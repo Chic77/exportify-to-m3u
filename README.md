@@ -1,4 +1,4 @@
-Exportify to M3U
+# Exportify to M3U
 exportify_to_m3u.py converts playlists exported by Spotify's Exportify into M3U playlists that reference files in a local music library. It is designed for a multi-user Navidrome setup and also includes library maintenance utilities.
 Features
 - Fetches Exportify playlist exports for configured accounts and processes per-user ZIP/CSV collections.
