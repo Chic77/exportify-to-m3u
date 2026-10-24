@@ -191,6 +191,8 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --dry-run             prova a secco di tutto (vedi la regola sopra).
   --no-scan             non avviare lo scan FULL di Navidrome a fine lavoro.
   --version             stampa la versione.
+  --help                mostra l'elenco dettagliato e aggiornato delle opzioni.
+  --changelog           stampa tutto il changelog incorporato nello script.
 
   --- Utenti ------------------------------------------------------------------
   --users a,b           (anche --user, ripetibile) limita le fasi PER-UTENTE agli utenti
@@ -353,7 +355,20 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 ==============================================================================
 CHANGELOG
 ==============================================================================
-Novita' 5.2 (matching piu' semplice e scoring configurabile):
+
+Novita' 0.54 (README e changelog CLI):
+  - aggiunto README.md con panoramica del progetto, funzionalita' e configurazione; le opzioni
+    dettagliate restano nell'help generato direttamente dallo script, che e' la fonte aggiornata
+  - aggiunto --changelog: stampa tutto questo changelog e termina senza avviare pipeline o creare log
+  - tutte le intestazioni dei rilasci precedenti sono marcate beta- per distinguerle dal rilascio corrente
+
+Novita' beta-5.3 (matching e copertine album):
+  - ampliata la penalita' configurabile per versioni alternative, includendo extended/expanded e
+    le etichette live, demo, instrumental e rehearsal; il titolo pulito e' favorito quando richiesto
+  - aggiunta la ricerca finale delle copertine album mancanti, con controlli per non sovrascrivere
+    artwork gia' presente e cache dei risultati negativi
+
+Novita' beta-5.2 (matching piu' semplice e scoring configurabile):
   - riutilizzata la mappa TITLE_MATCH_PENALTIES gia' presente nel JSON anche per la penalita' parentesi;
     il vecchio TITLE_MATCH_PARENTHESES_PENALTY viene ancora letto solo per compatibilita' con JSON v5.1
   - lista dei qualificatori normalizzata/ordinata una sola volta e memorizzata in cache, invece di
@@ -361,7 +376,16 @@ Novita' 5.2 (matching piu' semplice e scoring configurabile):
   - mantenuto il punteggio piu' alto per le versioni esplicitamente richieste (Live/Demo ecc.); i suffissi
     alternativi non richiesti perdono contro il titolo pulito
 
-Novita' 4.9 (fetch fresco e pulizia M3U per utente):
+Novita' beta-5.1 (penalita' delle versioni alternative):
+  - penalita' maggiori per titoli tra parentesi o qualificati come live/demo/instrumental/rehearsal
+  - conservato il vantaggio per una versione alternativa quando e' esplicitamente richiesta dal CSV
+  - aggiunta TANTI AUGURIII!! alla lista delle playlist da ignorare
+
+Novita' beta-5.0 (normalizzazione dei nomi e preferiti):
+  - pulizia dei duplicati M3U con nomi equivalenti dopo normalizzazione di maiuscole, spazi e punteggiatura
+  - corrispondenza degli album salvati meno restrittiva per applicare le stelle alle edizioni compatibili
+
+Novita' beta-4.9 (fetch fresco e pulizia M3U per utente):
   - FETCH_IGNORED_USERS in exportify_names.json esclude gli account dal fetch Exportify;
   - quando il fetch riesce, l'estrazione usa solo lo ZIP appena scaricato per quell'utente,
     ignorando gli altri ZIP della cartella spotify_csv;
@@ -371,7 +395,19 @@ Novita' 4.9 (fetch fresco e pulizia M3U per utente):
   - fetch, pulizia M3U e pulizia DB sono fasi distinte e temporizzate;
   - le cartelle M3U degli altri utenti sono protette anche col layout storico dell'utente default.
 
-Novita' 4.5 (revisione bug + pulizia):
+Novita' beta-4.8 (sync Navidrome piu' sicura):
+  - attesa che l'API Navidrome torni disponibile dopo un riavvio prima di applicare preferiti
+  - scan incrementale nella modalita' sync-only e gestione esplicita degli errori di scan
+
+Novita' beta-4.7 (modalita' sync-only e timer):
+  - aggiunta la modalita' quotidiana leggera che salta dedupe, FLAC e manutenzione massiva dei tag
+  - tempi per fase e riepilogo totale; una fase interrotta non deve essere marcata come completata
+
+Novita' beta-4.6 (CSV album e tempi di fase):
+  - riconosciuto saved_albums.csv come raccolta album e non come playlist di brani
+  - aggiunti timer e riepilogo finale delle durate delle fasi
+
+Novita' beta-4.5 (revisione bug + pulizia):
   - corretto un bug nel trasferimento di .playlist_meta.json: i nomi originali/cover dal ZIP ora vengono davvero salvati;
   - unzip atomico per CSV: prima mette in staging tutti i file del nuovo ZIP, poi li sostituisce;
     un archivio troncato non puo' cancellare i CSV precedenti o lasciare una pulizia incompleta
@@ -383,20 +419,20 @@ Novita' 4.5 (revisione bug + pulizia):
   - chiusa esplicitamente la risposta HTTP, uniformata la URL base senza slash finale
   - rimossi helper/locali morti e aggiornato lo User-Agent artwork alla versione corrente
 
-Novita' 4.4:
+Novita' beta-4.4:
   - --star-liked: accetta la playlist 'liked' (e 'liked songs'), stella le tracce; usa 'saved albums'
     per stellare gli album e stella gli artisti presenti nelle due playlist; la scan Navidrome avviene
     prima di questa fase, cosi' vengono lette le playlist appena aggiornate
   - unzip: se ci sono piu' ZIP dello stesso utente, usa solo il piu' recente; i CSV rimasti fuori
     dal nuovo export di quello stesso utente vengono rimossi
 
-Novita' 4.3:
+Novita' beta-4.3:
   - import playlist: recupera durante --fetch nome Spotify originale (case, emoji, Unicode) e cover;
     conserva i metadati per CSV e usa il nome esatto come basename M3U (slash -> ／, non puo' stare in un filename)
   - importa la cover Spotify come sidecar accanto alla M3U, riconosciuto da Navidrome; aggiorna la cover
     anche quando la playlist non deve essere riscritta; recupero artwork non riuscito non blocca l'import
 
-Novita' 4.2:
+Novita' beta-4.2:
   - mancanti_*.txt: X/Y ora e' TROVATI/totale con la % dei trovati, piu' "N brani rimasti" (quelli
     ancora da trovare), ovunque: totale, per utente, playlist e album. Il resto non cambia
   - corretto date_heal / MusicBrainz: un errore TEMPORANEO (503, 429, timeout) veniva salvato in cache
@@ -418,7 +454,7 @@ Novita' 4.2:
   - cookie malformati (campi col tipo sbagliato) danno un errore leggibile e non un traceback; i link
     simbolici rotti *.zip in ZIP_DIR non fanno piu' fallire la ricerca degli zip
 
-Novita' 4.1:
+Novita' beta-4.1:
   - corretto --fix-collab-artists: con la gestione multi-libreria Navidrome salva in media_file.path
     percorsi RELATIVI alla libreria (JPEGMAFIA/ALBUM (2023)/x.flac) e la fase li cercava saltando la
     prima cartella: diceva "file non trovati sul disco" e non riscriveva niente
@@ -432,7 +468,7 @@ Novita' 4.1:
   - nome del log: logs/e2m_<opzione1>+<opzione2>+..._<AAAAMMGG>_<HHMMSS>.log (opzioni senza
     '--'; senza opzioni "playlists")
 
-Novita' 4.0 - versione maggiore: pipeline multi-utente completa e guida integrata.
+Novita' beta-4.0 - versione maggiore: pipeline multi-utente completa e guida integrata.
   Riassume le novita' 3.22-3.30 qui sotto: zip e playlist per utente (--users), download
   automatico degli zip da Exportify (--fetch*), dedupe delle playlist, report mancanti
   con statistiche, controllo album incompleti su MusicBrainz, correzione dei collab.
@@ -440,7 +476,7 @@ Novita' 4.0 - versione maggiore: pipeline multi-utente completa e guida integrat
   - corretto --help: la descrizione di --max-dur-diff (contiene un '%') non veniva
     mostrata e stampava un dizionario Python
 
-Novita' 3.30:
+Novita' beta-3.30:
   - --fix-collab-artists: album collab che Navidrome mostra come "JPEGMAFIA • JPEGMAFIA &
     Danny Brown" invece di "JPEGMAFIA • Danny Brown". Navidrome unisce con " • " i VALORI
     del tag ALBUMARTIST: se nei FLAC ce n'e' uno che contiene gia' l'altro ("A" e "A & B")
@@ -459,7 +495,7 @@ Novita' 3.30:
     la prima run su una libreria grande e' lunga (si puo' interrompere e riprendere),
     le successive sono quasi istantanee. Solo lettura: non tocca file ne' DB
 
-Novita' 3.29:
+Novita' beta-3.29:
   - estraendo uno zip, i CSV dell'utente che NON sono nel nuovo zip (playlist cancellate o
     rinominate su Spotify) vengono cancellati: la cartella exportify/<utente>/ rispecchia
     sempre l'ultimo export (--clean e' ora superfluo). Vale solo per gli utenti il cui zip
@@ -474,7 +510,7 @@ Novita' 3.29:
     corrispondono a nessun CSV (utile per accorgersi di nomi scritti male)
   - le playlist ignorate non vengono elaborate, quindi non compaiono in logs/mancanti_*.txt
 
-Novita' 3.28 - controllo della sessione Exportify e cartella dei cookie:
+Novita' beta-3.28 - controllo della sessione Exportify e cartella dei cookie:
   - --fetch-cookies cerca il file anche in spotify_cookies/ (accanto allo script e nella
     cartella corrente); senza nome (--fetch-cookies da solo) prende il file piu' recente
     in spotify_cookies/ il cui nome inizia con l'utente (chic*.json / chic*.txt)
@@ -486,7 +522,7 @@ Novita' 3.28 - controllo della sessione Exportify e cartella dei cookie:
     [!]: copre ogni causa (sessione scaduta, interfaccia cambiata, Exportify non risponde)
   - la riga "estratti N CSV" dice quanto e' vecchio lo zip
 
-Novita' 3.27 - logs/mancanti_<data>.txt piu' ricco (l'elenco completo resta IN FONDO):
+Novita' beta-3.27 - logs/mancanti_<data>.txt piu' ricco (l'elenco completo resta IN FONDO):
   - totale: X/Y tracce uniche mancanti e percentuale (Y = brani unici letti dai CSV)
   - per utente: mancanti/totale e %, e quante canzoni mancano a quali utenti ("3 canzoni
     mancanti a elena", "1 canzone mancante a chic, stello"); solo con piu' utenti nella run
@@ -495,7 +531,7 @@ Novita' 3.27 - logs/mancanti_<data>.txt piu' ricco (l'elenco completo resta IN F
     quell'album presenti nelle playlist; non si conosce la tracklist completa dell'album)
   - nell'elenco completo le playlist portano il prefisso "utente:" se gli utenti sono piu' di uno
 
-Novita' 3.26 - login Exportify piu' robusto:
+Novita' beta-3.26 - login Exportify piu' robusto:
   - il browser del login nasconde i segnali di automazione (flag --enable-automation,
     navigator.webdriver) e usa Google Chrome se installato, altrimenti Chromium
   - chiudere il browser a meta' login non produce piu' un traceback
@@ -506,7 +542,7 @@ Novita' 3.26 - login Exportify piu' robusto:
     Servono almeno i cookie di login (sp_dc); lo script verifica la sessione subito.
     Consiglio: login in una finestra PRIVATA, esporta, chiudi la finestra SENZA fare logout.
 
-Novita' 3.25 - download automatico degli zip da Exportify (tutto in questo script):
+Novita' beta-3.25 - download automatico degli zip da Exportify (tutto in questo script):
   Exportify gira solo nel browser (nessun URL da scaricare con curl): con --fetch lo
   script pilota Chromium headless (Playwright), riusa la sessione Spotify salvata per
   utente (.exportify_sessions/<utente>.json), clicca "Export All" e salva lo zip come
@@ -529,7 +565,7 @@ Novita' 3.25 - download automatico degli zip da Exportify (tutto in questo scrip
     per testo, inglese e italiano); EXPORTIFY_URL cambia l'indirizzo
   - --fetch e' saltato con --dry-run
 
-Novita' 3.23 (multi-utenteNovita' 3.23 (multi-utente Navidrome - prima tappa):
+Novita' beta-3.23 (multi-utente Navidrome - prima tappa):
   - ZIP PER UTENTE: ogni zip Exportify va legato a un utente Navidrome. Il nome del
     file DEVE iniziare col nome utente (es. chic_spotify_playlists.zip). Se non lo fa,
     si prende l'ID Spotify piu' frequente nella colonna "Added By" dei CSV nello zip e
@@ -550,7 +586,7 @@ Novita' 3.23 (multi-utenteNovita' 3.23 (multi-utente Navidrome - prima tappa):
   - --star-liked per utente: password in ND_PASS_<UTENTE> (per l'utente ND_USER: ND_PASS).
     Stella i brani di 'liked', gli album di 'saved albums' e gli artisti presenti in entrambe.
 
-Novita' 3.22:
+Novita' beta-3.22:
   - UN SOLO LOG per esecuzione (logs/exportify_<data>_<ora>.log): prima ogni fase
     scriveva un file suo e il log 'principale' non conteneva le fasi
   - logs/mancanti_<AAAA-MM-GG>.txt: elenco unico delle tracce mancanti, a ogni run
@@ -562,7 +598,7 @@ Novita' 3.22:
     metaflac senza --no-utf8-convert (tag giapponesi rovinati con locale C/cron);
     _flac_tags case-sensitive; _move_to_trash lasciava il .lrc con --hard-delete
 
-Novita' 3.21 (dai log reali del 13/10):
+Novita' beta-3.21 (dai log reali del 13/10):
   - album_unify: la riparazione dei tag mancanti (spotyFLAC) dava KeyError 'title' su
     OGNI FLAC (funzionava solo per mp3/m4a); titolo ricostruito meglio
   - stop alle riscritture notturne che non convergono: .m4a (ffmpeg non salva
@@ -571,7 +607,7 @@ Novita' 3.21 (dai log reali del 13/10):
   - ALBUMARTIST riscritto col nome 'sanificato' della cartella solo per cartelle asiatiche
   - .missing.txt delle playlist 'invariate' ora aggiornato; nuovo --missing [FILE]
 
-Novita' 3.20 (ottimizzazioni + bugfix):
+Novita' beta-3.20 (ottimizzazioni + bugfix):
   - cache di ffprobe persistente + letture parallele: le fasi notturne non
     rileggono piu' tutta la libreria a ogni esecuzione
   - cache dell'indice in ~/.cache (non /tmp: su Debian 13 e' tmpfs, si svuota a
@@ -703,7 +739,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "5.3"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.54"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -7949,10 +7985,26 @@ def run_missing_album_artwork(dry_run=False):
     return {'downloaded': downloaded, 'missing': len(candidates) + negative_skipped,
             'attempted': attempted, 'network_errors': network_errors, 'not_found': not_found}
 
+def _embedded_changelog_text():
+    """Restituisce il changelog contenuto nel docstring del modulo, senza duplicarlo."""
+    lines = (__doc__ or "").splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() == 'CHANGELOG':
+            return "\n".join(lines[index:]).strip()
+    return "CHANGELOG non trovato nel docstring dello script."
+
+
+def _print_changelog():
+    """Stampa l'intero changelog senza avviare la pipeline o creare un log di esecuzione."""
+    print(_embedded_changelog_text())
+
+
 def main():
     ap = argparse.ArgumentParser(description='Exportify CSV -> m3u per Jellyfin + manutenzione libreria')
     ap.add_argument('--version', action='version',
                     version=f'%(prog)s {VERSION}')
+    ap.add_argument('--changelog', action='store_true',
+                    help='stampa il changelog completo incorporato nello script ed esce')
     ap.add_argument('csv', nargs='*', help='CSV specifici (default: tutti in EXPORTIFY_DIR)')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-artwork-download', action='store_true',
@@ -8090,6 +8142,9 @@ def main():
                     help='fase: converti/ricomprimi i FLAC (24->16bit livello 8, '
                          '16bit male compressi)')
     args = ap.parse_args()
+    if args.changelog:
+        _print_changelog()
+        return
 
     # UN solo log per tutta l'esecuzione: console + file, fasi comprese
     logf = open_run_log(_log_command_tag(sys.argv[1:], tuple(getattr(ap, '_option_string_actions', {}))))
