@@ -302,7 +302,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --compare FILE1 FILE2 confronta due file audio (durate + forma d'onda) e dice se sono
                         la stessa incisione.
   --build-spotify-proxies
-                        crea MP3 per gli album configurati in SPOTIFY_LOCAL_PROXY.albums, per
+                        crea MP3 proxy compatti (default 64k) per SPOTIFY_LOCAL_PROXY.albums, per
                         aggiungerli a playlist Spotify come Local Files; non modifica i FLAC.
   --album TESTO         con --fix-collab-artists/--check-albums: solo gli album il cui nome
                         contiene TESTO.
@@ -386,6 +386,11 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 ==============================================================================
 CHANGELOG
 ==============================================================================
+
+Novita' 0.60 (proxy Spotify MP3 piu' compatti):
+  - bitrate predefinito dei proxy Spotify abbassato da 192k a 64k, per ridurre lo spazio audio
+    a circa un terzo per la stessa durata; il bitrate resta configurabile tra 64k e 320k in
+    SPOTIFY_LOCAL_PROXY.bitrate. A 64k la qualita' e' bassa se si ascoltano i proxy direttamente.
 
 Novita' 0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
   - cache LRU per norm()/norm_bare(): riusa le normalizzazioni ripetute di artista, album e titolo;
@@ -826,7 +831,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.59"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.60"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -2290,7 +2295,7 @@ MISSING_ARTWORK_CONFIG = {
 SPOTIFY_LOCAL_PROXY_CONFIG = {
     'enabled': True,
     'output_dir': '~/Music/Spotify Local Files',
-    'bitrate': '192k',
+    'bitrate': '64k',
     'albums': [],  # [{"artist": "Nome artista", "album": "Nome album"}]
 }
 
@@ -8287,7 +8292,8 @@ def main():
                     help='stampa il changelog completo incorporato nello script ed esce')
     ap.add_argument('csv', nargs='*', help='CSV specifici (default: tutti in EXPORTIFY_DIR)')
     ap.add_argument('--build-spotify-proxies', action='store_true',
-                    help='genera MP3 compatibili con Spotify Local Files dagli album in SPOTIFY_LOCAL_PROXY.albums')
+                    help='genera MP3 proxy compatti (bitrate predefinito 64k) per Spotify Local Files; '
+                         'album da SPOTIFY_LOCAL_PROXY.albums')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-artwork-download', action='store_true',
                     help='salta la ricerca e il download automatico delle copertine album mancanti')
@@ -8690,7 +8696,7 @@ def run_build_spotify_proxies(dry_run=False, library_root=None):
         print(f'[ERRORE] output proxy dentro la libreria Navidrome: {output_root}; scegli una cartella esterna a {root}',
               file=sys.stderr)
         return {'created': 0, 'skipped': 0, 'errors': 1}
-    bitrate = str(cfg.get('bitrate', '192k')).lower()
+    bitrate = str(cfg.get('bitrate', '64k')).lower()
     m_bitrate = re.fullmatch(r'(\d{2,3})k', bitrate)
     if not m_bitrate or not 64 <= int(m_bitrate.group(1)) <= 320:
         print(f'[ERRORE] bitrate proxy non valido: {bitrate!r}', file=sys.stderr)
