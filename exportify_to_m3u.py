@@ -11,9 +11,9 @@ Sostituisce il vecchio script crontab. Migliorie:
     album multi-disco (Artista/Album/CD1/Traccia) indicizzati sotto l'artista vero
   - ARTIST_GROUPS: piu' nomi per lo stesso artista (aka), in entrambe le direzioni
   - virgole nel nome gestite via libreria ('Tyler, The Creator' resta intero)
-  - conversione automatica kanji<->romaji (pykakasi) per artista e titolo,
-    con e senza spazi (es. 'natsu mado' == 'natsumado'), in entrambe le direzioni
-    alias manuali per artisti con nome diverso; duplicati rimossi
+  - nomi asiatici: NAME_TRANSLATIONS (traduzione/forma inglese ufficiale) prima di
+    NAME_FIXES (alias/romanizzazione manuale), poi romanizzazione fonetica pykakasi/Hangul
+    (es. ワールドイズユアーズ -> World Is Yours); l'inglese prevale sulla lettura fonetica
   - matching: esatto (artista,album,titolo) -> esatto (artista,titolo) ->
     primo artista -> contenimento -> fuzzy difflib entro l'artista
   - report .missing.txt accanto a ogni playlist
@@ -41,6 +41,10 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
         --> questo script: abbina ogni brano alla tua libreria e scrive le playlist .m3u
         --> Navidrome le importa con lo scan --> ogni utente le vede tra le sue playlist.
   In piu' fa manutenzione della libreria (duplicati, tag, album incompleti...).
+  Sono integrate anche utilita' esterne opzionali: --fix-flac-safe ripara i nomi .flac.flac,
+  --lidarr-folder-fix riallinea i path artisti Lidarr, --lidarr-import-slskd lancia l'import slskd,
+  --lb-dedup controlla i doppi ascolti ListenBrainz. Sono operazioni indipendenti dalla sync
+  playlist e non vengono eseguite automaticamente da --all o --sync-only.
 
   Una run SENZA opzioni fa, in ordine:
     a. (con --fetch; --all lo accende da solo se esistono sessioni salvate) scarica gli zip
@@ -244,6 +248,10 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
                         USER (facoltativo) = proprietario delle playlist fuori dalle
                         cartelle utente (default DEFAULT_USER). Ferma il container
                         navidrome per scrivere il DB. Rispetta --dry-run.
+  --fix-all-playlist-owners [USER]
+                        forza TUTTE le playlist (incluse quelle create nella UI) al proprietario
+                        indicato (default DEFAULT_USER). Preview di default; --apply modifica il DB.
+                        Usare solo se si vuole davvero un unico proprietario per ogni playlist.
   --dedupe-playlists    elimina dal DB le playlist con lo STESSO nome esatto e lo stesso
                         proprietario, tenendo la piu' recente. A secco senza --apply.
   --star-liked          stella le tracce di 'liked'/'liked songs', gli album di 'saved albums'
@@ -266,6 +274,15 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --flac-16bit          converte/ricomprime i FLAC (24 -> 16 bit livello 8, 16 bit mal
                         compressi). Nota: da sola NON esclude la fase playlist.
   --clean-empty         rimuove le cartelle senza audio vuote da piu' di 24 ore.
+  --fix-flac-safe        ripara <brano>.flac.flac se il doppione e' un FLAC valido, quindi pulisce
+                        i .backup col rispettivo originale presente. Preview di default; --apply.
+  --lidarr-folder-fix    riallinea i path artisti Lidarr alle cartelle disco; preview di default;
+                        --apply scrive via API e avvia RescanFolders. Richiede LIDARR_API_KEY.
+  --lidarr-import-slskd  invia DownloadedAlbumsScan (/downloads/slskd), controlla failed_imports
+                        e propone correzioni cartelle; --apply applica anche i path trovati.
+  --lb-dedup UTENTE      trova ascolti ListenBrainz dello stesso artista/titolo entro 5s. Solo
+                        preview; --lb-delete cancella gli ascolti in eccesso (irreversibile).
+                        Richiede LISTENBRAINZ_TOKEN nell'ambiente o nel .env.
   --unify-only          esegue SOLO album_unify (niente playlist). --skip-unify lo salta.
   --skip-date-heal, --skip-romaji, --skip-artist-names, --skip-fix-dates
                         saltano la rispettiva fase tag della pipeline playlist.
@@ -284,6 +301,9 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
                         viene trovato.
   --compare FILE1 FILE2 confronta due file audio (durate + forma d'onda) e dice se sono
                         la stessa incisione.
+  --build-spotify-proxies
+                        crea MP3 per gli album configurati in SPOTIFY_LOCAL_PROXY.albums, per
+                        aggiungerli a playlist Spotify come Local Files; non modifica i FLAC.
   --album TESTO         con --fix-collab-artists/--check-albums: solo gli album il cui nome
                         contiene TESTO.
 
@@ -306,7 +326,8 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     PLAYLIST_FOLDERS {"nome playlist": "sottocartella"}: dove mettere certe m3u
     PLAYLIST_PREFIXES ["color", ...]: "color yellow" diventa "color - yellow" (si
                      raggruppano in tutti i client)
-    NAME_FIXES       letture sbagliate di kanji/hangul: {"original": "lettura giusta"}
+    NAME_TRANSLATIONS traduzione inglese o nome latino ufficiale per testo CJK/Hangul; precede gli altri
+    NAME_FIXES       alias/romanizzazione manuale, compatibile con i JSON precedenti; precede il fallback fonetico
     ALIASES          artista scritto diversamente su Spotify e in libreria
     ARTIST_GROUPS    gruppi di nomi dello STESSO artista (aka): [["a", "b"], ...]
     FORCE_ARTIST     "artista - titolo" -> artista da cercare al posto di quello del CSV
@@ -315,6 +336,10 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     UNIFY_FORCE      valori da forzare per album in album_unify ("cartella artista /
                      cartella album": {campo: valore})
     EMOJI_WORDS      parole usate al posto di un'emoji nei titoli Spotify
+    SPOTIFY_LOCAL_PROXY output_dir (cartella Local Files fuori da MUSIC_ROOT), bitrate MP3
+                        e albums=[{"artist": "...", "album": "..."}]. Solo gli album
+                        elencati sono convertiti; dopo averli importati in Spotify Desktop,
+                        aggiungili alle playlist desiderate. Exportify ne esporta i metadati.
 
 ------------------------------------------------------------------------------
 7. VARIABILI D'AMBIENTE
@@ -332,6 +357,12 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     EXPORTIFY_NO_VENV=1          non usare il .venv accanto allo script
     EXPORTIFY_PROBE_WORKERS      processi paralleli per leggere i tag con ffprobe
     MB_BASE                      indirizzo dell'API MusicBrainz (per prove/mirror)
+    LIDARR_URL / LIDARR_API_KEY   URL e API key per --lidarr-folder-fix / --lidarr-import-slskd
+    LIDARR_MUSIC_ROOT             root host libreria per trovare le cartelle (default LIBRARY_ROOT)
+    LIDARR_CONTAINER_ROOT         prefisso path artisti nel container Lidarr (default /music)
+    SLKSD_IMPORT_FOLDER           cartella vista da Lidarr per DownloadedAlbumsScan (default /downloads/slskd)
+    SLKSD_FAILED_FOLDER           cartella host failed_imports (default /downloads/slskd/failed_imports)
+    LISTENBRAINZ_TOKEN            token API per --lb-dedup; mai passato come argomento CLI
 
 ------------------------------------------------------------------------------
 8. SE QUALCOSA NON VA
@@ -356,7 +387,62 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 CHANGELOG
 ==============================================================================
 
-Novita' 0.54 (README e changelog CLI):
+Novita' 0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
+  - cache LRU per norm()/norm_bare(): riusa le normalizzazioni ripetute di artista, album e titolo;
+    le cache vengono invalidate subito dopo aver caricato le regole emoji dalla configurazione.
+  - romaji_tags: applica tutti i tag cambiati con una sola invocazione di metaflac per file FLAC,
+    invece di avviare un processo separato per ogni campo aggiornato.
+  - fix_date_tags: legge DATE/ORIGINALDATE dalla cache ffprobe condivisa e pre-carica in parallelo
+    i soli FLAC non in cache; scrive ORIGINALDATE e rimuove DATE con una sola invocazione metaflac.
+  - clean_empty: determina se ogni cartella contiene audio con un'unica passeggiata bottom-up,
+    evitando una scansione ricorsiva dell'intero sottoalbero per ogni cartella.
+  - README: aggiunta la procedura di profiling con profiling.sampling (Tachyon) su Python 3.15,
+    distinguendo il profilo wall-clock da quello CPU per riconoscere le attese su disco/rete.
+
+Novita' beta-0.58 (integrazione utilita' FLAC, Lidarr e ListenBrainz):
+  - integrate --fix-flac-safe: ripara i file .flac.flac solo se il duplicato e' valido, e pulisce
+    i .backup quando l'originale esiste; preview predefinita, modifiche solo con --apply.
+  - integrate --lidarr-folder-fix: riconcilia i path artisti Lidarr con le cartelle reali usando
+    normalizzazione, NAME_TRANSLATIONS/NAME_FIXES/ALIASES/ARTIST_GROUPS e fallback fuzzy; aggiorna
+    l'API e avvia RescanFolders solo dopo correzioni riuscite.
+  - integrate --lidarr-import-slskd: avvia DownloadedAlbumsScan, riallinea le cartelle e segnala
+    le sottocartelle in failed_imports; credenziali Lidarr da LIDARR_API_KEY, mai dal sorgente.
+  - integrate --lb-dedup UTENTE: trova ascolti ListenBrainz ripetuti entro 5 secondi, con retry,
+    checkpoint e segnalazione delle finestre saltate; e' preview per default, --lb-delete abilita
+    le cancellazioni e LISTENBRAINZ_TOKEN resta solo nell'ambiente/.env.
+  - mantenuto --fix-owners per-percorso e aggiunto --fix-all-playlist-owners per replicare il vecchio helper
+    che forza tutte le playlist, incluse quelle create nella UI, a un solo proprietario.
+
+Novita' beta-0.57 (traduzioni CJK prioritarie con fallback fonetico):
+  - aggiunto NAME_TRANSLATIONS per traduzioni inglesi curate e nomi inglesi ufficiali; ha priorita su
+    NAME_FIXES e sulla romanizzazione automatica. NAME_FIXES resta il livello di compatibilita per alias
+    manuali/romaji e pykakasi/Hangul viene usato solo quando non esiste una forma preferita.
+  - applicata la stessa priorita a matching di brani/artisti/album, manutenzione dei tag e proxy Spotify;
+    il lookup inverso normalizza anche le maiuscole per collegare la forma inglese alla chiave CJK.
+  - spostate nel JSON NAME_TRANSLATIONS le traduzioni/forme inglesi ufficiali gia' curate; le regole
+    generiche non presenti nelle tabelle continuano ad avere come fallback la lettura fonetica.
+  - invalidata la cache dell'indice (CACHE_VERSION 7) per rendere effettive le nuove regole.
+
+Novita' beta-0.56 (alias inglesi per titoli CJK e provenienza delle tracce mancanti):
+  - NAME_FIXES mantiene le maiuscole per i gloss leggibili; il matcher normalizza al confronto.
+    Le nuove traduzioni semantiche/forme inglesi ufficiali sono ora separate in NAME_TRANSLATIONS.
+  - aggiunte le varianti giapponesi ワールドイズユアーズ / ワールド イズ ユアーズ -> World Is Yours,
+    confermate per MASS OF THE FERMENTING DREGS; il matching usa l'alias per titolo E album.
+  - se romaji_tags trova un vecchio gloss che coincide esattamente con la lettura fonetica pykakasi,
+    lo sostituisce con il mapping inglese curato; non sovrascrive parentesi legittime come (Live).
+  - cache dell'indice incrementata per ricostruirla con le nuove regole di alias.
+  - la classifica 'ALBUM DA SCARICARE' in mancanti_*.txt mostra ora le playlist attive che originano
+    ogni raccomandazione album: gli album suggeriti non vengono confusi con nomi di playlist cancellate.
+
+Novita' beta-0.55 (Spotify Local Files per album assenti dal catalogo):
+  - aggiunto --build-spotify-proxies: genera MP3 solo per gli album esplicitamente elencati in
+    SPOTIFY_LOCAL_PROXY.albums, mantenendo intatti i FLAC originali
+  - output configurabile fuori da MUSIC_ROOT per evitare doppioni in Navidrome; bitrate e dry-run
+    configurabili, tag artista/album/titolo e copertina embedded preservati quando supportata
+  - Exportify puo' esportare metadata da tracce locali in playlist Spotify (URI spotify:local:...);
+    il matcher usa i campi testuali per trovare il file lossless originale
+
+Novita' beta-0.54 (README e changelog CLI):
   - aggiunto README.md con panoramica del progetto, funzionalita' e configurazione; le opzioni
     dettagliate restano nell'help generato direttamente dallo script, che e' la fonte aggiornata
   - aggiunto --changelog: stampa tutto questo changelog e termina senza avviare pipeline o creare log
@@ -626,6 +712,7 @@ import contextlib
 import csv
 import difflib
 import fnmatch
+import http.client
 import random
 import shutil
 import sqlite3
@@ -739,13 +826,14 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.54"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.59"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
     'title':  ['Nome della traccia', 'Track Name'],
     'artist': ["Nome dell'artista", 'Artist Name(s)', 'Artist Name', 'Artista'],
     'album':  ["Nome dell'album", 'Album Name', 'Album'],
+    'uri':    ['Track URI', 'URI', 'Track URI(s)'],
     # chi ha aggiunto il brano alla playlist (ID/URI utente Spotify): serve a capire
     # di chi e' uno zip il cui nome non inizia con un utente Navidrome
     'added_by': ['Added By', 'Aggiunto da', 'Aggiunta da', 'A\u00f1adido por',
@@ -2197,6 +2285,15 @@ MISSING_ARTWORK_CONFIG = {
     'cover_basename': 'cover',
 }
 
+# Proxy MP3 per Spotify Local Files: converte SOLO gli album esplicitamente configurati.
+# Output fuori da MUSIC_ROOT: Spotify li legge, ma Navidrome continua a usare i FLAC originali.
+SPOTIFY_LOCAL_PROXY_CONFIG = {
+    'enabled': True,
+    'output_dir': '~/Music/Spotify Local Files',
+    'bitrate': '192k',
+    'albums': [],  # [{"artist": "Nome artista", "album": "Nome album"}]
+}
+
 # Prefissi tipo "color yellow": il nome diventa "color - yellow" (piatto, raggruppa
 # in tutti i client). Dal JSON: "PLAYLIST_PREFIXES".
 PLAYLIST_PREFIXES = []
@@ -2236,13 +2333,15 @@ UNIFY_FORCE = {}
 # posto di quello della riga (il nome mostrato in playlist resta invariato).
 FORCE_ARTIST = {}
 
+NAME_TRANSLATIONS = {}  # traduzioni/nomi inglesi ufficiali; hanno priorita su NAME_FIXES e pykakasi
+
 NAME_FIXES = {
     # letture che pykakasi sbaglia — valgono per artisti E titoli (chiave = stringa normalizzata)
     '高中正義': 'masayoshi takanaka',
 }
 
 # --- configurazione utente esterna: exportify_names.json accanto allo script ---
-# Contiene le TUE tabelle (NAME_FIXES, ALIASES, ARTIST_GROUPS): modifica quello,
+# Contiene le TUE tabelle (NAME_TRANSLATIONS, NAME_FIXES, ALIASES, ARTIST_GROUPS): modifica quello,
 # non questo file — sopravvive agli aggiornamenti dello script.
 _USER_CFG = Path(__file__).with_name('exportify_names.json')
 
@@ -2255,7 +2354,21 @@ def load_user_config():
         # EMOJI_WORDS PRIMA di tutto: norm() lo usa per normalizzare le chiavi
         # delle tabelle qui sotto (prima veniva applicato dopo)
         EMOJI_WORDS.update(_cfg.get('EMOJI_WORDS', {}))
-        NAME_FIXES.update({norm(k): norm(v) for k, v in _cfg.get('NAME_FIXES', {}).items()})
+        # norm() dipende da EMOJI_WORDS: invalida qualsiasi risultato calcolato prima
+        # del caricamento (la cache viene definita piu' sotto nel file, quindi controlla).
+        if 'norm' in globals():
+            norm.cache_clear()
+            norm_bare.cache_clear()
+        translations_cfg = _cfg.get('NAME_TRANSLATIONS', {})
+        if not isinstance(translations_cfg, dict):
+            raise ValueError('NAME_TRANSLATIONS deve essere un oggetto JSON {testo_originale: traduzione_inglese}')
+        NAME_TRANSLATIONS.update({norm(k): str(v).strip() for k, v in translations_cfg.items()
+                                  if norm(k) and str(v).strip()})
+        name_fixes_cfg = _cfg.get('NAME_FIXES', {})
+        if not isinstance(name_fixes_cfg, dict):
+            raise ValueError('NAME_FIXES deve essere un oggetto JSON {alias_originale: alias_preferito}')
+        NAME_FIXES.update({norm(k): str(v).strip() for k, v in name_fixes_cfg.items()
+                            if norm(k) and str(v).strip()})
         FORCE_ARTIST.update({norm(k): norm(v) for k, v in _cfg.get('FORCE_ARTIST', {}).items()})
         for pl, rows in _cfg.get('CSV_FIX', {}).items():
             CSV_FIX[norm(pl)] = {norm(k): v for k, v in rows.items()}
@@ -2307,6 +2420,38 @@ def load_user_config():
                         not re.fullmatch(r'[A-Za-z0-9 _.-]+', base)):
                     raise ValueError('MISSING_ARTWORK.cover_basename deve essere un nome file semplice')
                 MISSING_ARTWORK_CONFIG['cover_basename'] = base
+        proxy_cfg = _cfg.get('SPOTIFY_LOCAL_PROXY', {})
+        if proxy_cfg is not None:
+            if not isinstance(proxy_cfg, dict):
+                raise ValueError('SPOTIFY_LOCAL_PROXY deve essere un oggetto JSON')
+            if 'enabled' in proxy_cfg:
+                if not isinstance(proxy_cfg['enabled'], bool):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.enabled deve essere booleano')
+                SPOTIFY_LOCAL_PROXY_CONFIG['enabled'] = proxy_cfg['enabled']
+            if 'output_dir' in proxy_cfg:
+                output_dir = str(proxy_cfg['output_dir']).strip()
+                if not output_dir:
+                    raise ValueError("SPOTIFY_LOCAL_PROXY.output_dir non puo' essere vuoto")
+                SPOTIFY_LOCAL_PROXY_CONFIG['output_dir'] = output_dir
+            if 'bitrate' in proxy_cfg:
+                bitrate = str(proxy_cfg['bitrate']).strip().lower()
+                match = re.fullmatch(r'(\d{2,3})k', bitrate)
+                if not match or not 64 <= int(match.group(1)) <= 320:
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.bitrate deve essere tra 64k e 320k')
+                SPOTIFY_LOCAL_PROXY_CONFIG['bitrate'] = bitrate
+            if 'albums' in proxy_cfg:
+                albums = proxy_cfg['albums']
+                if not isinstance(albums, list):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.albums deve essere una lista')
+                checked = []
+                for i, item in enumerate(albums, 1):
+                    if not isinstance(item, dict):
+                        raise ValueError(f'SPOTIFY_LOCAL_PROXY.albums[{i}] deve contenere artist e album')
+                    artist, album = str(item.get('artist', '')).strip(), str(item.get('album', '')).strip()
+                    if not artist or not album:
+                        raise ValueError(f'SPOTIFY_LOCAL_PROXY.albums[{i}] richiede artist e album non vuoti')
+                    checked.append({'artist': artist, 'album': album})
+                SPOTIFY_LOCAL_PROXY_CONFIG['albums'] = checked
         PLAYLIST_FOLDERS.update(_cfg.get('PLAYLIST_FOLDERS', {}))
         SKIP_PLAYLISTS.extend(_cfg.get('SKIP_PLAYLISTS', []))
         PLAYLIST_PREFIXES.extend(_cfg.get('PLAYLIST_PREFIXES', []))
@@ -2315,6 +2460,9 @@ def load_user_config():
             if sg and sg not in ARTIST_GROUPS:
                 ARTIST_GROUPS.append(sg)
         to_romaji.cache_clear()
+        _preferred_name_for_key.cache_clear()
+        if '_NF_REV' in globals():
+            globals()['_NF_REV'] = None
         _title_qualifier_phrases.cache_clear()
         _title_variant_penalty_cached.cache_clear()
         print(f"[i] configurazione utente caricata: {_USER_CFG}", file=sys.stderr)
@@ -2326,23 +2474,34 @@ def load_user_config():
 _CJK = re.compile(r'[぀-ヿ㐀-鿿豈-﫿]')
 
 
-@lru_cache(maxsize=None)
-def to_romaji(s):
-    """Kanji/kana -> romaji (Hepburn). Ritorna '' se non applicabile."""
-    if not s:
-        return ''
-    if s in NAME_FIXES:
-        return norm(NAME_FIXES[s])
-    if not _HAS_KAKASI:
-        return ''
-    if not _CJK.search(s):
+@lru_cache(maxsize=65536)
+def _phonetic_kakasi(s):
+    """Lettura fonetica Hepburn pura, senza traduzioni o alias; ripara vecchi gloss."""
+    if not s or not _HAS_KAKASI or not _CJK.search(s):
         return ''
     return norm(' '.join(w['hepburn'] for w in _kks.convert(s)))
+
+
+@lru_cache(maxsize=None)
+def to_romaji(s):
+    """Forma inglese/alias preferita, poi fallback fonetico per CJK e Hangul."""
+    if not s:
+        return ''
+    fixed = _preferred_name(s)
+    if fixed:
+        return norm(fixed)
+    # Hangul has its own romanizer; pykakasi handles Japanese/Kanji only.
+    hangul_pattern = globals().get('_HANGUL')
+    hangul_fn = globals().get('_HANGUL_FN')
+    if hangul_pattern is not None and hangul_pattern.search(s) and not _CJK.search(s):
+        return norm(hangul_fn(s)) if callable(hangul_fn) else ''
+    return _phonetic_kakasi(s)
 
 
 AUDIO_EXT = {'.mp3', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma'}
 
 
+@lru_cache(maxsize=131072)
 def norm(s):
     if not s:
         return ""
@@ -2363,6 +2522,7 @@ def norm(s):
 
 
 
+@lru_cache(maxsize=131072)
 def norm_bare(s):
     """Come norm() ma SENZA rimuovere parentesi/feat: '(Nice Dream)' -> 'nice dream'.
     Usato come fallback per titoli che norm() svuoterebbe."""
@@ -2375,6 +2535,17 @@ def norm_bare(s):
     s = re.sub(r'[^\w \U0001F300-\U0001FAFF\U00002600-\U000027BF]+', ' ', s)
     s = s.replace('_', ' ')
     return re.sub(r'\s+', ' ', s).strip()
+
+@lru_cache(maxsize=65536)
+def _preferred_name_for_key(key):
+    """NAME_TRANSLATIONS (traduzione/forma inglese ufficiale) > NAME_FIXES (alias manuale)."""
+    return NAME_TRANSLATIONS.get(key) or NAME_FIXES.get(key, '')
+
+
+def _preferred_name(value):
+    """Alias preferito preservando le maiuscole; stringa vuota se non configurato."""
+    return _preferred_name_for_key(norm(value)) if value else ''
+
 
 QUALIFIER_WORDS = {
     'mix', 'remix', 'version', 'acoustic', 'karaoke', 'カラオケ', 'instrumental',
@@ -2634,7 +2805,7 @@ def scan_library(root, rels=None):
     return by_full, by_artist, by_strict, path_qual, n
 
 
-CACHE_VERSION = 5
+CACHE_VERSION = 7
 
 
 def _config_crc():
@@ -2780,7 +2951,9 @@ def _alb_folder(path):
     name = os.path.basename(d)
     if _DISC_DIR.match(name):
         name = os.path.basename(os.path.dirname(d))
-    return norm_bare(name)
+    # Prefer a curated English translation/official title, then a legacy alias/romanization.
+    fixed = _preferred_name(name)
+    return norm_bare(fixed if fixed else name)
 
 
 def _close1(word, by_len, cutoff):
@@ -3115,7 +3288,7 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
     akeys = sorted(akeys)
     nts = sorted(nts)
 
-    nalb = norm_bare(album)
+    nalb = norm_bare(_preferred_name(album) or album)
     na_set = {na}
     _r = to_romaji(na)
     if _r:
@@ -3430,7 +3603,7 @@ def report_missing(files, by_full, by_artist, by_strict, path_qual, threshold, o
             ct = pick_col(fieldnames, COLS['title'])
             ca = pick_col(fieldnames, COLS['artist'])
             cal = pick_col(fieldnames, COLS['album'])
-            if not ct or not ca:
+            if (not ct or not ca) and not cu:
                 print(f"[!] {csv_path.name}: intestazioni non riconosciute, saltato", file=sys.stderr)
                 continue
             for row in reader:
@@ -3587,6 +3760,26 @@ def _remove_legacy_playlist(root, user, old_base, old_folder, new_path, dry_run)
             print(f"[warn] vecchia M3U {old_path.name} non rimossa: {e}", file=sys.stderr)
 
 
+def _spotify_local_uri_metadata(uri):
+    """Fallback per CSV che non riportano i tag testuali di una URI spotify:local."""
+    value = str(uri or '').strip()
+    if not value.lower().startswith('spotify:local:'):
+        return None
+    parts = value.split(':', 5)
+    if len(parts) != 6:
+        return None
+    try:
+        artist = urllib.parse.unquote_plus(parts[2])
+        album = urllib.parse.unquote_plus(parts[3])
+        title = urllib.parse.unquote_plus(parts[4])
+        duration = int(parts[5])
+    except (ValueError, TypeError):
+        return None
+    if not title and not artist:
+        return None
+    return {'artist': artist, 'album': album, 'title': title, 'duration': duration}
+
+
 def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=None):
     user = user or DEFAULT_USER
     root = _user_playlist_root(user)
@@ -3606,17 +3799,21 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
         ct = pick_col(fieldnames, COLS['title'])
         ca = pick_col(fieldnames, COLS['artist'])
         cal = pick_col(fieldnames, COLS['album'])
+        cu = pick_col(fieldnames, COLS['uri'])
         if not ct or not ca:
             print(f"[ERRORE] {csv_path.name}: intestazioni non riconosciute: {fieldnames[:8]}",
                   file=sys.stderr)
             return False
 
-        matched, missing, seen, skipped = [], [], 0, 0
+        matched, missing, seen, skipped, local_rows = [], [], 0, 0, 0
         seen_paths = set()
         for row in reader:
-            title = (row.get(ct) or '').strip().strip('"')
-            artist = clean_artist(row.get(ca))
-            album = (row.get(cal) or '').strip().strip('"') if cal else ''
+            local_meta = _spotify_local_uri_metadata(row.get(cu)) if cu else None
+            if local_meta:
+                local_rows += 1
+            title = (row.get(ct) or '').strip().strip('"') or (local_meta or {}).get('title', '')
+            artist = clean_artist(row.get(ca) or (local_meta or {}).get('artist', ''))
+            album = ((row.get(cal) or '').strip().strip('"') if cal else '') or (local_meta or {}).get('album', '')
             if not title or not artist:
                 skipped += 1
                 continue
@@ -3706,7 +3903,8 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
             SYNC_STATE[skey] = st
             if spotify_name and base != legacy_base:
                 _remove_legacy_playlist(root, user, legacy_base, legacy_folder, out_path, args.dry_run)
-        print(f"{tag}{out_path.name}: invariata (modifiche lato client preservate)")
+        print(f"{tag}{out_path.name}: invariata (modifiche lato client preservate)"
+              f"{f', {local_rows} tracce Spotify Local Files' if local_rows else ''}")
         # la m3u non si tocca, ma il .missing.txt si': se una riga prima mancante ora
         # combacia con un file GIA' presente nella playlist (duplicato scartato) i percorsi
         # non cambiano e il vecchio report restava con righe false
@@ -3733,7 +3931,8 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
     mode = "[dry-run] " if args.dry_run else ""
     print(f"{mode}{tag}{out_path.name}: {len(matched)}/{seen} match"
           f"{f', {len(missing)} mancanti' if missing else ''}"
-          f"{f', {skipped} righe vuote saltate' if skipped else ''}")
+          f"{f', {skipped} righe vuote saltate' if skipped else ''}"
+          f"{f', {local_rows} tracce Spotify Local Files' if local_rows else ''}")
     if missing:
         rep = out_dir / f"{base}.missing.txt"
         if not args.dry_run:
@@ -3968,12 +4167,13 @@ def write_missing_report(partial=False):
         L.append('')
 
         # ---- album da scaricare (per numero di canzoni mancanti)
-        seen_a, miss_a, who_a, name_a = Counter(), Counter(), {}, {}
-        for (a, al, t) in SEEN_ALL:
+        seen_a, miss_a, who_a, name_a, source_a = Counter(), Counter(), {}, {}, {}
+        for (a, al, t), sources in SEEN_ALL.items():
             if al:
                 ak = (a.lower(), al.lower())
                 seen_a[ak] += 1
                 name_a.setdefault(ak, (a, al))
+                source_a.setdefault(ak, set()).update(sources)
         for (a, al, t), v in MISSING_ALL.items():
             if al:
                 ak = (a.lower(), al.lower())
@@ -3982,10 +4182,17 @@ def write_missing_report(partial=False):
         top_a = sorted(miss_a, key=lambda ak: (-miss_a[ak], -miss_a[ak] / seen_a[ak], ak))[:MISSING_TOP_ALBUMS]
         L.append(f"=== {len(top_a)} ALBUM DA SCARICARE (per canzoni mancanti) ===")
         L.append("# X/Y = canzoni trovate / canzoni di quell'album presenti nelle playlist")
+        L.append("# Sono album dedotti dalle playlist attive, non nomi di playlist mancanti/cancellate.")
         for i, ak in enumerate(top_a, 1):
             a, al = name_a[ak]
-            who = f"  [{', '.join(sorted(who_a[ak], key=str.lower))}]" if multi else ''
-            L.append(f"  {i:>2}. {a} - {al}  {_found_ratio(miss_a[ak], seen_a[ak])}{who}")
+            who = f"  [utenti: {', '.join(sorted(who_a[ak], key=str.lower))}]" if multi else ''
+            sources = sorted((label(u, pl) for u, pl in source_a.get(ak, set())), key=str.casefold)
+            if len(sources) > 8:
+                source_text = ', '.join(sources[:8]) + f", ... (+{len(sources) - 8})"
+            else:
+                source_text = ', '.join(sources) if sources else '(nessuna fonte)'
+            L.append(f"  {i:>2}. {a} - {al}  {_found_ratio(miss_a[ak], seen_a[ak])}"
+                     f"{who}  [playlist attive: {source_text}]")
         noalb = sum(1 for k in MISSING_ALL if not k[1])
         if noalb:
             L.append(f"# ({_plural(noalb, 'canzone mancante senza', 'canzoni mancanti senza')} album: "
@@ -4046,10 +4253,9 @@ def _romanize_core(s):
     """Lettura latina di una stringa con caratteri asiatici ('' se non disponibile)."""
     global _WARNED_HANGUL
     ko = _HANGUL.search(s) and not _CJK.search(s)
-    # la TUA tabella (NAME_FIXES) vince su kakasi/hangul, anche nei tag. Prima la
-    # lookup usava il valore GREZZO ('スペース・ロード') mentre le chiavi sono
-    # normalizzate ('スペース ロード'): le voci del JSON non scattavano mai.
-    r = NAME_FIXES.get(norm(s), '')
+    # Traduzione/forma inglese ufficiale (NAME_TRANSLATIONS) e poi alias manuale
+    # (NAME_FIXES) battono la romanizzazione fonetica, anche nella manutenzione tag.
+    r = _preferred_name(s)
     if r:
         return r
     if ko:
@@ -4063,8 +4269,8 @@ def _romanize_core(s):
                   file=sys.stderr)
         return ''
     # giapponese/kanji: kakasi. Per nomi CINESI (hanzi senza kana)
-    # aggiungi la lettura a NAME_FIXES: kakasi leggerebbe con
-    # pronuncia giapponese, sbagliata per il cinese.
+    # aggiungi la lettura corretta a NAME_FIXES, oppure il nome inglese ufficiale a
+    # NAME_TRANSLATIONS: kakasi leggerebbe con pronuncia giapponese, sbagliata per il cinese.
     return to_romaji(s)
 
 
@@ -4076,6 +4282,18 @@ def _romanize_tag_value(v, _check=True):
     # perdeva '(4 of 4)'.
     if not v or not (_CJK.search(v) or _HANGUL.search(v)):
         return v
+    # Se un mapping tradotto e' stato aggiunto dopo che romaji_tags aveva scritto
+    # una lettura fonetica, sostituisci SOLO il gloss che coincide con la vecchia
+    # lettura pykakasi. Parentesi legittime come (Live), (English title) ecc. restano intatte.
+    old_gloss = re.match(r'^(.*?)\s*\(([^()]*)\)\s*$', v)
+    if old_gloss and _CJK.search(old_gloss.group(1)):
+        source, existing_gloss = old_gloss.group(1).strip(), old_gloss.group(2).strip()
+        preferred = _preferred_name(source)
+        phonetic = _phonetic_kakasi(source)
+        if (preferred and phonetic and
+                _romkey(existing_gloss) == _romkey(phonetic) and
+                _romkey(existing_gloss) != _romkey(preferred)):
+            return f'{source} ({preferred})'
     # gia' bilingue: c'e' una parentesi latina (traduzione/alias presente)
     # -> non toccare. E ripara le doppie traduzioni scritte dalle versioni
     # precedenti ('X (English) (romaji)' -> 'X (English)').
@@ -4140,10 +4358,11 @@ def run_romaji_tags(dry_run=False, base=None):
                 changed += 1
                 continue
             if f.suffix.lower() == '.flac':
+                # Un solo processo per file: metaflac accetta piu' operazioni in una chiamata.
+                args = []
                 for k, v in newvals.items():
-                    subprocess.run([*METAFLAC, f'--remove-tag={VORBIS[k]}',
-                                    f'--set-tag={VORBIS[k]}={v}', str(f)],
-                                   capture_output=True, timeout=60, check=True)
+                    args.extend((f'--remove-tag={VORBIS[k]}', f'--set-tag={VORBIS[k]}={v}'))
+                _metaflac_run(*args, path=f)
             else:
                 ffkeys = {'albumartist': 'album_artist'}
                 tmp = f.with_name(f.stem + '.tmp' + f.suffix)
@@ -4862,7 +5081,7 @@ def run_phase(logname, fn, *args, **kwargs):
 # Cause: romaji_tags aggiunge il gloss SOLO ai tag che contengono CJK, e album_unify
 # riscriveva ALBUMARTIST ma ARTIST solo se i token del tag erano un sottoinsieme di
 # quelli della cartella (mai vero per 'masayoshi takanaka' vs '高中正義').
-# Questa fase porta TUTTE le scritture note dello stesso artista (NAME_FIXES,
+# Questa fase porta TUTTE le scritture note dello stesso artista (NAME_TRANSLATIONS, NAME_FIXES,
 # ARTIST_GROUPS, kakasi) alla forma canonica della cartella, nei tag ARTIST /
 # ALBUMARTIST (e ARTISTS / ALBUMARTISTS dei FLAC, che Navidrome legge per i
 # multi-artista). Cartelle in kanji/hangul: sempre. Cartelle latine: solo se nei tag
@@ -4874,13 +5093,15 @@ _FLAC_ARTIST_TAGS = ('ARTIST', 'ALBUMARTIST', 'ARTISTS', 'ALBUMARTISTS')
 
 
 def _name_fixes_rev():
-    """latino(norm) -> {chiavi CJK(norm)} da NAME_FIXES."""
+    """Nome canonico normalizzato -> alias originali da traduzioni e NAME_FIXES."""
     global _NF_REV
     if _NF_REV is None:
         _NF_REV = {}
-        for k, v in NAME_FIXES.items():
-            if k and v:
-                _NF_REV.setdefault(v, set()).add(k)
+        for table in (NAME_TRANSLATIONS, NAME_FIXES):
+            for k, v in table.items():
+                value_key = norm(v)
+                if k and value_key:
+                    _NF_REV.setdefault(value_key, set()).add(k)
     return _NF_REV
 
 
@@ -4890,7 +5111,7 @@ def _has_asian(s):
 
 def _artist_variants(name):
     """Tutte le scritture (norm) che la configurazione conosce per lo STESSO artista:
-    il nome, il romaji (NAME_FIXES o kakasi), la direzione inversa latino->CJK e i
+    il nome, la traduzione/alias (NAME_TRANSLATIONS/NAME_FIXES) o romaji e la direzione inversa latino->CJK e i
     gruppi ARTIST_GROUPS. norm() toglie le parentesi: 'kanji (latino)' == 'kanji'."""
     n = norm(name)
     if not n:
@@ -4967,7 +5188,7 @@ def _rewrite_nonflac(f, targets):
 
 def run_unify_artists(dry_run=False, base=None):
     global _NF_REV
-    _NF_REV = None                      # NAME_FIXES puo' essere cambiato dopo la config
+    _NF_REV = None                      # mapping NAME_TRANSLATIONS/NAME_FIXES puo' cambiare dopo la config
     base = Path(base) if base else LIBRARY_ROOT
     have_mf = shutil.which('metaflac') is not None
     tg = '[dry] ' if dry_run else ''
@@ -5591,10 +5812,21 @@ def run_fix_dates(dry_run=False, base=None):
         return
     base = Path(base) if base else LIBRARY_ROOT
     fixed = errors = 0
-    for f in sorted(base.rglob('*.flac')):
+    # Usa l'elenco veloce condiviso e ffprobe/cache (lettura in parallelo): la vecchia
+    # versione avviava metaflac almeno una volta per OGNI file, anche se gia' corretto.
+    files = [base.joinpath(*rel) for rel in _walk_audio(base, {'.flac'})
+             if not rel[-1].lower().endswith('.backup')]
+    prefetch_probe(files, 'fix_date_tags')
+    for f in files:
         try:
-            _tv = _flac_tags(f, 'DATE', 'ORIGINALDATE')
-            date_v, orig_v = _tv['DATE'], _tv['ORIGINALDATE']
+            tags = probe(f)
+            date_v = tags.get('date', '')
+            orig_v = tags.get('originaldate', '')
+            # Raro fallback: ffprobe non e' riuscito a leggere alcun tag. Mantiene
+            # il comportamento precedente con una lettura mirata di metaflac.
+            if not tags:
+                raw = _flac_tags(f, 'DATE', 'ORIGINALDATE')
+                date_v, orig_v = raw['DATE'], raw['ORIGINALDATE']
             if orig_v:
                 if date_v and date_v != orig_v:
                     print(f"{'[dry] ' if dry_run else ''}FIX(rem): {f.name}  "
@@ -5613,14 +5845,13 @@ def run_fix_dates(dry_run=False, base=None):
                     print(f"{'[dry] ' if dry_run else ''}FIX(set): {f.name}  "
                           f"DATE={date_v} -> ORIGINALDATE={year}")
                     if not dry_run:
-                        _metaflac_run(f'--set-tag=ORIGINALDATE={year}', path=f)
-                        _metaflac_run('--remove-tag=DATE', path=f)
+                        # Scrittura e rimozione in una sola invocazione.
+                        _metaflac_run(f'--set-tag=ORIGINALDATE={year}', '--remove-tag=DATE', path=f)
                         fixed += 1
         except Exception as e:
             errors += 1
             print(f'ERRORE: {f}: {e}', file=sys.stderr)
     print(f'fix_date_tags: {fixed} file sistemati, {errors} errori')
-
 
 # ===================== fase: flac 16bit =====================
 # (da flac_16bit.py, ottimizzata: 24bit -> 16bit livello 8; 16bit con ratio
@@ -5963,7 +6194,7 @@ SUBSONIC_USER = os.environ.get('ND_USER', 'chic')
 SUBSONIC_PASS = os.environ.get('ND_PASS')
 
 def _load_navidrome_env_file():
-    """Carica ND_* da un env file per il cron. L'ambiente gia' impostato ha precedenza."""
+    """Carica ND_* e le credenziali delle utility opzionali dal file env; ambiente ha precedenza."""
     candidates = []
     if os.environ.get('ND_ENV_FILE'):
         candidates.append(Path(os.environ['ND_ENV_FILE']).expanduser())
@@ -5991,7 +6222,10 @@ def _load_navidrome_env_file():
                 if not m:
                     continue
                 key, value = m.groups()
-                if not (key in {'ND_URL', 'ND_USER', 'ND_DEFAULT_USER', 'ND_PASS'} or
+                if not (key in {'ND_URL', 'ND_USER', 'ND_DEFAULT_USER', 'ND_PASS',
+                                'LIDARR_URL', 'LIDARR_API_KEY', 'LIDARR_MUSIC_ROOT',
+                                'LIDARR_CONTAINER_ROOT', 'SLKSD_IMPORT_FOLDER',
+                                'SLKSD_FAILED_FOLDER', 'LISTENBRAINZ_TOKEN'} or
                         re.fullmatch(r'ND_PASS_[A-Za-z0-9_]+', key)):
                     continue
                 value = value.strip()
@@ -6459,6 +6693,44 @@ def run_fix_owners(default_owner='', dry_run=False, users=None):
             con.commit()
         print(f'riassegnate {len(changes)} playlist ({detail}); '
               f'esaminate {len(rows)} importate da m3u')
+
+
+
+def run_fix_all_playlist_owners(target_owner='', dry_run=False):
+    """Force every Navidrome playlist (including UI-created playlists) to one owner.
+
+    This is the legacy helper's exact broad behaviour. It is separate from --fix-owners,
+    which intentionally preserves UI-created playlist ownership and maps M3U paths by user.
+    """
+    if not NAVIDROME_DB.exists():
+        print(f'[ERRORE] DB Navidrome non trovato: {NAVIDROME_DB}', file=sys.stderr)
+        return False
+    target_owner = (target_owner or DEFAULT_USER).strip()
+    with _nd_db(write=not dry_run, reason='forzo proprietario di tutte le playlist') as con:
+        cur = con.cursor()
+        users = cur.execute('SELECT id, user_name FROM user').fetchall()
+        for uid, uname in users:
+            print(f'    utente: id={uid}  name={uname}')
+        target = next(((uid, uname) for uid, uname in users
+                       if uname.casefold() == target_owner.casefold()), None)
+        if target is None:
+            print(f"[ERRORE] utente '{target_owner}' non trovato nel DB Navidrome", file=sys.stderr)
+            return False
+        target_id, target_name = target
+        print('--- proprietari attuali delle playlist:')
+        for row in cur.execute("SELECT p.owner_id, u.user_name, COUNT(*) FROM playlist p LEFT JOIN user u ON u.id=p.owner_id GROUP BY p.owner_id, u.user_name"):
+            print('   ', row)
+        count = cur.execute('SELECT COUNT(*) FROM playlist WHERE owner_id IS NULL OR owner_id != ?',
+                            (target_id,)).fetchone()[0]
+        if dry_run:
+            print(f'[dry-run] {count} playlist verrebbero assegnate a {target_name} (id {target_id}); '
+                  'le playlist create nella UI sono incluse.')
+            return True
+        cur.execute('UPDATE playlist SET owner_id=? WHERE owner_id IS NULL OR owner_id != ?',
+                    (target_id, target_id))
+        con.commit()
+        print(f'Riassegnate {cur.rowcount} playlist a {target_name} (id {target_id}).')
+    return True
 
 
 _TS_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})'
@@ -7158,27 +7430,36 @@ CLEAN_MARKER = '.ndempty'
 CLEAN_MAX_AGE = 24 * 3600
 
 
-def _has_audio_tree(d: Path) -> bool:
-    # INDEX_EXT (non AUDIO_EXT): una cartella di soli .aiff/.ape/.wv/.dsf/...
-    # NON e' vuota. Prima veniva cancellata dopo 24h (rmtree) con tutta la musica.
-    for p in d.rglob('*'):
-        if p.is_file() and p.suffix.lower() in INDEX_EXT:
-            return True
-    return False
-
-
 def run_clean_empty(dry_run=False, base=None):
     base = Path(base) if base else LIBRARY_ROOT
+    base_key = os.path.normpath(str(base))
     now = time.time()
     removed = marked = waiting = unmarked = 0
+    contains_audio = {}
+    # In os.walk bottom-up, ogni cartella eredita il risultato dei soli figli diretti.
+    # Evita chiamare d.rglob('*') per OGNI cartella, che moltiplicava il costo su librerie
+    # con tanti livelli artista/album/disco.
     for root, dirs, files in os.walk(base, topdown=False):
+        root_key = os.path.normpath(root)
+        has_audio = any(
+            os.path.splitext(name)[1].lower() in INDEX_EXT and
+            os.path.isfile(os.path.join(root, name))
+            for name in files
+        )
+        if not has_audio:
+            has_audio = any(
+                contains_audio.get(os.path.normpath(os.path.join(root, child)), False)
+                for child in dirs
+            )
+        contains_audio[root_key] = has_audio
+
         d = Path(root)
-        if d == base or d.name.startswith('.'):
+        if root_key == base_key or d.name.startswith('.'):
             continue
         rel = d.relative_to(base)
         if rel.parts and rel.parts[0].lower() == 'playlists':
             continue
-        if _has_audio_tree(d):
+        if has_audio:
             mk = d / CLEAN_MARKER
             if mk.exists():
                 if not dry_run:
@@ -7212,7 +7493,6 @@ def run_clean_empty(dry_run=False, base=None):
                     pass
     print(f'marcate: {marked} | in attesa (<24h): {waiting} | rimosse: {removed} '
           f'| sbloccate: {unmarked} | conflitti syncthing: {conflicts}')
-
 
 # ===================== fase: dedupe releases =====================
 # (da dedupe_releases.py — unifica release duplicate: duplicati nel cestino,
@@ -8006,6 +8286,8 @@ def main():
     ap.add_argument('--changelog', action='store_true',
                     help='stampa il changelog completo incorporato nello script ed esce')
     ap.add_argument('csv', nargs='*', help='CSV specifici (default: tutti in EXPORTIFY_DIR)')
+    ap.add_argument('--build-spotify-proxies', action='store_true',
+                    help='genera MP3 compatibili con Spotify Local Files dagli album in SPOTIFY_LOCAL_PROXY.albums')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-artwork-download', action='store_true',
                     help='salta la ricerca e il download automatico delle copertine album mancanti')
@@ -8119,6 +8401,32 @@ def main():
                     help='fase: assegna le playlist importate da m3u al proprietario giusto (cartella '
                          'utente in Playlists/); USER = proprietario di quelle fuori dalle cartelle '
                          'utente (default: DEFAULT_USER)')
+    ap.add_argument('--fix-all-playlist-owners', nargs='?', const='', default=None, metavar='USER',
+                    help='utility: assegna TUTTE le playlist (anche UI) a USER; preview di default, --apply modifica il DB')
+    ap.add_argument('--fix-flac-safe', action='store_true',
+                    help='utility: ripara i .flac.flac validi e pulisce .backup; preview di default, --apply modifica')
+    ap.add_argument('--lidarr-folder-fix', action='store_true',
+                    help='utility: riconcilia i path artisti Lidarr con le cartelle; preview di default, --apply aggiorna')
+    ap.add_argument('--lidarr-import-slskd', action='store_true',
+                    help='utility: invia DownloadedAlbumsScan a Lidarr, corregge i path e conta failed_imports')
+    ap.add_argument('--lidarr-url', metavar='URL',
+                    help='override per le utility Lidarr (default LIDARR_URL nell’ambiente/.env)')
+    ap.add_argument('--library-root', metavar='PATH',
+                    help='override root della libreria per --fix-flac-safe e --lidarr-folder-fix')
+    ap.add_argument('--lidarr-container-root', metavar='PATH',
+                    help='prefisso path visto da Lidarr (default /music o LIDARR_CONTAINER_ROOT)')
+    ap.add_argument('--slskd-import-folder', metavar='PATH',
+                    help='cartella dentro Lidarr da importare (default /downloads/slskd)')
+    ap.add_argument('--slskd-failed-folder', metavar='PATH',
+                    help='cartella host failed_imports da controllare dopo l’import')
+    ap.add_argument('--lb-dedup', metavar='UTENTE',
+                    help='utility: controlla ascolti duplicati ListenBrainz; token richiesto in LISTENBRAINZ_TOKEN')
+    ap.add_argument('--lb-delete', action='store_true',
+                    help='ListenBrainz: cancella gli ascolti duplicati trovati da --lb-dedup (irreversibile)')
+    ap.add_argument('--lb-window', type=int, default=5, metavar='SEC',
+                    help='ListenBrainz: ascolti identici a distanza massima di SEC secondi (default 5)')
+    ap.add_argument('--lb-days', type=int, default=365, metavar='GIORNI',
+                    help='ListenBrainz: storico da esaminare (default 365 giorni)')
     ap.add_argument('--no-scan', action='store_true',
                     help='non avviare lo scan FULL di Navidrome a fine lavoro')
     ap.add_argument('--rebuild-album', metavar='NOME',
@@ -8307,6 +8615,746 @@ def _scan_before_favorites(users, full_scan=True):
     return None
 
 
+def _spotify_proxy_norm(value):
+    """Normalizzazione stretta per nome artista/album ignorando maiuscole e punteggiatura."""
+    return norm_bare(str(value or ''))
+
+
+def _spotify_proxy_artist_keys(value):
+    """Nome artista e varianti note (alias, gruppi, lettura romaji)."""
+    raw = str(value or '').strip()
+    if not raw:
+        return set()
+    n = norm(raw)
+    out = {_spotify_proxy_norm(raw), _spotify_proxy_norm(n)}
+    if n:
+        out.add(_spotify_proxy_norm(_canon(n)))
+        preferred = _preferred_name(n)
+        if preferred:
+            out.add(_spotify_proxy_norm(preferred))
+        if n in ALIASES:
+            out.add(_spotify_proxy_norm(ALIASES[n]))
+        for table in (NAME_TRANSLATIONS, NAME_FIXES):
+            for alias, target in table.items():
+                if norm(target) == n:
+                    out.add(_spotify_proxy_norm(alias))
+        for alias, target in ALIASES.items():
+            if target == n:
+                out.add(_spotify_proxy_norm(alias))
+        for group in ARTIST_GROUPS:
+            if n in group:
+                out.update(_spotify_proxy_norm(x) for x in group)
+        romanized = to_romaji(n)
+        if romanized:
+            out.add(_spotify_proxy_norm(romanized))
+    return {x for x in out if x}
+
+
+def _spotify_proxy_rel_album(rel):
+    """Nome cartella album per Artist/Album/CD1/track.ext o Artist/Album/track.ext."""
+    if len(rel) >= 4 and _DISC_DIR.match(rel[-2]):
+        return rel[-3]
+    return rel[-2] if len(rel) >= 2 else ''
+
+
+def _spotify_proxy_title(path, tags):
+    title = str(tags.get('title') or '').strip()
+    if not title:
+        title = re.sub(r'^\s*\d{1,3}\s*[-._: ]+\s*', '', Path(path).stem).strip()
+    return title or Path(path).stem
+
+
+def run_build_spotify_proxies(dry_run=False, library_root=None):
+    """Crea proxy MP3 selettivi per Spotify Local Files, preservando gli originali lossless."""
+    cfg = SPOTIFY_LOCAL_PROXY_CONFIG
+    if not cfg.get('enabled', True):
+        print('[i] SPOTIFY_LOCAL_PROXY.enabled=false: generazione proxy disabilitata')
+        return {'created': 0, 'skipped': 0, 'errors': 0}
+    requested = cfg.get('albums') or []
+    if not requested:
+        print('[i] nessun album in SPOTIFY_LOCAL_PROXY.albums; nessuna conversione avviata')
+        print('[i] aggiungi oggetti {"artist": "Artista", "album": "Album"} per gli album assenti dal catalogo Spotify')
+        return {'created': 0, 'skipped': 0, 'errors': 0}
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        print('[ERRORE] ffmpeg non trovato; impossibile generare i proxy MP3', file=sys.stderr)
+        return {'created': 0, 'skipped': 0, 'errors': 1}
+
+    root = Path(library_root or LIBRARY_ROOT).expanduser().resolve()
+    output_root = Path(str(cfg.get('output_dir') or '~/Music/Spotify Local Files')).expanduser().resolve()
+    try:
+        output_root.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        print(f'[ERRORE] output proxy dentro la libreria Navidrome: {output_root}; scegli una cartella esterna a {root}',
+              file=sys.stderr)
+        return {'created': 0, 'skipped': 0, 'errors': 1}
+    bitrate = str(cfg.get('bitrate', '192k')).lower()
+    m_bitrate = re.fullmatch(r'(\d{2,3})k', bitrate)
+    if not m_bitrate or not 64 <= int(m_bitrate.group(1)) <= 320:
+        print(f'[ERRORE] bitrate proxy non valido: {bitrate!r}', file=sys.stderr)
+        return {'created': 0, 'skipped': 0, 'errors': 1}
+
+    criteria, seen_criteria = [], set()
+    for item in requested:
+        if not isinstance(item, dict):
+            print(f'[warn] criterio ignorato (richiede artist e album): {item!r}', file=sys.stderr)
+            continue
+        artist = str(item.get('artist') or '').strip()
+        album = str(item.get('album') or '').strip()
+        if not artist or not album:
+            print(f'[warn] criterio incompleto ignorato: {item!r}', file=sys.stderr)
+            continue
+        key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(album))
+        if key in seen_criteria:
+            continue
+        seen_criteria.add(key)
+        criteria.append({'artist': artist, 'album': album,
+                         'artist_keys': _spotify_proxy_artist_keys(artist),
+                         'album_key': _spotify_proxy_norm(album), 'matches': 0})
+    if not criteria:
+        print('[ERRORE] SPOTIFY_LOCAL_PROXY.albums non contiene criteri validi', file=sys.stderr)
+        return {'created': 0, 'skipped': 0, 'errors': 1}
+
+    print(f'[i] ricerca {len(criteria)} album selezionati in {root}; output: {output_root}')
+    rels = _walk_audio(root, INDEX_EXT)
+    # Fast path: the library is normally Artist/Album/Track. Probe only tracks in
+    # matching folders. Fall back to tag matching across the library only if a
+    # configured album cannot be located by its directory names.
+    for crit in criteria:
+        crit['folder_rels'] = []
+        for rel in rels:
+            folder_artist = _spotify_proxy_artist_keys(rel[0]) if rel else set()
+            folder_album = _spotify_proxy_norm(_spotify_proxy_rel_album(rel))
+            if crit['album_key'] == folder_album and crit['artist_keys'] & folder_artist:
+                crit['folder_rels'].append(rel)
+        crit['fallback_tags'] = not bool(crit['folder_rels'])
+        if crit['fallback_tags']:
+            print(f"[warn] {crit['artist']} — {crit['album']}: cartella non trovata esattamente, ripiego sui tag della libreria",
+                  file=sys.stderr)
+
+    if any(crit['fallback_tags'] for crit in criteria):
+        candidate_rels = rels
+    else:
+        wanted = {rel for crit in criteria for rel in crit['folder_rels']}
+        candidate_rels = sorted(wanted)
+    selected = {}
+    for rel in candidate_rels:
+        path = root.joinpath(*rel)
+        tags = probe(path)
+        folder_album = _spotify_proxy_norm(_spotify_proxy_rel_album(rel))
+        tagged_album = _spotify_proxy_norm(tags.get('album') or '')
+        artist_values = [tags.get('albumartist'), tags.get('album_artist'), tags.get('artist')]
+        if rel:
+            artist_values.append(rel[0])
+        artist_keys = set()
+        for value in artist_values:
+            artist_keys.update(_spotify_proxy_artist_keys(value))
+        for crit in criteria:
+            path_match = rel in crit['folder_rels']
+            if path_match or (crit['fallback_tags'] and crit['album_key'] in {folder_album, tagged_album}
+                              and bool(crit['artist_keys'] & artist_keys)):
+                if path not in selected:
+                    selected[path] = (rel, tags, crit)
+                    crit['matches'] += 1
+                break
+
+    for crit in criteria:
+        print(f"[i] album proxy {crit['artist']} — {crit['album']}: {crit['matches']} tracce")
+    if not selected:
+        print('[warn] nessun file corrisponde; controlla i nomi artista/album nei tag o nelle cartelle', file=sys.stderr)
+        return {'created': 0, 'skipped': 0, 'errors': 0}
+
+    destinations, used_targets = [], {}
+    for source, (rel, tags, crit) in sorted(selected.items(), key=lambda item: str(item[0]).casefold()):
+        dest = output_root / Path(*rel).with_suffix('.mp3')
+        owner = used_targets.get(str(dest).casefold())
+        if owner is not None and owner != source:
+            dest = dest.with_name(f'{dest.stem} [from {source.suffix[1:].upper()}].mp3')
+        used_targets[str(dest).casefold()] = source
+        destinations.append((source, dest, rel, tags, crit))
+
+    if not dry_run:
+        output_root.mkdir(parents=True, exist_ok=True)
+    created = skipped = errors = 0
+    for source, dest, rel, tags, crit in destinations:
+        title = _spotify_proxy_title(source, tags)
+        album = str(tags.get('album') or _spotify_proxy_rel_album(rel) or crit['album']).strip()
+        track_artist = str(tags.get('artist') or tags.get('albumartist') or tags.get('album_artist') or rel[0]).strip()
+        album_artist = str(tags.get('albumartist') or tags.get('album_artist') or rel[0]).strip()
+        try:
+            src_mtime = source.stat().st_mtime
+            if dest.exists() and dest.stat().st_size > 4096 and dest.stat().st_mtime >= src_mtime:
+                skipped += 1
+                continue
+        except OSError:
+            pass
+        if dry_run:
+            print(f'[dry-run] {source} -> {dest}')
+            created += 1
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f'.{dest.stem}.tmp-{os.getpid()}.mp3')
+        cmd = [ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
+               '-map', '0:a:0', '-map', '0:v:disp:attached_pic?', '-map_metadata', '0',
+               '-c:a', 'libmp3lame', '-b:a', bitrate, '-c:v', 'copy',
+               '-id3v2_version', '3', '-write_id3v1', '1',
+               '-metadata', f'title={title}', '-metadata', f'artist={track_artist}',
+               '-metadata', f'album={album}', '-metadata', f'album_artist={album_artist}',
+               '-f', 'mp3', str(tmp)]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 4096:
+                raise RuntimeError((result.stderr or f'ffmpeg exit {result.returncode}').strip()[:400])
+            if not _ffprobe_raw(str(tmp)):
+                raise RuntimeError('ffprobe non riesce a leggere il proxy generato')
+            os.replace(tmp, dest)
+            # Timestamp del proxy uguale al sorgente: una modifica successiva al FLAC lo invalida.
+            try:
+                shutil.copystat(source, dest, follow_symlinks=True)
+            except OSError:
+                pass
+            created += 1
+        except Exception as exc:
+            errors += 1
+            print(f'[ERRORE] proxy {source}: {exc}', file=sys.stderr)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+    flush_probe_cache()
+    print(f'[i] proxy Spotify conclusi: {created} creati, {skipped} gia aggiornati, {errors} errori')
+    print('[i] aggiungi la cartella proxy in Spotify Desktop > Settings > Local Files, poi aggiungi i brani alle playlist')
+    print('[i] al prossimo --sync-only, Exportify puo\' esportare i metadati locali e il matcher li abbina ai file originali')
+    return {'created': created, 'skipped': skipped, 'errors': errors}
+
+
+
+# ===================== utilita' integrate: FLAC safe / Lidarr / ListenBrainz =====================
+# I valori di default derivano dagli helper precedenti, ma le credenziali NON sono nel sorgente.
+
+class _LBRetryFailed(Exception):
+    """Richiesta ListenBrainz non riuscita dopo i tentativi consentiti."""
+
+
+def _safe_flac_valid(path):
+    """Valida un FLAC tramite metaflac o ffprobe; un controllo fallito non autorizza la sostituzione."""
+    if shutil.which('metaflac'):
+        try:
+            subprocess.run([*METAFLAC, '--list', str(path)], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE, check=True, timeout=45)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+    if shutil.which('ffprobe'):
+        try:
+            r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=format_name',
+                                '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
+                               capture_output=True, text=True, check=True, timeout=45)
+            return 'flac' in (r.stdout or '').casefold()
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return False
+    print('[ERRORE] servono metaflac o ffprobe per validare i FLAC.', file=sys.stderr)
+    return False
+
+
+def run_fix_flac_safe(base=None, apply=False):
+    """Ripara <file>.flac.flac solo quando il duplicato e' un FLAC valido; poi elimina .backup
+    soltanto quando il relativo file originale esiste. Per sicurezza il chiamante usa dry-run di
+    default e passa apply=True esclusivamente con --apply (e senza --dry-run)."""
+    base = Path(base or LIBRARY_ROOT).expanduser()
+    if not base.is_dir():
+        print(f'[ERRORE] cartella libreria non trovata: {base}', file=sys.stderr)
+        return False
+    mode = 'APPLICA' if apply else 'DRY-RUN'
+    print(f'[i] fix-flac-safe: root={base} | modalita={mode}')
+    originals = []
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in {'.git', '@eaDir', '.stfolder'}]
+        for name in files:
+            lower = name.casefold()
+            if lower.endswith('.flac') and not lower.endswith('.flac.flac'):
+                originals.append(Path(root) / name)
+    originals.sort(key=lambda p: str(p).casefold())
+    print(f'Trovati {len(originals)} file FLAC originali.')
+    fixed = skipped_no_dup = skipped_invalid = errors = 0
+    for original in originals:
+        duplicate = Path(str(original) + '.flac')
+        if not duplicate.exists():
+            skipped_no_dup += 1
+            continue
+        if not _safe_flac_valid(duplicate):
+            print(f'  WARN: duplicato non valido, salto: {duplicate.name}')
+            skipped_invalid += 1
+            continue
+        if not apply:
+            print(f'  FIX previsto: {original} <- {duplicate.name}')
+            fixed += 1
+            continue
+        try:
+            # os.replace sovrascrive in modo atomico sullo stesso filesystem; se fallisce,
+            # non eliminiamo prima il vecchio originale (il vecchio helper poteva perdere dati).
+            os.replace(duplicate, original)
+            fixed += 1
+            if fixed % 200 == 0:
+                print(f'  ...{fixed} file sistemati')
+        except OSError as e:
+            print(f'  ERRORE: {original}: {e}', file=sys.stderr)
+            errors += 1
+    print(f'Fase FLAC: {fixed} sistemati/previsti, {skipped_no_dup} senza duplicato, '
+          f'{skipped_invalid} duplicati non validi, {errors} errori.')
+
+    backups = []
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in {'.git', '@eaDir', '.stfolder'}]
+        for name in files:
+            if name.endswith('.backup'):
+                backups.append(Path(root) / name)
+    removed = 0
+    for backup in sorted(backups, key=lambda p: str(p).casefold()):
+        original = Path(str(backup)[:-7])
+        if not original.exists():
+            continue
+        if not apply:
+            print(f'  BACKUP da rimuovere: {backup}')
+            removed += 1
+            continue
+        try:
+            backup.unlink()
+            removed += 1
+        except OSError as e:
+            print(f'  WARN: non riesco a rimuovere il backup {backup}: {e}', file=sys.stderr)
+    print(f'Backup con originale presente rimossi/previsti: {removed}.')
+    if not apply:
+        print('[i] anteprima soltanto: usare --fix-flac-safe --apply per applicare le modifiche.')
+    return errors == 0
+
+
+def _lidarr_norm(value):
+    value = unicodedata.normalize('NFKD', str(value or ''))
+    value = ''.join(c for c in value if not unicodedata.combining(c)).casefold().strip()
+    value = re.sub(r'[^\w ]+', ' ', value, flags=re.UNICODE)
+    value = value.replace('_', ' ')
+    return re.sub(r'\s+', ' ', value).strip()
+
+
+def _lidarr_config(url=None, api_key=None, music_root=None, container_root=None):
+    url = (url or os.environ.get('LIDARR_URL') or 'http://192.168.1.7:8686').rstrip('/')
+    api_key = api_key or os.environ.get('LIDARR_API_KEY')
+    host_root = Path(music_root or os.environ.get('LIDARR_MUSIC_ROOT') or LIBRARY_ROOT).expanduser()
+    container_root = (container_root or os.environ.get('LIDARR_CONTAINER_ROOT') or '/music').rstrip('/')
+    return url, api_key, host_root, container_root
+
+
+def _lidarr_request(method, path, data=None, url=None, api_key=None, _tries=0):
+    """Richiesta API Lidarr con redirect limitati e senza inviare la chiave a un host diverso."""
+    if not url or not api_key:
+        print('[ERRORE] configurare LIDARR_URL e LIDARR_API_KEY nel .env/ambiente.', file=sys.stderr)
+        return None
+    full_url = path if path.startswith('http://') or path.startswith('https://') else url.rstrip('/') + '/' + path.lstrip('/')
+    body = json.dumps(data).encode('utf-8') if data is not None else None
+    req = urllib.request.Request(full_url, data=body, method=method)
+    req.add_header('X-Api-Key', api_key)
+    if body is not None:
+        req.add_header('Content-Type', 'application/json')
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            raw = response.read()
+            if not raw:
+                return {}
+            try:
+                return json.loads(raw.decode('utf-8'))
+            except json.JSONDecodeError:
+                return {'_raw': raw.decode('utf-8', errors='replace')}
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 307, 308) and _tries < 3:
+            location = e.headers.get('Location')
+            if location:
+                target = urllib.parse.urljoin(full_url, location)
+                if urllib.parse.urlsplit(target).netloc.casefold() == urllib.parse.urlsplit(url).netloc.casefold():
+                    return _lidarr_request(method, target, data, url, api_key, _tries + 1)
+                print(f'[ERRORE API Lidarr] redirect verso host diverso rifiutato: {target}', file=sys.stderr)
+                return None
+        print(f'[ERRORE API Lidarr {method}]: HTTP {e.code}: {e.read().decode(errors="replace")[:300]}',
+              file=sys.stderr)
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        print(f'[ERRORE API Lidarr {method} {full_url}: {e}]', file=sys.stderr)
+        return None
+
+
+def _lidarr_path_to_host(path, host_root, container_root):
+    path = str(path or '')
+    if path.startswith(container_root + '/'):
+        return str(host_root) + path[len(container_root):]
+    return path
+
+
+def _lidarr_alias_data():
+    """Usa le tabelle gia' caricate da exportify_names.json, inclusa la priorita' inglese."""
+    mapping = {}
+    for table in (NAME_TRANSLATIONS, NAME_FIXES, ALIASES):
+        for key, value in table.items():
+            k, v = _lidarr_norm(key), _lidarr_norm(value)
+            if k and v:
+                mapping[k] = v
+                mapping.setdefault(v, k)  # consenti anche il match inverso dell'alias
+    groups = []
+    for group in ARTIST_GROUPS:
+        vals = {_lidarr_norm(x) for x in group if _lidarr_norm(x)}
+        if vals:
+            groups.append(vals)
+    return mapping, groups
+
+
+def run_lidarr_folder_fix(apply=False, url=None, api_key=None, music_root=None, container_root=None):
+    """Ripara i path artisti Lidarr che puntano a cartelle mancanti; --apply aggiorna l'API."""
+    url, api_key, host_root, container_root = _lidarr_config(url, api_key, music_root, container_root)
+    if not api_key:
+        print('[ERRORE] LIDARR_API_KEY mancante: inserirla nel .env locale (non nel sorgente).', file=sys.stderr)
+        return False
+    if not host_root.is_dir():
+        print(f'[ERRORE] cartella libreria non trovata: {host_root}', file=sys.stderr)
+        return False
+    artists = _lidarr_request('GET', '/api/v1/artist', url=url, api_key=api_key)
+    if not isinstance(artists, list) or not artists:
+        print('[ERRORE] Lidarr non ha restituito un elenco artisti valido.', file=sys.stderr)
+        return False
+
+    actual = sorted((d.name for d in os.scandir(host_root)
+                     if d.is_dir() and not d.name.startswith('.')
+                     and _lidarr_norm(d.name) not in {'playlists', 'strawberry playlists'}),
+                    key=str.casefold)
+    by_norm = {}
+    for name in actual:
+        by_norm.setdefault(_lidarr_norm(name), name)
+    alias_map, groups = _lidarr_alias_data()
+    fixed = failed = ok = noop = 0
+    reserved = set()
+    # Non assegnare una cartella gia' usata da un artista con un path valido.
+    for artist in artists:
+        path = str(artist.get('path') or '')
+        host_path = _lidarr_path_to_host(path, host_root, container_root)
+        if path and os.path.isdir(host_path):
+            ok += 1
+            reserved.add(_lidarr_norm(os.path.basename(path.rstrip('/'))))
+
+    matched_folders = set()
+    for artist in artists:
+        path = str(artist.get('path') or '')
+        if path and os.path.isdir(_lidarr_path_to_host(path, host_root, container_root)):
+            continue
+        base = os.path.basename(path.rstrip('/'))
+        nb = _lidarr_norm(base)
+        artist_name = str(artist.get('artistName') or artist.get('name') or artist.get('id'))
+        if not nb:
+            print(f'NO-MATCH: {artist_name} (path vuoto/non confrontabile: {path})')
+            failed += 1
+            continue
+        candidates = [nb]
+        if nb in alias_map:
+            candidates.append(alias_map[nb])
+        for group in groups:
+            if nb in group:
+                candidates.extend(sorted(group - {nb}))
+        hit = None
+        for cand in dict.fromkeys(candidates):
+            candidate = by_norm.get(cand)
+            if candidate and _lidarr_norm(candidate) not in reserved:
+                hit = candidate
+                break
+        if not hit:
+            available = [k for k, v in by_norm.items() if k not in reserved]
+            close = difflib.get_close_matches(nb, available, n=1, cutoff=0.8)
+            if close:
+                hit = by_norm[close[0]]
+        if not hit:
+            print(f'NO-MATCH: {artist_name} (atteso: {base})')
+            failed += 1
+            continue
+        hit_norm = _lidarr_norm(hit)
+        if hit_norm in reserved:
+            print(f'NO-MATCH: {artist_name} (cartella {hit!r} gia assegnata)')
+            failed += 1
+            continue
+        matched_folders.add(hit)
+        reserved.add(hit_norm)
+        parent = path.rstrip('/').rsplit('/', 1)[0] if '/' in path.rstrip('/') else ''
+        newpath = f'{parent}/{hit}' if parent else hit
+        print(f'{"FIX" if apply else "PREVIEW"}: {artist_name}: {base!r} -> {hit!r}')
+        if apply:
+            payload = dict(artist)
+            payload['path'] = newpath
+            result = _lidarr_request('PUT', f"/api/v1/artist/{artist.get('id')}", payload,
+                                     url=url, api_key=api_key)
+            if result is None:
+                failed += 1
+                reserved.discard(hit_norm)
+                matched_folders.discard(hit)
+                print(f'  [ATTENZIONE] aggiornamento fallito per {artist_name}', file=sys.stderr)
+            else:
+                fixed += 1
+        else:
+            fixed += 1
+
+    known = {_lidarr_norm(os.path.basename(str(a.get('path') or '').rstrip('/'))) for a in artists}
+    known |= {_lidarr_norm(f) for f in matched_folders}
+    orphans = [n for n in actual if _lidarr_norm(n) not in known]
+    if orphans:
+        print('\nCartelle su disco senza artista in Lidarr (da aggiungere a mano):')
+        for name in orphans:
+            print(f'  - {name}')
+    print(f'\nGia a posto: {ok} | correzioni {"applicate" if apply else "previste"}: {fixed} | senza corrispondenza/errori: {failed}')
+    if apply and fixed:
+        if _lidarr_request('POST', '/api/v1/command/', {'name': 'RescanFolders'}, url=url, api_key=api_key) is not None:
+            print('RescanFolders avviato.')
+        else:
+            print('RescanFolders NON avviato (errore API).', file=sys.stderr)
+    elif not apply:
+        print('[i] anteprima soltanto: usare --lidarr-folder-fix --apply per aggiornare Lidarr.')
+    return failed == 0
+
+
+def run_lidarr_import_slskd(dry_run=False, apply=False, url=None, api_key=None, music_root=None,
+                            container_root=None, import_folder=None, failed_folder=None):
+    """Esegue DownloadedAlbumsScan di Lidarr, riallinea i path e segnala failed_imports."""
+    url, api_key, host_root, container_root = _lidarr_config(url, api_key, music_root, container_root)
+    import_folder = import_folder or os.environ.get('SLKSD_IMPORT_FOLDER') or '/downloads/slskd'
+    failed_folder = Path(failed_folder or os.environ.get('SLKSD_FAILED_FOLDER') or
+                         '/downloads/slskd/failed_imports').expanduser()
+    if not api_key:
+        print('[ERRORE] LIDARR_API_KEY mancante: inserirla nel .env locale (non nel sorgente).', file=sys.stderr)
+        return False
+    folder_ok = True
+    if dry_run:
+        print(f'[dry-run] non invio DownloadedAlbumsScan per {import_folder}')
+        folder_ok = run_lidarr_folder_fix(False, url=url, api_key=api_key, music_root=host_root,
+                                          container_root=container_root)
+    else:
+        print(f'>>> Lidarr DownloadedAlbumsScan: {import_folder}')
+        response = _lidarr_request('POST', '/api/v1/command/',
+                                   {'name': 'DownloadedAlbumsScan', 'path': import_folder},
+                                   url=url, api_key=api_key)
+        if response is None:
+            print('[ERRORE] Lidarr non ha accettato DownloadedAlbumsScan.', file=sys.stderr)
+            return False
+        print('>>> OK: comando di import inviato a Lidarr.')
+        # Comportamento dell'helper precedente: correzione path subito dopo l'accodamento.
+        folder_ok = run_lidarr_folder_fix(apply=apply, url=url, api_key=api_key, music_root=host_root,
+                                          container_root=container_root)
+    if failed_folder.is_dir():
+        count = sum(1 for p in failed_folder.iterdir() if p.is_dir())
+        if count:
+            print(f'[ATTENZIONE] {count} album/cartelle in {failed_folder} richiedono gestione manuale.')
+        else:
+            print(f'[i] nessuna sottocartella fallita in {failed_folder}.')
+    else:
+        print(f'[i] cartella failed_imports non trovata: {failed_folder}')
+    return folder_ok is not False
+
+
+def _lb_request(url, token, data=None, timeout=90):
+    headers = {'Authorization': f'Token {token}', 'Content-Type': 'application/json'}
+    body = json.dumps(data).encode('utf-8') if data is not None else None
+    req = urllib.request.Request(url, data=body, headers=headers,
+                                 method='POST' if body is not None else 'GET')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            try:
+                wait = max(1, int(e.headers.get('Retry-After') or 10))
+            except (ValueError, TypeError):
+                wait = 10
+            print(f'  [ListenBrainz 429] attendo {wait}s...', file=sys.stderr, flush=True)
+            time.sleep(wait)
+        raise _LBRetryFailed(f'HTTP {e.code}') from e
+    except (urllib.error.URLError, http.client.RemoteDisconnected,
+            ConnectionResetError, TimeoutError, OSError) as e:
+        raise _LBRetryFailed(str(e)) from e
+
+
+def _lb_api_get(path, token):
+    url = 'https://api.listenbrainz.org/1' + path
+    last_error = None
+    for attempt in range(1, 7):
+        try:
+            raw = _lb_request(url, token, timeout=90)
+            return json.loads(raw)
+        except (_LBRetryFailed, json.JSONDecodeError) as e:
+            last_error = e
+            print(f'  [ListenBrainz tentativo {attempt}/6 fallito: {str(e)[:90]}] '
+                  f'riprovo tra {3 * attempt}s...', file=sys.stderr, flush=True)
+            if attempt < 6:
+                time.sleep(3 * attempt)
+    raise _LBRetryFailed(f'pagina irraggiungibile dopo 6 tentativi: {url} ({last_error})')
+
+
+def _lb_fetch_page(user, token, max_ts, count):
+    path = f'/user/{urllib.parse.quote(user, safe="")}/listens?count={count}'
+    if max_ts is not None:
+        path += f'&max_ts={int(max_ts)}'
+    data = _lb_api_get(path, token)
+    if not isinstance(data, dict) or not isinstance(data.get('payload'), dict):
+        raise _LBRetryFailed('risposta ListenBrainz senza payload valido')
+    listens = data['payload'].get('listens')
+    if not isinstance(listens, list):
+        raise _LBRetryFailed('risposta ListenBrainz senza elenco listens valido')
+    return listens
+
+
+def _lb_fetch_all(user, token, days=365):
+    slug = re.sub(r'[^A-Za-z0-9_.-]+', '_', user)[:80] or 'user'
+    cache = CACHE_DIR / f'lb_dedup_{slug}_cache.json'
+    listens, max_ts = [], None
+    if cache.exists():
+        try:
+            cached = json.loads(cache.read_text(encoding='utf-8'))
+            listens, max_ts = cached['listens'], cached['max_ts']
+            print(f'  [ripreso dalla cache: {len(listens)} ascolti, max_ts={max_ts}]',
+                  file=sys.stderr, flush=True)
+        except (OSError, KeyError, ValueError, TypeError):
+            listens, max_ts = [], None
+    skipped = []
+    consecutive_skips = 0
+    cutoff = int(time.time()) - int(days * 86400)
+    while max_ts is None or max_ts > cutoff:
+        batch = None
+        for count, attempts in ((100, 4), (25, 2), (5, 1)):
+            try:
+                batch = _lb_fetch_page(user, token, max_ts, count)
+                break
+            except _LBRetryFailed as e:
+                print(f'  [pagina ListenBrainz bloccata count={count}: {str(e)[:100]}]',
+                      file=sys.stderr, flush=True)
+        if batch is None:
+            frm = max_ts if max_ts is not None else int(time.time())
+            skipped.append((frm, frm - 3 * 86400))
+            max_ts = frm - 3 * 86400
+            consecutive_skips += 1
+            print(f'  [SALTO finestra ListenBrainz {time.strftime("%Y-%m-%d", time.gmtime(frm))} - 3 giorni]',
+                  file=sys.stderr, flush=True)
+            cache.write_text(json.dumps({'listens': listens, 'max_ts': max_ts}), encoding='utf-8')
+            if consecutive_skips >= 5:
+                print('[!] 5 finestre consecutive non raggiungibili; la cache resta per il prossimo tentativo.',
+                      file=sys.stderr)
+                raise _LBRetryFailed('5 finestre consecutive saltate; rilanciare per riprendere dalla cache')
+            continue
+        consecutive_skips = 0
+        if not batch:
+            break
+        listens.extend(batch)
+        listens.sort(key=lambda item: int(item.get('listened_at') or 0), reverse=True)
+        try:
+            oldest = min(int(item['listened_at']) for item in batch)
+        except (KeyError, TypeError, ValueError):
+            raise _LBRetryFailed('ListenBrainz ha restituito un ascolto senza listened_at')
+        max_ts = oldest - 1
+        # Scrive checkpoint a ogni pagina per poter riprendere dopo un crash/interruzione.
+        cache.write_text(json.dumps({'listens': listens, 'max_ts': max_ts}), encoding='utf-8')
+        print(f'  ...{len(listens)} ascolti scaricati', file=sys.stderr, flush=True)
+        time.sleep(1.2)
+    cache.unlink(missing_ok=True)
+    return listens, skipped
+
+
+def _lb_find_dupes(listens, window=5):
+    by_song = {}
+    for item in listens:
+        meta = item.get('track_metadata') or {}
+        artist = re.sub(r'\s+', ' ', str(meta.get('artist_name') or '')).strip().casefold()
+        title = re.sub(r'\s+', ' ', str(meta.get('track_name') or '')).strip().casefold()
+        if artist and title:
+            by_song.setdefault((artist, title), []).append(item)
+    dupes = []
+    for group in by_song.values():
+        group.sort(key=lambda item: int(item.get('listened_at') or 0))
+        cluster = []
+        for item in group:
+            ts = int(item.get('listened_at') or 0)
+            if cluster and ts - int(cluster[-1].get('listened_at') or 0) > window:
+                if len(cluster) > 1:
+                    dupes.append(cluster)
+                cluster = []
+            cluster.append(item)
+        if len(cluster) > 1:
+            dupes.append(cluster)
+    return dupes
+
+
+def _lb_delete_listen(token, item):
+    msid = item.get('recording_msid')
+    listened_at = item.get('listened_at')
+    if not msid or listened_at is None:
+        print('    [ERRORE] ascolto senza recording_msid/listened_at: non cancellato', file=sys.stderr)
+        return False
+    payload = {'listened_at': int(listened_at), 'recording_msid': msid}
+    for attempt in range(1, 5):
+        try:
+            _lb_request('https://api.listenbrainz.org/1/delete-listen', token,
+                        data=payload, timeout=30)
+            return True
+        except Exception as e:
+            print(f'    [retry cancellazione {attempt}/4: {str(e)[:70]}]', file=sys.stderr)
+            if attempt < 4:
+                time.sleep(3 * attempt)
+    return False
+
+
+def run_lb_dedup(user, token, delete=False, window=5, days=365):
+    """Trova listen duplicati. Default sola lettura; cancellazione solo con --lb-delete."""
+    if not token:
+        print('[ERRORE] LISTENBRAINZ_TOKEN mancante nel .env/ambiente.', file=sys.stderr)
+        return False
+    if not user or window < 0 or days < 1:
+        print('[ERRORE] utente ListenBrainz, finestra e giorni non validi.', file=sys.stderr)
+        return False
+    print(f"[i] scarico lo storico ListenBrainz di '{user}' (ultimi {days} giorni)...", file=sys.stderr)
+    try:
+        listens, skipped = _lb_fetch_all(user, token, days=days)
+    except _LBRetryFailed as e:
+        print(f'[ERRORE] download ListenBrainz incompleto: {e}', file=sys.stderr)
+        return False
+    print(f'[i] {len(listens)} ascolti scaricati', file=sys.stderr)
+    if skipped:
+        print(f'[!] ATTENZIONE: {len(skipped)} finestre non scaricate:')
+        for start, end in skipped:
+            print(f'    {time.strftime("%Y-%m-%d", time.gmtime(end))} - '
+                  f'{time.strftime("%Y-%m-%d", time.gmtime(start))} UTC')
+        if delete:
+            print('[ERRORE] cancellazione bloccata: lo storico e incompleto, quindi i duplicati non sono affidabili.',
+                  file=sys.stderr)
+            return False
+    dupes = _lb_find_dupes(listens, window=window)
+    extra_count = sum(len(cluster) - 1 for cluster in dupes)
+    if not dupes:
+        print('Nessun doppione trovato. Nulla da fare.')
+        return True
+    print(f'\nTrovati {len(dupes)} gruppi con doppioni ({extra_count} listen in eccesso):\n')
+    for cluster in sorted(dupes, key=lambda group: int(group[0].get('listened_at') or 0)):
+        meta = cluster[0].get('track_metadata') or {}
+        stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(int(cluster[0].get('listened_at') or 0)))
+        print(f"  {stamp} UTC | {meta.get('artist_name', '?')} - {meta.get('track_name', '?')} | x{len(cluster)}")
+    if not delete:
+        print('\nDRY-RUN: nessuna cancellazione. Per confermare usa --lb-delete (senza --dry-run).')
+        return True
+    print(f'\n[*] cancello {extra_count} listen in eccesso (mantengo il primo di ogni gruppo)...')
+    ok = fail = 0
+    for cluster in dupes:
+        # La prima occorrenza cronologica del cluster resta conservata.
+        for extra in cluster[1:]:
+            if _lb_delete_listen(token, extra):
+                ok += 1
+            else:
+                fail += 1
+            time.sleep(1.5)
+    print(f'Fatto: {ok} cancellate, {fail} errori.')
+    return fail == 0
+
+
 def _run(args):
     if args.sync_only:
         conflicts = (args.all or args.dedupe_playlists or args.dedupe_releases or
@@ -8339,6 +9387,59 @@ def _run(args):
         SYNC_STATE = json.loads(SYNC_FILE.read_text())
     except Exception:
         SYNC_STATE = {}
+
+    # Utility separate dalla sync: mai incluse implicitamente in --all/--sync-only.
+    utility_modes = [args.fix_all_playlist_owners is not None, args.fix_flac_safe,
+                     args.lidarr_folder_fix, args.lidarr_import_slskd, args.lb_dedup is not None]
+    if sum(utility_modes) > 1:
+        sys.exit('[ERRORE] esegui una sola utility standalone per volta')
+    if any(utility_modes) and (args.all or args.sync_only or args.playlists or args.fetch or args.fetch_only):
+        sys.exit('[ERRORE] le utility standalone non si combinano con la pipeline playlist (--all/--sync-only/--playlists/--fetch)')
+    if args.lb_delete and args.lb_dedup is None:
+        sys.exit('[ERRORE] --lb-delete richiede --lb-dedup UTENTE')
+    if args.fix_all_playlist_owners is not None:
+        result = run_phase('fix_all_playlist_owners', run_fix_all_playlist_owners,
+                           args.fix_all_playlist_owners, dry_run=not (args.apply and not args.dry_run))
+        if result is not True:
+            raise SystemExit(1)
+        return
+    if args.fix_flac_safe:
+        result = run_phase('fix_flac_safe', run_fix_flac_safe,
+                           base=args.library_root or LIBRARY_ROOT,
+                           apply=args.apply and not args.dry_run)
+        if result is not True:
+            raise SystemExit(1)
+        return
+    if args.lidarr_folder_fix:
+        result = run_phase('lidarr_folder_fix', run_lidarr_folder_fix,
+                           apply=args.apply and not args.dry_run, url=args.lidarr_url,
+                           music_root=args.library_root, container_root=args.lidarr_container_root)
+        if result is not True:
+            raise SystemExit(1)
+        return
+    if args.lidarr_import_slskd:
+        result = run_phase('lidarr_import_slskd', run_lidarr_import_slskd,
+                           dry_run=args.dry_run, apply=args.apply and not args.dry_run,
+                           url=args.lidarr_url, music_root=args.library_root,
+                           container_root=args.lidarr_container_root,
+                           import_folder=args.slskd_import_folder, failed_folder=args.slskd_failed_folder)
+        if result is not True:
+            raise SystemExit(1)
+        return
+    if args.lb_dedup is not None:
+        result = run_phase('listenbrainz_dedup', run_lb_dedup, args.lb_dedup,
+                           os.environ.get('LISTENBRAINZ_TOKEN'),
+                           delete=args.lb_delete and not args.dry_run,
+                           window=args.lb_window, days=args.lb_days)
+        if result is not True:
+            raise SystemExit(1)
+        return
+
+    if args.build_spotify_proxies:
+        result = run_phase('build_spotify_local_proxies', run_build_spotify_proxies, dry_run=args.dry_run)
+        if isinstance(result, dict) and result.get('errors'):
+            raise SystemExit(1)
+        return
 
     if args.rebuild_album:
         run_phase('rebuild_album', rebuild_album, args.rebuild_album)
