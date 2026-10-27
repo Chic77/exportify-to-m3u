@@ -11,8 +11,8 @@ Sostituisce il vecchio script crontab. Migliorie:
     album multi-disco (Artista/Album/CD1/Traccia) indicizzati sotto l'artista vero
   - ARTIST_GROUPS: piu' nomi per lo stesso artista (aka), in entrambe le direzioni
   - virgole nel nome gestite via libreria ('Tyler, The Creator' resta intero)
-  - nomi asiatici: NAME_TRANSLATIONS (traduzione/forma inglese ufficiale) prima di
-    NAME_FIXES (alias/romanizzazione manuale), poi romanizzazione fonetica pykakasi/Hangul
+  - nomi asiatici: NAME_TRANSLATIONS (traduzione/forma inglese ufficiale), NAME_FIXES,
+    traduzione inglese automatica sopra soglia, poi romanizzazione fonetica pykakasi/Hangul
     (es. ワールドイズユアーズ -> World Is Yours); l'inglese prevale sulla lettura fonetica
   - matching: esatto (artista,album,titolo) -> esatto (artista,titolo) ->
     primo artista -> contenimento -> fuzzy difflib entro l'artista
@@ -20,7 +20,7 @@ Sostituisce il vecchio script crontab. Migliorie:
 
 Requisiti (Debian 12+/13: 'pip install --user' e' bloccato da PEP 668 -> venv):
     cd ~/homelab/scripts && python3 -m venv .venv
-    .venv/bin/pip install -r requirements.txt     # pykakasi, hangul-romanize, numpy
+    .venv/bin/pip install pykakasi hangul-romanize numpy
   Se .venv esiste accanto allo script viene usato in automatico (cron compreso);
   EXPORTIFY_NO_VENV=1 lo disattiva. Servono anche ffmpeg/ffprobe e metaflac.
 
@@ -90,7 +90,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 2. PRIMA INSTALLAZIONE (una volta sola)
 ------------------------------------------------------------------------------
     cd ~/homelab/scripts && python3 -m venv .venv
-    .venv/bin/pip install -r requirements.txt        # pykakasi, hangul-romanize, numpy
+    .venv/bin/pip install pykakasi hangul-romanize numpy
     sudo apt install ffmpeg flac                      # ffmpeg, ffprobe, metaflac
     # SOLO se vuoi scaricare gli zip in automatico (--fetch*):
     .venv/bin/pip install playwright && .venv/bin/playwright install chromium
@@ -302,8 +302,21 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --compare FILE1 FILE2 confronta due file audio (durate + forma d'onda) e dice se sono
                         la stessa incisione.
   --build-spotify-proxies
-                        crea MP3 proxy compatti (default 64k) per SPOTIFY_LOCAL_PROXY.albums, per
-                        aggiungerli a playlist Spotify come Local Files; non modifica i FLAC.
+                        crea MP3 proxy compatti (default 64k) per gli album di SPOTIFY_LOCAL_PROXY.albums
+                        e auto_albums; non modifica i FLAC. Aggiorna anche il manifest dei preferiti
+                        Navidrome e la playlist locale liked.m3u quando l'API Navidrome e' disponibile.
+  --sync-proxy-favorites
+                        rilegge i preferiti (cuore) di Navidrome e aggiorna la lista proxy liked.m3u;
+                        preview predefinita, --apply scrive i file. Non puo' creare una playlist Spotify
+                        nativa automaticamente: Spotify Web API non supporta l'aggiunta di file locali.
+  --sync-spotify-proxy-config
+                        confronta gli album della libreria con il catalogo Spotify (market da
+                        SPOTIFY_LOCAL_PROXY.market). Di default fa un dry-run: scrive report e
+                        JSON proposta, non modifica exportify_names.json; --apply aggiorna auto_albums.
+                        Richiede SPOTIFY_CLIENT_ID/SECRET nel .env per le query non in cache.
+  --proxy-limit N       limita a N album nuovi da interrogare (scan parziale additivo, default: tutti).
+  --proxy-force-refresh ignora la cache del catalogo Spotify e rifà le query.
+  --proxy-report FILE   percorso del report per --sync-spotify-proxy-config.
   --album TESTO         con --fix-collab-artists/--check-albums: solo gli album il cui nome
                         contiene TESTO.
 
@@ -387,12 +400,87 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 CHANGELOG
 ==============================================================================
 
-Novita' 0.60 (proxy Spotify MP3 piu' compatti):
+Novita' 0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
+  - artwork: lo stato delle cover embedded viene salvato nella cache ffprobe insieme a tag/durata;
+    per le cache preesistenti viene aggiunto al primo controllo. La verifica si ferma appena una
+    delle prime tracce contiene una cover, invece di eseguire sempre fino a tre ffprobe per album.
+  - traduzione automatica: dopo un errore del provider Google pubblico si attiva un circuit breaker
+    persistente per 6 ore (configurabile con AUTO_NAME_TRANSLATION.failure_cooldown_hours). Le
+    traduzioni gia' cacheate continuano a funzionare; i nuovi nomi usano la fonetica senza altri timeout.
+  - correlazione waveform: controlla prima offset zero e poi gli offset grossolani in ordine di
+    distanza, così le copie gia' allineate possono superare la soglia senza percorrere tutta la griglia.
+    Le ricerche complete (incl. --compare) conservano la griglia e il massimo diagnostico precedenti.
+  - il profiling del 27/10/2026 mostra che la cache ffprobe non e' piu' hotspot dominante; restano
+    ~92 s in controlli artwork embedded, ~85 s nella traduzione HTTPS e ~69 s nei tie-break waveform.
+    Queste durate sono stime a campionamento; la nuova riduzione end-to-end va verificata sul server.
+
+Novita' 0.64 (ottimizzazioni verificate sul profilo Tachyon reale):
+  - flush_probe_cache non esegue piu' una os.path.exists su ogni chiave della cache dopo ogni fase.
+    Le voci obsolete vengono eliminate in modo lazy quando un percorso richiesto non esiste; la
+    cache non viene usata per un file prima di aver verificato stat, quindi i dati obsoleti non
+    possono produrre tag di un file mancante. Rimosso il controllo O(numero file) su storage lento.
+  - download_missing_album_artwork raccoglie i nomi delle cover gia' durante la passeggiata delle
+    directory, evitando una scandir separata per ogni album; controlla la cache negativa prima di
+    avviare ffprobe per l'artwork incorporato.
+  - le nuove traduzioni automatiche vengono salvate in batch a fine fase, non riscrivendo l'intero
+    JSON cache dopo ogni singolo nome; il salvataggio resta atomico e avviene anche dopo errori/interruzioni
+    gestite da run_phase.
+  - modifiche mirate basate su logs/e2m_sync-only+dry-run+no-scan_20261026_231303.log e sul flame graph
+    Tachyon: il profilo ha mostrato ~109 s nel controllo esistenza della cache ffprobe, altri ~23 s in
+    un successivo flush, ~75 s nelle verifiche ffprobe dell'artwork, ~29 s nelle scansioni cartella-cover
+    e ~69 s nelle traduzioni HTTP.
+    I tempi sono stime a campionamento e dipendono dallo storage/rete.
+
+Novita' beta-0.63 (tracciamento dei preferiti per i proxy Spotify e profiling Python 3.15):
+  - dopo la generazione dei proxy legge getStarred2 di Navidrome, abbina i brani preferiti ai proxy
+    tramite percorso file e metadati, e mantiene .spotify_proxy_manifest.json, liked.m3u e
+    spotify_proxy_favorites.json. Gli errori API non cancellano la lista precedente.
+  - aggiunto --sync-proxy-favorites (preview predefinita; --apply scrive la lista locale) per
+    aggiornare i preferiti senza ricodificare gli MP3. Il manifest consente di collegare i proxy
+    ai sorgenti anche nelle run successive.
+  - documentato il limite Spotify: la Web API non aggiunge file locali a playlist o Liked Songs;
+    liked.m3u e' un elenco locale pronto per consultazione/importazione manuale, non una playlist
+    Spotify nativa. Nessun falso stato di completamento viene dichiarato.
+  - aggiunte le istruzioni per Python 3.15.2 e profiling.sampling (Tachyon). Il runtime di questo
+    ambiente non e' stato aggiornabile perche' i download DNS sono bloccati; nessuna flame graph
+    reale viene dichiarata come prodotta.
+
+Novita' beta-0.62 (cache FLAC16 sicura e dedupe piu' efficiente):
+  - flac_16bit ora memorizza anche i FLAC gia' efficienti: non rilancia ffprobe su quegli stessi
+    file a ogni run se mtime e dimensione non cambiano. La scansione usa il walker os.scandir.
+  - corretto un bug di sicurezza: --dry-run non rimuove piu' file .backup e non modifica la cache
+    FLAC16; mostra invece quali backup verrebbero rimossi.
+  - dedupe_tracks pre-carica i tag di tutti i candidati in una singola fase parallela, invece di
+    salvare la cache ffprobe ripetutamente per ogni album: riduce I/O e scritture quadratiche.
+  - la correlazione waveform riusa somme cumulative per calcolare le norme delle finestre; mantiene
+    la ricerca di offset e velocita' senza cambiare le soglie di deduplicazione.
+  - rimosso un insieme old_auto_keys inutilizzato nella scansione proxy e resi piu' espliciti gli
+    errori API Spotify quando il proprietario dell'app deve avere Premium in Development Mode.
+
+Novita' beta-0.61 (proxy automatici e traduzioni automatiche prudenti):
+  - aggiunto --sync-spotify-proxy-config: confronta gli album della libreria con il catalogo
+    Spotify tramite Search API, produce un report e una copia JSON proposta; il JSON attivo
+    cambia solo con --apply. Gli album ambigui e gli errori di rete non vengono auto-aggiunti.
+  - separati SPOTIFY_LOCAL_PROXY.albums (manuali) e auto_albums (catalogo): la scansione aggiorna
+    solo la lista automatica; il builder genera proxy per entrambe senza perdere gli override manuali.
+  - aggiunta una cache persistente del catalogo Spotify con TTL e retry 429/5xx per non ripetere
+    richieste a ogni run; market IT predefinito, configurabile.
+  - introdotto il livello di traduzione inglese automatica per CJK/Hangul dopo NAME_TRANSLATIONS
+    e NAME_FIXES e prima della lettura fonetica; solo risultati sopra la soglia euristica vengono
+    usati. I risultati vengono memorizzati in cache, senza trasformarli in traduzioni ufficiali.
+  - l'affidabilita' della traduzione automatica e' una stima euristica (il provider Google pubblico
+    non restituisce una probabilita' calibrata); sotto soglia resta la lettura fonetica.
+  - catalog_cache_days=0 disabilita il riuso della cache Spotify; qualunque --proxy-limit resta
+    additivo e preserva gli auto_albums esistenti, anche quando tutti gli album entrano nel batch.
+  - gli errori imprevisti delle utility proxy ora restituiscono un codice di uscita non-zero;
+    prima dell'applicazione viene controllato che il JSON non sia stato modificato durante la scansione.
+
+Novita' beta-0.60 (proxy Spotify MP3 piu' compatti):
   - bitrate predefinito dei proxy Spotify abbassato da 192k a 64k, per ridurre lo spazio audio
     a circa un terzo per la stessa durata; il bitrate resta configurabile tra 64k e 320k in
     SPOTIFY_LOCAL_PROXY.bitrate. A 64k la qualita' e' bassa se si ascoltano i proxy direttamente.
 
-Novita' 0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
+Novita' beta-0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
   - cache LRU per norm()/norm_bare(): riusa le normalizzazioni ripetute di artista, album e titolo;
     le cache vengono invalidate subito dopo aver caricato le regole emoji dalla configurazione.
   - romaji_tags: applica tutti i tag cambiati con una sola invocazione di metaflac per file FLAC,
@@ -713,6 +801,7 @@ Novita' beta-3.20 (ottimizzazioni + bugfix):
 """
 
 import argparse
+import base64
 import contextlib
 import csv
 import difflib
@@ -831,7 +920,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.60"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.65"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -2296,8 +2385,24 @@ SPOTIFY_LOCAL_PROXY_CONFIG = {
     'enabled': True,
     'output_dir': '~/Music/Spotify Local Files',
     'bitrate': '64k',
+    'market': 'IT',
+    'catalog_cache_days': 90,
+    'favorites_user': '',  # vuoto = ND_USER/SUBSONIC_USER; puo' essere sovrascritto nel JSON
     'albums': [],  # [{"artist": "Nome artista", "album": "Nome album"}]
+    'auto_albums': [],  # riempito da --sync-spotify-proxy-config; non sovrascrive albums manuale
 }
+
+AUTO_NAME_TRANSLATION_CONFIG = {
+    'enabled': True,
+    'min_confidence': 0.72,
+    'max_new_per_run': 100,
+    'cache_days': 365,
+    'timeout': 8,
+    'failure_cooldown_hours': 6,
+}
+AUTO_NAME_TRANSLATION_CACHE = None
+AUTO_NAME_TRANSLATION_NEW = 0
+_AUTO_TRANSLATION_CACHE_DIRTY = False
 
 # Prefissi tipo "color yellow": il nome diventa "color - yellow" (piatto, raggruppa
 # in tutti i client). Dal JSON: "PLAYLIST_PREFIXES".
@@ -2444,19 +2549,66 @@ def load_user_config():
                 if not match or not 64 <= int(match.group(1)) <= 320:
                     raise ValueError('SPOTIFY_LOCAL_PROXY.bitrate deve essere tra 64k e 320k')
                 SPOTIFY_LOCAL_PROXY_CONFIG['bitrate'] = bitrate
-            if 'albums' in proxy_cfg:
-                albums = proxy_cfg['albums']
-                if not isinstance(albums, list):
-                    raise ValueError('SPOTIFY_LOCAL_PROXY.albums deve essere una lista')
-                checked = []
-                for i, item in enumerate(albums, 1):
-                    if not isinstance(item, dict):
-                        raise ValueError(f'SPOTIFY_LOCAL_PROXY.albums[{i}] deve contenere artist e album')
-                    artist, album = str(item.get('artist', '')).strip(), str(item.get('album', '')).strip()
-                    if not artist or not album:
-                        raise ValueError(f'SPOTIFY_LOCAL_PROXY.albums[{i}] richiede artist e album non vuoti')
-                    checked.append({'artist': artist, 'album': album})
-                SPOTIFY_LOCAL_PROXY_CONFIG['albums'] = checked
+            for field in ('albums', 'auto_albums'):
+                if field in proxy_cfg:
+                    albums = proxy_cfg[field]
+                    if not isinstance(albums, list):
+                        raise ValueError(f'SPOTIFY_LOCAL_PROXY.{field} deve essere una lista')
+                    checked = []
+                    for i, item in enumerate(albums, 1):
+                        if not isinstance(item, dict):
+                            raise ValueError(f'SPOTIFY_LOCAL_PROXY.{field}[{i}] deve contenere artist e album')
+                        artist, album = str(item.get('artist', '')).strip(), str(item.get('album', '')).strip()
+                        if not artist or not album:
+                            raise ValueError(f'SPOTIFY_LOCAL_PROXY.{field}[{i}] richiede artist e album non vuoti')
+                        checked.append({'artist': artist, 'album': album})
+                    SPOTIFY_LOCAL_PROXY_CONFIG[field] = checked
+            if 'market' in proxy_cfg:
+                market = str(proxy_cfg['market']).strip().upper()
+                if not re.fullmatch(r'[A-Z]{2}', market):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.market deve essere un codice paese ISO a 2 lettere')
+                SPOTIFY_LOCAL_PROXY_CONFIG['market'] = market
+            if 'catalog_cache_days' in proxy_cfg:
+                try:
+                    cache_days = int(proxy_cfg['catalog_cache_days'])
+                except (TypeError, ValueError):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.catalog_cache_days deve essere intero')
+                if not 0 <= cache_days <= 3650:
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.catalog_cache_days deve essere tra 0 e 3650')
+                SPOTIFY_LOCAL_PROXY_CONFIG['catalog_cache_days'] = cache_days
+            if 'favorites_user' in proxy_cfg:
+                favorites_user = str(proxy_cfg['favorites_user'] or '').strip()
+                if any(ch in favorites_user for ch in '\r\n\x00'):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.favorites_user contiene caratteri di controllo')
+                SPOTIFY_LOCAL_PROXY_CONFIG['favorites_user'] = favorites_user
+        translation_cfg = _cfg.get('AUTO_NAME_TRANSLATION', {})
+        if translation_cfg is not None:
+            if not isinstance(translation_cfg, dict):
+                raise ValueError('AUTO_NAME_TRANSLATION deve essere un oggetto JSON')
+            if 'enabled' in translation_cfg:
+                if not isinstance(translation_cfg['enabled'], bool):
+                    raise ValueError('AUTO_NAME_TRANSLATION.enabled deve essere booleano')
+                AUTO_NAME_TRANSLATION_CONFIG['enabled'] = translation_cfg['enabled']
+            if 'min_confidence' in translation_cfg:
+                try:
+                    score = float(translation_cfg['min_confidence'])
+                except (TypeError, ValueError):
+                    raise ValueError('AUTO_NAME_TRANSLATION.min_confidence deve essere numerico')
+                if not 0 <= score <= 1:
+                    raise ValueError('AUTO_NAME_TRANSLATION.min_confidence deve essere tra 0 e 1')
+                AUTO_NAME_TRANSLATION_CONFIG['min_confidence'] = score
+            for field in ('max_new_per_run', 'cache_days', 'timeout', 'failure_cooldown_hours'):
+                if field in translation_cfg:
+                    try:
+                        val = int(translation_cfg[field])
+                    except (TypeError, ValueError):
+                        raise ValueError(f'AUTO_NAME_TRANSLATION.{field} deve essere intero')
+                    low = 1 if field == 'timeout' else 0
+                    high = (86400 if field == 'timeout' else 720 if field == 'failure_cooldown_hours'
+                            else 100000 if field == 'max_new_per_run' else 3650)
+                    if not low <= val <= high:
+                        raise ValueError(f'AUTO_NAME_TRANSLATION.{field} fuori intervallo')
+                    AUTO_NAME_TRANSLATION_CONFIG[field] = val
         PLAYLIST_FOLDERS.update(_cfg.get('PLAYLIST_FOLDERS', {}))
         SKIP_PLAYLISTS.extend(_cfg.get('SKIP_PLAYLISTS', []))
         PLAYLIST_PREFIXES.extend(_cfg.get('PLAYLIST_PREFIXES', []))
@@ -2548,8 +2700,198 @@ def _preferred_name_for_key(key):
 
 
 def _preferred_name(value):
-    """Alias preferito preservando le maiuscole; stringa vuota se non configurato."""
-    return _preferred_name_for_key(norm(value)) if value else ''
+    """NAME_TRANSLATIONS > NAME_FIXES > traduzione automatica sopra soglia > fonetica."""
+    if not value:
+        return ''
+    forced = _preferred_name_for_key(norm(value))
+    if forced:
+        return forced
+    return _auto_translate_name(value)
+
+
+_AUTO_TRANSLATABLE_RE = re.compile(r'[぀-ヿ㐀-鿿豈-﫿\uac00-\ud7af]')
+_AUTO_TRANSLATION_WARNED = False
+# Circuit breaker: se il provider web fallisce, non serializzare timeout per ogni nome CJK.
+_AUTO_TRANSLATION_PROVIDER_FAILED = False
+_AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = 0
+
+
+def _auto_translation_cache_load():
+    """Carica cache traduzioni e cooldown del provider, separata dalle regole curate."""
+    global AUTO_NAME_TRANSLATION_CACHE, _AUTO_TRANSLATION_PROVIDER_FAILED
+    global _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL
+    if AUTO_NAME_TRANSLATION_CACHE is not None:
+        return AUTO_NAME_TRANSLATION_CACHE
+    path = CACHE_DIR / 'auto_name_translations.json'
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if data.get('version') == 1 and isinstance(data.get('items', {}), dict):
+            AUTO_NAME_TRANSLATION_CACHE = data.get('items', {})
+            _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = int(
+                data.get('provider_unavailable_until') or 0)
+            if _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL > int(time.time()):
+                _AUTO_TRANSLATION_PROVIDER_FAILED = True
+        else:
+            AUTO_NAME_TRANSLATION_CACHE = {}
+    except (OSError, ValueError, TypeError):
+        AUTO_NAME_TRANSLATION_CACHE = {}
+    return AUTO_NAME_TRANSLATION_CACHE
+
+
+def _auto_translation_cache_save():
+    global _AUTO_TRANSLATION_CACHE_DIRTY
+    if not _AUTO_TRANSLATION_CACHE_DIRTY:
+        return
+    path = CACHE_DIR / 'auto_name_translations.json'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f'.tmp-{os.getpid()}')
+        payload = {
+            'version': 1,
+            'provider_unavailable_until': int(_AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL or 0),
+            'items': _auto_translation_cache_load(),
+        }
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        os.replace(tmp, path)
+        _AUTO_TRANSLATION_CACHE_DIRTY = False
+    except OSError as e:
+        print(f'[warn] cache traduzioni automatiche non salvata: {e}', file=sys.stderr)
+
+
+def _auto_translation_phonetic(value):
+    """Lettura fonetica grezza: aiuta a scartare output che sono soltanto romanizzazioni."""
+    if _CJK.search(value):
+        return _phonetic_kakasi(value)
+    hangul = globals().get('_HANGUL')
+    romanizer = globals().get('_HANGUL_FN')
+    if hangul is not None and hangul.search(value) and callable(romanizer):
+        try:
+            return norm(romanizer(value))
+        except Exception:
+            return ''
+    return ''
+
+
+def _auto_translation_confidence(source, translated, phonetic=''):
+    """Stima euristica 0..1, NON probabilita' fornita dal provider.
+
+    Il traduttore web non espone una confidence calibrata per nomi brevi. I criteri conservativi
+    richiedono output leggibile in caratteri latini, diverso dalla fonte e dalla lettura fonetica.
+    """
+    translated = str(translated or '').strip()
+    if not translated or len(translated) > 180:
+        return 0.0
+    letters = [c for c in translated if c.isalpha()]
+    if not letters:
+        return 0.0
+    latin = sum('LATIN' in unicodedata.name(c, '') for c in letters)
+    latin_ratio = latin / len(letters)
+    if latin_ratio < 0.85 or _AUTO_TRANSLATABLE_RE.search(translated):
+        return 0.2
+    source_key, translated_key = norm_bare(source), norm_bare(translated)
+    if not translated_key:
+        return 0.0
+    phonetic_key = norm_bare(phonetic)
+    if phonetic_key and difflib.SequenceMatcher(None, translated_key, phonetic_key).ratio() >= 0.88:
+        return 0.58
+    score = 0.64
+    if source_key and translated_key != source_key:
+        score += 0.08
+    if latin_ratio >= 0.98:
+        score += 0.07
+    if 1 <= len(translated_key.split()) <= 10:
+        score += 0.05
+    if len(source_key) <= 1:
+        score = min(score, 0.60)  # un ideogramma isolato e' spesso un nome proprio
+    elif len(translated_key.split()) == 1 and len(source_key) <= 2:
+        score = min(score, 0.70)
+    return round(min(0.92, score), 3)
+
+
+def _google_auto_translate_to_english(value):
+    """Traduzione inglese senza dipendenze; endpoint pubblico non contrattuale/rate-limited."""
+    query = urllib.parse.urlencode({'client': 'gtx', 'sl': 'auto', 'tl': 'en', 'dt': 't', 'q': value})
+    url = 'https://translate.googleapis.com/translate_a/single?' + query
+    timeout = int(AUTO_NAME_TRANSLATION_CONFIG.get('timeout', 8))
+    last_error = None
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 exportify-to-m3u'})
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            segments = payload[0] if isinstance(payload, list) and payload else []
+            translated = ''.join(str(seg[0]) for seg in segments if isinstance(seg, list) and seg and seg[0])
+            translated = re.sub(r'\s+', ' ', translated).strip()
+            if translated:
+                return translated
+            last_error = 'risposta senza testo tradotto'
+        except Exception as e:
+            last_error = f'{type(e).__name__}: {e}'
+        if attempt == 0:
+            time.sleep(0.4)
+    raise RuntimeError(last_error or 'traduzione non riuscita')
+
+
+def _auto_translate_name(value):
+    """Traduzione automatica prudente; provider offline => fonetica senza nuovi timeout."""
+    global AUTO_NAME_TRANSLATION_NEW, _AUTO_TRANSLATION_WARNED, _AUTO_TRANSLATION_CACHE_DIRTY
+    global _AUTO_TRANSLATION_PROVIDER_FAILED, _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL
+    cfg = AUTO_NAME_TRANSLATION_CONFIG
+    if not cfg.get('enabled', True) or not value or not _AUTO_TRANSLATABLE_RE.search(value):
+        return ''
+    key = norm(value)
+    if not key:
+        return ''
+    cache = _auto_translation_cache_load()
+    now = int(time.time())
+    entry = cache.get(key)
+    if isinstance(entry, dict):
+        age = now - int(entry.get('checked_at') or 0)
+        ttl = int(cfg.get('cache_days', 365)) * 86400
+        if age <= ttl:
+            if float(entry.get('confidence') or 0) >= float(cfg.get('min_confidence', 0.72)):
+                return str(entry.get('translation') or '')
+            if entry.get('error') and age < 7 * 86400:
+                return ''
+            if not entry.get('error'):
+                return ''
+    # Le traduzioni gia' in cache si possono usare anche durante il cooldown; non fare
+    # richieste HTTP nuove dopo un fallimento, altrimenti 100 nomi possono serializzare minuti.
+    if _AUTO_TRANSLATION_PROVIDER_FAILED:
+        return ''
+    max_new = int(cfg.get('max_new_per_run', 100))
+    if max_new and AUTO_NAME_TRANSLATION_NEW >= max_new:
+        if not _AUTO_TRANSLATION_WARNED:
+            print(f'[i] limite traduzioni automatiche raggiunto ({max_new}); in questa run uso la fonetica',
+                  file=sys.stderr)
+            _AUTO_TRANSLATION_WARNED = True
+        return ''
+    AUTO_NAME_TRANSLATION_NEW += 1
+    try:
+        translated = _google_auto_translate_to_english(value)
+    except Exception as e:
+        # Circuit breaker persistente: un errore definitivo/rete non deve moltiplicarsi
+        # per ogni nome della libreria. Dopo il cooldown una run futura testa di nuovo il provider.
+        cooldown_hours = max(1, int(cfg.get('failure_cooldown_hours', 6)))
+        _AUTO_TRANSLATION_PROVIDER_FAILED = True
+        _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = now + cooldown_hours * 3600
+        if not _AUTO_TRANSLATION_WARNED:
+            print(f'[warn] traduzione automatica non disponibile ({type(e).__name__}); '
+                  f'uso la fonetica e sospendo le richieste per {cooldown_hours}h',
+                  file=sys.stderr)
+            _AUTO_TRANSLATION_WARNED = True
+        cache[key] = {'source': value, 'translation': '', 'confidence': 0.0,
+                      'provider': 'google-web-heuristic', 'checked_at': now, 'error': str(e)[:160]}
+        _AUTO_TRANSLATION_CACHE_DIRTY = True
+        return ''
+
+    confidence = _auto_translation_confidence(value, translated, _auto_translation_phonetic(value))
+    cache[key] = {'source': value, 'translation': translated, 'confidence': confidence,
+                  'provider': 'google-web-heuristic', 'checked_at': now}
+    _AUTO_TRANSLATION_CACHE_DIRTY = True
+    if confidence >= float(cfg.get('min_confidence', 0.72)):
+        return translated
+    return ''
 
 
 QUALIFIER_WORDS = {
@@ -2810,7 +3152,7 @@ def scan_library(root, rels=None):
     return by_full, by_artist, by_strict, path_qual, n
 
 
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 
 
 def _config_crc():
@@ -3186,7 +3528,7 @@ def _waveform_tiebreak(paths):
     if not _dur_compatible(dur1, dur2, 8.0):
         return None
     fp1, fp2 = _match_fingerprint(str(p1)), _match_fingerprint(str(p2))
-    corr = correlate(fp1, fp2) if fp1 is not None and fp2 is not None else None
+    corr = correlate(fp1, fp2, stop_at=0.95) if fp1 is not None and fp2 is not None else None
     if corr is None or corr < 0.95:
         return None
     # Stessa incisione verificata: scegli il keeper secondo la politica esistente
@@ -4395,7 +4737,7 @@ def run_romaji_tags(dry_run=False, base=None):
 # (path + mtime + dimensione): un file modificato (anche dallo script stesso)
 # viene riletto, gli altri no. Le letture a freddo sono parallele.
 
-PROBE_CACHE = CACHE_DIR / 'probe_cache_v3.json'   # v3: tag dei flussi (opus/ogg) + 'track'
+PROBE_CACHE = CACHE_DIR / 'probe_cache_v3.json'   # tag flussi + track + stato cover embedded opzionale
 for _old in ('probe_cache.json', 'probe_cache_v2.json'):      # formati precedenti
     try:
         (CACHE_DIR / _old).unlink()
@@ -4407,7 +4749,7 @@ PROBE_WORKERS = max(1, int(os.environ.get('EXPORTIFY_PROBE_WORKERS') or min(8, (
 _PROBE_KEEP = {'title', 'artist', 'album', 'albumartist', 'album_artist', 'date',
                'originaldate', 'musicbrainz_albumid', 'musicbrainz_releasegroupid',
                'track', 'tracknumber'}
-_PROBE_MEM = None        # {path: [mtime_ns, size, tags, durata]}
+_PROBE_MEM = None        # {path: [mtime_ns, size, tags, durata, embedded_art_opzionale]}
 _PROBE_DIRTY = False
 
 
@@ -4426,23 +4768,31 @@ def _ffprobe_raw(key):
     try:
         r = subprocess.run(['ffprobe', '-v', 'quiet', '-print_format', 'json',
                             '-show_entries',
-                            'format_tags:format=duration:stream=codec_type:stream_tags', key],
+                            'format_tags:format=duration:stream=codec_type:stream_tags:stream_disposition=attached_pic', key],
                            capture_output=True, text=True, timeout=120)
         d = json.loads(r.stdout or '{}')
         fmt = d.get('format')
         if not isinstance(fmt, dict):
             return None
         tags = {k.lower(): str(v) for k, v in (fmt.get('tags') or {}).items()}
+        streams = d.get('streams') or []
         # .opus/.ogg: i Vorbis comment stanno nei tag del FLUSSO audio, non del formato
         # (prima probe() non leggeva NESSUN tag di questi file e unify li riscriveva ogni
         # notte). Solo il flusso audio: la copertina incorporata ha tag suoi (title...).
-        for st in (d.get('streams') or []):
+        for st in streams:
             if st.get('codec_type') == 'audio':
                 for k, v in (st.get('tags') or {}).items():
                     tags.setdefault(k.lower(), str(v))
                 break
+        # Conserva lo stato se ffprobe ha incluso il campo disposition.attached_pic.
+        # None significa output non compatibile: il caller puo' usare la probe dedicata.
+        disposition_known = any(
+            isinstance(st.get('disposition'), dict) and 'attached_pic' in st['disposition']
+            for st in streams)
+        embedded_art = (any(int((st.get('disposition') or {}).get('attached_pic', 0) or 0) == 1
+                            for st in streams) if disposition_known else None)
         dur = fmt.get('duration')
-        return tags, (float(dur) if dur else None)
+        return tags, (float(dur) if dur else None), embedded_art
     except Exception:
         return None
 
@@ -4453,16 +4803,24 @@ def _probe_entry(path):
     try:
         st = os.stat(key)
     except OSError:
+        # Se una voce gia' caricata punta a un file sparito, eliminala senza forzare
+        # il caricamento della cache su disco. La validita' del dato viene sempre
+        # verificata con stat PRIMA di leggere tag/durata dalla cache.
+        mem = _PROBE_MEM
+        if mem is not None and key in mem:
+            mem.pop(key, None)
+            _PROBE_DIRTY = True
         return None
     mem = _probe_mem()
     ent = mem.get(key)
-    if ent and ent[0] == st.st_mtime_ns and ent[1] == st.st_size:
+    if ent and len(ent) >= 4 and ent[0] == st.st_mtime_ns and ent[1] == st.st_size:
         return ent
     res = _ffprobe_raw(key)
     if res is None:
         return None
-    tags, dur = res
-    ent = [st.st_mtime_ns, st.st_size, {k: v for k, v in tags.items() if k in _PROBE_KEEP}, dur]
+    tags, dur, embedded_art = res
+    ent = [st.st_mtime_ns, st.st_size,
+           {k: v for k, v in tags.items() if k in _PROBE_KEEP}, dur, embedded_art]
     mem[key] = ent
     _PROBE_DIRTY = True
     return ent
@@ -4488,23 +4846,20 @@ def probe_dur(path: Path):
 
 
 def flush_probe_cache():
-    """Salva la cache (atomico). Sicuro mentre i thread di prefetch scrivono:
-    lavora su uno snapshot (list(items) non cede il GIL) e riabbassa il flag
-    PRIMA dello snapshot, cosi' le voci aggiunte durante il salvataggio
-    restano 'sporche' per il flush successivo."""
+    """Salva la cache in modo atomico senza scandire tutti i path con stat/exists.
+
+    Su storage lento, validare ogni voce ad ogni confine di fase costa O(numero file)
+    ed e' risultato il principale hotspot del profilo Tachyon. Una voce obsoleta non puo'
+    essere usata: _probe_entry esegue os.stat prima di accedere ai tag in cache e rimuove
+    lazily la voce se il file non esiste. Snapshot e reset anticipato del flag mantengono
+    il comportamento sicuro mentre i thread di prefetch scrivono.
+    """
     global _PROBE_DIRTY
     if _PROBE_MEM is None or not _PROBE_DIRTY:
         return
     _PROBE_DIRTY = False
     mem = _PROBE_MEM
     snap = list(mem.items())
-    dead = {k for k, _ in snap if not os.path.exists(k)}
-    # se "spariscono" piu' della meta' dei file la libreria e' probabilmente
-    # smontata: non buttare la cache
-    if dead and (len(snap) < 100 or len(dead) <= len(snap) // 2):
-        for k in dead:
-            mem.pop(k, None)
-        snap = [(k, v) for k, v in snap if k not in dead]
     try:
         _write_json_atomic(PROBE_CACHE, dict(snap), ensure_ascii=False, separators=(',', ':'))
     except OSError as e:
@@ -4880,7 +5235,7 @@ def _cluster_by_waveform(files, meta, corr, max_dur, trust_format=False):
                 continue
             if fps[a] is None or fps[b] is None:
                 continue
-            c = correlate(fps[a], fps[b])
+            c = correlate(fps[a], fps[b], stop_at=corr)
             if c is not None and c >= corr:        # None = non confrontabili
                 parent[find(a)] = find(b)
 
@@ -4914,6 +5269,11 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
             print(f"[ERRORE] artista '{artist}' non trovato in {base}")
             return
 
+    # Prepara tutti gli album una volta e fa un solo prefetch. Prima ogni album chiamava
+    # prefetch_probe(), che salvava l'intera cache JSON a ogni gruppo di file nuovi: in una
+    # libreria fredda questo causava scritture ripetute del file cache, crescenti col tempo.
+    album_batches = []
+    all_candidate_files = []
     for art in artists:
         for album in sorted(art.iterdir()):
             if not album.is_dir():
@@ -4921,85 +5281,89 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
             files = _audio_files(album)
             if len(files) < 2:
                 continue
-            prefetch_probe(files, 'dedupe')
+            album_batches.append((art, album, files))
+            all_candidate_files.extend(files)
+    if all_candidate_files:
+        prefetch_probe(all_candidate_files, 'dedupe')
 
-            def handle_group(label, group):
-                """Verifica waveform + eventuale cestinamento di un gruppo
-                di file che condividono il titolo (strict o fuzzy)."""
-                nonlocal n_groups, n_dup, n_distinct, unverifiable, errors
-                n_groups += 1
-                if not _HAS_NP:
+    for art, album, files in album_batches:
+        def handle_group(label, group):
+            """Verifica waveform + eventuale cestinamento di un gruppo
+            di file che condividono il titolo (strict o fuzzy)."""
+            nonlocal n_groups, n_dup, n_distinct, unverifiable, errors
+            n_groups += 1
+            if not _HAS_NP:
+                unverifiable += 1
+                print(f"    [info] {album.name}: titolo '{label}' x{len(group)} "
+                      f"— numpy assente, niente verifica: lascio tutto")
+                return
+            clusters, fps = _cluster_by_waveform(group, meta, corr, max_dur,
+                                                 trust_format=trust_format)
+            multi = [c for c in clusters if len(c) > 1]
+            if not multi:
+                n_distinct += 1
+                if all(fps[f] is None for f in group):
                     unverifiable += 1
                     print(f"    [info] {album.name}: titolo '{label}' x{len(group)} "
-                          f"— numpy assente, niente verifica: lascio tutto")
-                    return
-                clusters, fps = _cluster_by_waveform(group, meta, corr, max_dur,
-                                                     trust_format=trust_format)
-                multi = [c for c in clusters if len(c) > 1]
-                if not multi:
-                    n_distinct += 1
-                    if all(fps[f] is None for f in group):
-                        unverifiable += 1
-                        print(f"    [info] {album.name}: titolo '{label}' x{len(group)} "
-                              f"non verificabile (file <5s o non decodificabili)")
-                    else:
-                        print(f"    [info] {album.name}: titolo '{label}' con "
-                              f"{len(group)} file ma versioni distinte (nessuna copia)")
-                    return
-                for cluster in multi:
-                    cluster = sorted(cluster, key=lambda f: _keeper_score(f, meta[f][0]))
-                    keeper, rest = cluster[0], cluster[1:]
-                    for f in rest:
-                        n_dup += 1
-                        print(f"    {'[dry] ' if not apply else ''}DUPE  {album.name}/"
-                              f"{f.name} (tengo {keeper.name})")
-                        if apply:
-                            try:
-                                _move_to_trash(f, stamp, hard_delete, base)
-                            except Exception as e:
-                                errors += 1
-                                print(f"    ERRORE spostamento {f}: {e}",
-                                      file=sys.stderr)
-
-            # indicizza: strict (parentesi incluse) e fuzzy (parentesi ignorate)
-            meta = {}
-            strict_key, fuzzy_key = {}, {}
-            for f in files:
-                tags, dur = probe_dur(f)
-                meta[f] = (tags, dur)
-                strict_key[f] = norm_bare(best_title(f, tags))
-                fuzzy_key[f] = norm(best_title(f, tags))
-
-            # FASE 1: gruppi STRICT — titoli identici parentesi incluse
-            singles = []
-            by_strict = {}
-            for f in files:
-                by_strict.setdefault(strict_key[f], []).append(f)
-            for label, group in by_strict.items():
-                if len(group) >= 2:
-                    handle_group(label, group)
+                          f"non verificabile (file <5s o non decodificabili)")
                 else:
-                    singles.extend(group)
+                    print(f"    [info] {album.name}: titolo '{label}' con "
+                          f"{len(group)} file ma versioni distinte (nessuna copia)")
+                return
+            for cluster in multi:
+                cluster = sorted(cluster, key=lambda f: _keeper_score(f, meta[f][0]))
+                keeper, rest = cluster[0], cluster[1:]
+                for f in rest:
+                    n_dup += 1
+                    print(f"    {'[dry] ' if not apply else ''}DUPE  {album.name}/"
+                          f"{f.name} (tengo {keeper.name})")
+                    if apply:
+                        try:
+                            _move_to_trash(f, stamp, hard_delete, base)
+                        except Exception as e:
+                            errors += 1
+                            print(f"    ERRORE spostamento {f}: {e}",
+                                  file=sys.stderr)
 
-            # FASE 2: fuzzy SOLO per i singletti — parentesi ignorate.
-            # Gate qualificatori: se alcuni file hanno parole-tipo (mix/live/
-            # karaoke/...) e altri no, NON cestinare nulla automaticamente:
-            # sono versioni diverse della stessa canzone (karaoke vs originale),
-            # meglio un occhio umano. Il waveform da solo non li distingue.
-            by_fuzzy = {}
-            for f in singles:
-                by_fuzzy.setdefault(fuzzy_key[f], []).append(f)
-            for label, group in by_fuzzy.items():
-                if len(group) < 2:
-                    continue
-                qual = {_has_qualifier(strict_key[f]) for f in group}
-                if True in qual and False in qual:
-                    n_review += 1
-                    print(f"    [review] {album.name}: titolo '{label}' con {len(group)} "
-                          f"file e versioni qualificate (mix/live/karaoke/...): "
-                          f"lascio tutto, verifica a orecchio")
-                    continue
+        # indicizza: strict (parentesi incluse) e fuzzy (parentesi ignorate)
+        meta = {}
+        strict_key, fuzzy_key = {}, {}
+        for f in files:
+            tags, dur = probe_dur(f)
+            meta[f] = (tags, dur)
+            strict_key[f] = norm_bare(best_title(f, tags))
+            fuzzy_key[f] = norm(best_title(f, tags))
+
+        # FASE 1: gruppi STRICT — titoli identici parentesi incluse
+        singles = []
+        by_strict = {}
+        for f in files:
+            by_strict.setdefault(strict_key[f], []).append(f)
+        for label, group in by_strict.items():
+            if len(group) >= 2:
                 handle_group(label, group)
+            else:
+                singles.extend(group)
+
+        # FASE 2: fuzzy SOLO per i singletti — parentesi ignorate.
+        # Gate qualificatori: se alcuni file hanno parole-tipo (mix/live/
+        # karaoke/...) e altri no, NON cestinare nulla automaticamente:
+        # sono versioni diverse della stessa canzone (karaoke vs originale),
+        # meglio un occhio umano. Il waveform da solo non li distingue.
+        by_fuzzy = {}
+        for f in singles:
+            by_fuzzy.setdefault(fuzzy_key[f], []).append(f)
+        for label, group in by_fuzzy.items():
+            if len(group) < 2:
+                continue
+            qual = {_has_qualifier(strict_key[f]) for f in group}
+            if True in qual and False in qual:
+                n_review += 1
+                print(f"    [review] {album.name}: titolo '{label}' con {len(group)} "
+                      f"file e versioni qualificate (mix/live/karaoke/...): "
+                      f"lascio tutto, verifica a orecchio")
+                continue
+            handle_group(label, group)
 
     print(f"\ngruppi titolo esaminati: {n_groups} | duplicati nel cestino: {n_dup} "
           f"| versioni distinte: {n_distinct} | da verificare a orecchio: {n_review} "
@@ -5067,6 +5431,7 @@ def run_phase(logname, fn, *args, **kwargs):
         print(f'[ERRORE] fase {logname}: {type(e).__name__}: {e}', file=sys.stderr)
         traceback.print_exc()
     finally:
+        _auto_translation_cache_save()
         flush_probe_cache()
         elapsed = time.perf_counter() - started
         _PHASE_TIMINGS.append((logname, elapsed))
@@ -5431,7 +5796,7 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
             else:
                 fp_m = fingerprint(m)
                 for c in same:
-                    cc = correlate(fp_m, fingerprint(c))
+                    cc = correlate(fp_m, fingerprint(c), stop_at=corr)
                     if cc is not None and cc >= corr:
                         keeper = c
                         break
@@ -5912,8 +6277,11 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
     saved = 0
     stopped = ''
     attempts = 0
-    for p in sorted(base.rglob('*.flac')):
-        if p.name.endswith('.flac.flac') or p.name.endswith('.backup'):
+    cache_updates = 0
+    # _walk_audio usa os.scandir, normalizza estensioni e ignora directory non musicali.
+    flac_files = [base.joinpath(*rel) for rel in _walk_audio(base, {'.flac'})]
+    for p in flac_files:
+        if p.name.casefold().endswith('.flac.flac') or p.name.casefold().endswith('.backup'):
             continue
         try:
             st = p.stat()
@@ -5931,6 +6299,13 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
         ratio = st.st_size / raw if raw else 1.0
         if bps <= 16 and ratio <= FLAC16_MAX_RATIO:
             skipped += 1
+            # Questo risultato e' stabile per path+mtime+size. Prima non veniva memorizzato,
+            # quindi un FLAC gia' efficiente veniva interrogato da ffprobe a ogni esecuzione.
+            if not dry_run:
+                cache[key] = [st.st_mtime, st.st_size]
+                cache_updates += 1
+                if cache_updates % 1000 == 0:
+                    _write_json_atomic(cache_path, cache)
             continue          # gia' ben compresso: non toccare
         tag = f'24->16bit ({bps}bit)' if bps > 16 else f'16bit ricomprimo (ratio {ratio:.2f})'
         if dry_run:
@@ -5993,14 +6368,39 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
                 _write_json_atomic(cache_path, cache)
 
     removed = 0
-    for b in base.rglob('*.backup'):          # residui di esecuzioni interrotte
-        if b.with_name(b.name[:-len('.backup')]).exists():
+    # Ricerca backup con una sola visita del filesystem. In dry-run non cancellare e non
+    # scrivere la cache: il flag deve essere senza effetti collaterali anche su file ausiliari.
+    base_abs = os.path.abspath(base)
+    for root_dir, _dirs, names in os.walk(base):
+        for name in names:
+            if not name.endswith('.backup'):
+                continue
+            b = Path(root_dir) / name
+            original = b.with_name(b.name[:-len('.backup')])
+            if not original.exists():
+                continue  # possibile recupero dopo interruzione: conservare il solo backup
+            if dry_run:
+                print(f'[dry] RIMUOVEREI backup ridondante: {b}')
+                continue
             try:
                 b.unlink()
                 removed += 1
-            except Exception:
-                pass
-    _write_json_atomic(cache_path, cache)
+            except OSError as e:
+                print(f'[warn] backup non rimosso {b}: {e}', file=sys.stderr)
+    # Elimina dal cache le voci obsolete sotto la radice corrente, evitando crescita indefinita.
+    if not dry_run:
+        live_keys = {str(p) for p in flac_files
+                     if not p.name.casefold().endswith('.flac.flac')}
+        stale = []
+        for cached_path in cache:
+            try:
+                if os.path.commonpath([base_abs, os.path.abspath(cached_path)]) == base_abs and cached_path not in live_keys:
+                    stale.append(cached_path)
+            except (ValueError, OSError):
+                continue
+        for cached_path in stale:
+            cache.pop(cached_path, None)
+        _write_json_atomic(cache_path, cache)
     if stopped:
         print(f'[STOP] fase interrotta: {stopped}. Libera spazio e rilancia.', file=sys.stderr)
     print(f'convertiti: {converted} | saltati (cache o gia ok): {skipped} | '
@@ -6227,10 +6627,11 @@ def _load_navidrome_env_file():
                 if not m:
                     continue
                 key, value = m.groups()
-                if not (key in {'ND_URL', 'ND_USER', 'ND_DEFAULT_USER', 'ND_PASS',
+                if not (key in {'ND_URL', 'ND_USER', 'ND_DEFAULT_USER', 'ND_FAVORITES_USER', 'ND_PASS',
                                 'LIDARR_URL', 'LIDARR_API_KEY', 'LIDARR_MUSIC_ROOT',
                                 'LIDARR_CONTAINER_ROOT', 'SLKSD_IMPORT_FOLDER',
-                                'SLKSD_FAILED_FOLDER', 'LISTENBRAINZ_TOKEN'} or
+                                'SLKSD_FAILED_FOLDER', 'LISTENBRAINZ_TOKEN',
+                                'SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_MARKET'} or
                         re.fullmatch(r'ND_PASS_[A-Za-z0-9_]+', key)):
                     continue
                 value = value.strip()
@@ -7568,43 +7969,72 @@ def fingerprint(path: Path, seconds=25, rate=11025):
         return None
 
 
-def _shift_corr(x, y, n, s, min_len):
-    """Correlazione con y slittata di s campioni rispetto a x."""
+def _shift_corr(x, y, n, s, min_len, x_sq_cum=None, y_sq_cum=None):
+    """Correlazione normalizzata di finestre traslate.
+
+    Le somme cumulative dei quadrati permettono di ottenere le norme delle finestre in O(1),
+    invece di rileggere entrambi i vettori per ogni offset. Il prodotto scalare resta esatto.
+    """
     if s >= 0:
         u, v = x[:n - s], y[s:]
+        if x_sq_cum is not None and y_sq_cum is not None:
+            nx2 = x_sq_cum[n - s] - x_sq_cum[0]
+            ny2 = y_sq_cum[n] - y_sq_cum[s]
     else:
         u, v = x[-s:], y[:n + s]
+        if x_sq_cum is not None and y_sq_cum is not None:
+            nx2 = x_sq_cum[n] - x_sq_cum[-s]
+            ny2 = y_sq_cum[n + s] - y_sq_cum[0]
     if len(u) < min_len:
         return None
-    # abs: una copia a polarita' invertita (capita in alcune masterizzazioni)
-    # e' identica al 100% ma correlerebbe a -1 senza il modulo
-    return abs(float(np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v) + 1e-9)))
+    if x_sq_cum is None or y_sq_cum is None:
+        denom = np.linalg.norm(u) * np.linalg.norm(v) + 1e-9
+    else:
+        denom = np.sqrt(max(0.0, float(nx2))) * np.sqrt(max(0.0, float(ny2))) + 1e-9
+    # abs: una copia a polarita' invertita e' identica al 100%.
+    return abs(float(np.dot(u, v) / denom))
 
 
-def _aligned_corr(x, y, n, rate):
-    """Due passaggi di ricerca offset (±1s a 0.1s, poi ±0.1s a 5ms intorno al
-    migliore). Il passaggio fine include SEMPRE esplicitamente s0 e 0: le
-    griglie a passo fisso non garantiscono di campionare lo zero esatto
-    (rate//10 non divide rate), e per segnali tonali perdere lo zero e'
-    catastrofico."""
+def _aligned_corr(x, y, n, rate, stop_at=None):
+    """Cerca l'offset con due griglie; le norme per ogni finestra sono O(1).
+
+    In modalita' soglia controlla offset zero per primo: e' il caso comune per copie
+    della stessa incisione e puo' evitare l'intera scansione grossolana. Il percorso
+    completo continua a calcolare lo stesso massimo sulla griglia gia' usata prima.
+    """
     step_c = rate // 10
     step_f = max(1, rate // 200)
-    best, s0 = 0.0, 0
-    for s in range(-rate, rate + 1, step_c):
-        c = _shift_corr(x, y, n, s, rate * 5)
+    x_sq_cum = np.concatenate(([0.0], np.cumsum(x * x, dtype=np.float64)))
+    y_sq_cum = np.concatenate(([0.0], np.cumsum(y * y, dtype=np.float64)))
+
+    c0 = _shift_corr(x, y, n, 0, rate * 5, x_sq_cum, y_sq_cum)
+    best, s0 = (c0 or 0.0), 0
+    if stop_at is not None and best >= stop_at:
+        return best
+
+    # Prima gli offset vicini, per trovare prima eventuali copie con piccolo delay.
+    coarse_offsets = sorted(range(-rate, rate + 1, step_c), key=lambda off: (abs(off), off))
+    for s in coarse_offsets:
+        if s == 0:  # Gia' verificato sopra.
+            continue
+        c = _shift_corr(x, y, n, s, rate * 5, x_sq_cum, y_sq_cum)
         if c is not None and c > best:
             best, s0 = c, s
+            if stop_at is not None and best >= stop_at:
+                return best
     cand = set(range(s0 - step_c, s0 + step_c + 1, step_f))
-    cand |= {s0, 0}
-    for s in cand:
-        c = _shift_corr(x, y, n, s, rate * 5)
+    cand.add(s0)
+    cand.discard(0)  # Gia' verificato sopra.
+    for s in sorted(cand):
+        c = _shift_corr(x, y, n, s, rate * 5, x_sq_cum, y_sq_cum)
         if c is not None and c > best:
             best = c
+            if stop_at is not None and best >= stop_at:
+                return best
     return best
 
-
-def correlate(x, y, rate=11025):
-    """Massima correlazione di Pearson. Gestisce:
+def correlate(x, y, rate=11025, stop_at=None):
+    """Massima correlazione di Pearson, o early-exit se stop_at basta a decidere.
     - offset temporale (due passaggi, fino a 5ms di precisione: copre il
       delay di codifica MP3 ~26ms e i pregaps)
     - velocita' diversa: se i due file girano a velocita' leggermente
@@ -7622,7 +8052,9 @@ def correlate(x, y, rate=11025):
     y -= y.mean()
     if np.linalg.norm(x) == 0 or np.linalg.norm(y) == 0:
         return None
-    best = _aligned_corr(x, y, n, rate)
+    best = _aligned_corr(x, y, n, rate, stop_at=stop_at)
+    if stop_at is not None and best >= stop_at:
+        return best
     if best >= 0.98:
         return best
     # ricerca velocita' a due risoluzioni: y[i] ~ x[i*r] per qualche r vicino a 1.
@@ -7633,18 +8065,22 @@ def correlate(x, y, rate=11025):
         if m < rate * 5:
             continue
         yy = np.interp(np.arange(m) * r, np.arange(len(y)), y)
-        c = _aligned_corr(x[:m], yy, m, rate)
+        c = _aligned_corr(x[:m], yy, m, rate, stop_at=stop_at)
         if c > best:
             best, best_r = c, r
+        if stop_at is not None and best >= stop_at:
+            return best
     if best < 0.95 and best_r is not None:
         for r in np.arange(best_r - 0.005, best_r + 0.0051, 0.001):
             m = min(n, int(len(y) / r) - 1)
             if m < rate * 5:
                 continue
             yy = np.interp(np.arange(m) * r, np.arange(len(y)), y)
-            c = _aligned_corr(x[:m], yy, m, rate)
+            c = _aligned_corr(x[:m], yy, m, rate, stop_at=stop_at)
             if c > best:
                 best = c
+            if stop_at is not None and best >= stop_at:
+                return best
     return best
 
 
@@ -7659,7 +8095,7 @@ def _dur_compatible(dk, df, max_diff=10.0) -> bool:
 
 
 def same_recording(x, y, rate=11025, threshold=0.95) -> bool:
-    c = correlate(x, y, rate)
+    c = correlate(x, y, rate, stop_at=threshold)
     return c is not None and c >= threshold
 
 
@@ -7936,9 +8372,13 @@ def _album_art_directory(track_path):
     return directory if len(rel.parts) >= 2 else None
 
 
-def _has_local_album_art(album_dir, album_title=''):
-    """True se la cartella possiede già una cover con nome convenzionale/di album."""
+def _has_local_album_art(album_dir, album_title='', artwork_stems_by_dir=None):
+    """True se la cartella possiede cover; riusa i nomi raccolti dalla scansione se forniti."""
     known = _ARTWORK_KNOWN_STEMS | ({norm_bare(album_title)} if album_title else set())
+    if artwork_stems_by_dir is not None:
+        # run_missing_album_artwork ha gia' raccolto i filename in un'unica passeggiata;
+        # evita una scandir separata per ciascuno dei ~1.300 album.
+        return bool(known.intersection(artwork_stems_by_dir.get(Path(album_dir), ())))
     try:
         for child in album_dir.iterdir():
             if child.is_file() and child.suffix.lower() in _ARTWORK_EXTS:
@@ -7950,7 +8390,14 @@ def _has_local_album_art(album_dir, album_title=''):
 
 
 def _embedded_art_state(track_path, timeout=10):
-    """True/False se ffprobe rileva una cover embedded; None se non è possibile verificarla."""
+    """Stato cover embedded dalla cache ffprobe; migra i record vecchi con una probe dedicata."""
+    global _PROBE_DIRTY
+    ent = _probe_entry(track_path)
+    if ent is None:
+        return None
+    if len(ent) >= 5 and ent[4] in (True, False):
+        return bool(ent[4])
+    # Cache v3 preesistente: fa una sola probe dedicata, poi conserva il risultato nell'entry.
     try:
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-select_streams', 'v',
@@ -7960,8 +8407,14 @@ def _embedded_art_state(track_path, timeout=10):
         if result.returncode != 0:
             return None
         data = json.loads(result.stdout or '{}')
-        return any(int((stream.get('disposition') or {}).get('attached_pic', 0) or 0) == 1
-                   for stream in data.get('streams', []))
+        state = any(int((stream.get('disposition') or {}).get('attached_pic', 0) or 0) == 1
+                    for stream in data.get('streams', []))
+        if len(ent) < 5:
+            ent.append(bool(state))
+        else:
+            ent[4] = bool(state)
+        _PROBE_DIRTY = True
+        return bool(state)
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
         return None
 
@@ -8101,14 +8554,38 @@ def _read_artwork_image(url, timeout, min_bytes, max_bytes):
 
 
 def _load_artwork_album_groups():
-    """Gruppi filesystem album->tracce, senza interrogare ffprobe su tutti i file audio."""
+    """Raccoglie tracce e nomi cover in un'unica scansione delle cartelle."""
     groups = {}
-    for rel in _walk_audio(LIBRARY_ROOT, INDEX_EXT):
-        track = LIBRARY_ROOT.joinpath(*rel)
-        album_dir = _album_art_directory(track)
-        if album_dir is not None:
-            groups.setdefault(album_dir, []).append(track)
-    return groups
+    art_stems_by_dir = {}
+    root = Path(LIBRARY_ROOT)
+    stack = [root]
+    exts = INDEX_EXT
+    while stack:
+        base = stack.pop()
+        try:
+            with os.scandir(base) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for entry in entries:
+            name = entry.name
+            if name.lower() in _SKIP_DIRS:
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+                    continue
+                suffix = os.path.splitext(name)[1].lower()
+                if suffix in _ARTWORK_EXTS and entry.is_file():
+                    art_stems_by_dir.setdefault(base, set()).add(norm_bare(os.path.splitext(name)[0]))
+                if suffix in exts and entry.is_file():
+                    track = Path(entry.path)
+                    album_dir = _album_art_directory(track)
+                    if album_dir is not None:
+                        groups.setdefault(album_dir, []).append(track)
+            except OSError:
+                continue
+    return groups, art_stems_by_dir
 
 
 def run_missing_album_artwork(dry_run=False):
@@ -8126,7 +8603,7 @@ def run_missing_album_artwork(dry_run=False):
         print(f'[warn] directory libreria non accessibile per artwork: {LIBRARY_ROOT}', file=sys.stderr)
         return {'downloaded': 0, 'missing': 0, 'attempted': 0}
 
-    groups = _load_artwork_album_groups()
+    groups, artwork_stems_by_dir = _load_artwork_album_groups()
     cache = _artwork_cache_load()
     negative = cache.setdefault('not_found', {})
     now = int(time.time())
@@ -8136,7 +8613,7 @@ def run_missing_album_artwork(dry_run=False):
     embedded_unknown = 0
 
     for album_dir, tracks in sorted(groups.items(), key=lambda item: str(item[0]).casefold()):
-        if not tracks or _has_local_album_art(album_dir, album_dir.name):
+        if not tracks or _has_local_album_art(album_dir, album_dir.name, artwork_stems_by_dir):
             continue
         tags = probe(tracks[0])
         album_name = (tags.get('album') or '').strip() or album_dir.name
@@ -8155,22 +8632,33 @@ def run_missing_album_artwork(dry_run=False):
             print(f'[artwork] salto cartella con piu album taggati: {album_dir}', file=sys.stderr)
             continue
 
+        key = _artwork_cache_key(artist_name, album_name)
+        until = int(negative.get(key, 0) or 0)
+        if until > now:
+            # Il servizio remoto aveva gia' risposto che non esiste una cover valida.
+            # Non serve lanciare fino a tre ffprobe solo per arrivare poi allo stesso skip.
+            negative_skipped += 1
+            continue
+        if until:
+            negative.pop(key, None)
+
         if cfg.get('check_embedded_art', True):
-            states = [_embedded_art_state(track, timeout=min(timeout, 10)) for track in tracks[:3]]
-            if any(state is True for state in states):
+            # Non lanciare tre ffprobe in ogni album: fermarsi appena la prima traccia
+            # conferma una cover embedded. Stato cacheato anche per i run successivi.
+            states = []
+            embedded_found = False
+            for track in tracks[:3]:
+                state = _embedded_art_state(track, timeout=min(timeout, 10))
+                states.append(state)
+                if state is True:
+                    embedded_found = True
+                    break
+            if embedded_found:
                 continue
             if states and all(state is None for state in states):
                 print(f'[artwork] cover non controllabile (ffprobe): {album_dir}', file=sys.stderr)
                 embedded_unknown += 1
                 continue
-
-        key = _artwork_cache_key(artist_name, album_name)
-        until = int(negative.get(key, 0) or 0)
-        if until > now:
-            negative_skipped += 1
-            continue
-        if until:
-            negative.pop(key, None)
         tags_mbid = str(tags.get('musicbrainz_albumid') or '').strip()
         nfo_mbid = (_nfo_field(album_dir, 'musicbrainzalbumid') or
                     _nfo_field(album_dir, 'MusicBrainzAlbumID')).strip()
@@ -8292,8 +8780,18 @@ def main():
                     help='stampa il changelog completo incorporato nello script ed esce')
     ap.add_argument('csv', nargs='*', help='CSV specifici (default: tutti in EXPORTIFY_DIR)')
     ap.add_argument('--build-spotify-proxies', action='store_true',
-                    help='genera MP3 proxy compatti (bitrate predefinito 64k) per Spotify Local Files; '
-                         'album da SPOTIFY_LOCAL_PROXY.albums')
+                    help='genera MP3 proxy compatti (64k default) e aggiorna manifest/preferiti Navidrome')
+    ap.add_argument('--sync-proxy-favorites', action='store_true',
+                    help='ricalcola liked.m3u dai brani preferiti di Navidrome; preview predefinita, --apply scrive')
+    ap.add_argument('--sync-spotify-proxy-config', action='store_true',
+                    help='confronta gli album della libreria con il catalogo Spotify; dry-run predefinito, '
+                         '--apply aggiorna solo SPOTIFY_LOCAL_PROXY.auto_albums')
+    ap.add_argument('--proxy-limit', type=int, default=0, metavar='N',
+                    help='limita a N album nuovi da interrogare per --sync-spotify-proxy-config; 0 = tutti')
+    ap.add_argument('--proxy-force-refresh', action='store_true',
+                    help='ignora la cache Spotify e ripete le query catalogo')
+    ap.add_argument('--proxy-report', metavar='FILE',
+                    help='percorso report per --sync-spotify-proxy-config (default: logs/...)')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-artwork-download', action='store_true',
                     help='salta la ricerca e il download automatico delle copertine album mancanti')
@@ -8418,7 +8916,7 @@ def main():
     ap.add_argument('--lidarr-url', metavar='URL',
                     help='override per le utility Lidarr (default LIDARR_URL nell’ambiente/.env)')
     ap.add_argument('--library-root', metavar='PATH',
-                    help='override root della libreria per --fix-flac-safe e --lidarr-folder-fix')
+                    help='override root della libreria per --fix-flac-safe, utility Lidarr e proxy Spotify')
     ap.add_argument('--lidarr-container-root', metavar='PATH',
                     help='prefisso path visto da Lidarr (default /music o LIDARR_CONTAINER_ROOT)')
     ap.add_argument('--slskd-import-folder', metavar='PATH',
@@ -8670,13 +9168,777 @@ def _spotify_proxy_title(path, tags):
     return title or Path(path).stem
 
 
+_SPOTIFY_CATALOG_TOKEN = None
+_SPOTIFY_CATALOG_TOKEN_UNTIL = 0
+
+
+def _spotify_proxy_items():
+    """Unisce i criteri manuali e automatici, mantenendo prioritari quelli manuali."""
+    out, seen = [], set()
+    for field in ('albums', 'auto_albums'):
+        for item in SPOTIFY_LOCAL_PROXY_CONFIG.get(field, []) or []:
+            artist, album = str(item.get('artist') or '').strip(), str(item.get('album') or '').strip()
+            key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(album))
+            if artist and album and key not in seen:
+                seen.add(key)
+                out.append({'artist': artist, 'album': album, '_source': field})
+    return out
+
+
+def _spotify_catalog_cache_path():
+    return CACHE_DIR / 'spotify_album_catalog_cache.json'
+
+
+def _spotify_catalog_cache_load():
+    try:
+        data = json.loads(_spotify_catalog_cache_path().read_text(encoding='utf-8'))
+        if data.get('version') == 1 and isinstance(data.get('items'), dict):
+            return data['items']
+    except (OSError, ValueError, TypeError):
+        pass
+    return {}
+
+
+def _spotify_catalog_cache_save(cache):
+    path = _spotify_catalog_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f'.tmp-{os.getpid()}')
+        tmp.write_text(json.dumps({'version': 1, 'items': cache}, ensure_ascii=False,
+                                  separators=(',', ':')), encoding='utf-8')
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f'[warn] cache catalogo Spotify non salvata: {e}', file=sys.stderr)
+
+
+def _spotify_catalog_token():
+    """OAuth client-credentials token per Search API; credenziali solo da ambiente/.env."""
+    global _SPOTIFY_CATALOG_TOKEN, _SPOTIFY_CATALOG_TOKEN_UNTIL
+    if _SPOTIFY_CATALOG_TOKEN and time.time() < _SPOTIFY_CATALOG_TOKEN_UNTIL - 30:
+        return _SPOTIFY_CATALOG_TOKEN
+    client_id = os.environ.get('SPOTIFY_CLIENT_ID', '').strip()
+    client_secret = os.environ.get('SPOTIFY_CLIENT_SECRET', '').strip()
+    if not client_id or not client_secret:
+        raise RuntimeError('mancano SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET nel .env o nell ambiente')
+    basic = base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode('ascii')
+    req = urllib.request.Request(
+        'https://accounts.spotify.com/api/token',
+        data=urllib.parse.urlencode({'grant_type': 'client_credentials'}).encode('ascii'),
+        headers={'Authorization': 'Basic ' + basic,
+                 'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', 'replace')[:240]
+        if 'premium' in detail.casefold() and ('required' in detail.casefold() or 'active' in detail.casefold()):
+            raise RuntimeError('Spotify richiede un abbonamento Premium attivo al proprietario dell’app '
+                               'per le app in Development Mode (regole 2026); nessun JSON aggiornato. '
+                               'Un catalogo interamente in cache può essere esaminato offline.') from e
+        raise RuntimeError(f'Spotify OAuth HTTP {e.code}: {detail}') from e
+    if not data.get('access_token'):
+        raise RuntimeError(f'Spotify OAuth senza access_token: {str(data)[:200]}')
+    _SPOTIFY_CATALOG_TOKEN = data['access_token']
+    _SPOTIFY_CATALOG_TOKEN_UNTIL = time.time() + int(data.get('expires_in') or 3600)
+    return _SPOTIFY_CATALOG_TOKEN
+
+
+def _spotify_catalog_search(query, market, token):
+    url = 'https://api.spotify.com/v1/search?' + urllib.parse.urlencode({
+        'q': query, 'type': 'album', 'market': market, 'limit': 10, 'offset': 0,
+    })
+    last_error = None
+    for attempt in range(5):
+        req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token,
+                                                   'User-Agent': f'exportify-to-m3u/{VERSION}'})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            items = payload.get('albums', {}).get('items', []) or []
+            time.sleep(0.2)  # evitare burst di richieste al catalogo nei primi scan
+            return items
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and attempt == 0:
+                global _SPOTIFY_CATALOG_TOKEN, _SPOTIFY_CATALOG_TOKEN_UNTIL
+                _SPOTIFY_CATALOG_TOKEN = None
+                _SPOTIFY_CATALOG_TOKEN_UNTIL = 0
+                token = _spotify_catalog_token()
+                last_error = 'token scaduto, rinnovato'
+            elif e.code == 429:
+                try:
+                    wait = int(e.headers.get('Retry-After') or 2)
+                except (TypeError, ValueError):
+                    wait = 2
+                if wait > 120:
+                    raise RuntimeError(f'Spotify rate limit: Retry-After={wait}s, fermo per prudenza') from e
+                time.sleep(max(1, wait))
+                last_error = f'HTTP 429, atteso {wait}s'
+            elif e.code in (500, 502, 503, 504):
+                last_error = f'HTTP {e.code}'
+                if attempt < 4:
+                    time.sleep(2 ** attempt)
+            else:
+                detail = e.read().decode('utf-8', 'replace')[:240]
+                if 'premium' in detail.casefold() and ('required' in detail.casefold() or 'active' in detail.casefold()):
+                    raise RuntimeError('Spotify richiede un abbonamento Premium attivo al proprietario dell’app '
+                                       'per le app in Development Mode (regole 2026); nessun JSON aggiornato. '
+                                       'Un catalogo interamente in cache può essere esaminato offline.') from e
+                raise RuntimeError(f'Spotify Search API HTTP {e.code}: {detail}') from e
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            last_error = f'{type(e).__name__}: {e}'
+            if attempt < 4:
+                time.sleep(2 ** attempt)
+    raise RuntimeError(f'Spotify Search API non disponibile dopo i retry: {last_error}')
+
+
+def _proxy_similarity(left, right):
+    left, right = _spotify_proxy_norm(left), _spotify_proxy_norm(right)
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    seq = difflib.SequenceMatcher(None, left, right).ratio()
+    lt, rt = set(left.split()), set(right.split())
+    token = len(lt & rt) / max(len(lt), len(rt)) if lt and rt else 0.0
+    return max(seq, token)
+
+
+def _proxy_query_variants(artist, album):
+    """Query originali e al massimo una query con alias/romanizzazione/traduzione nota."""
+    raw = (artist, album)
+    variants = [raw]
+    alts = []
+    for value in raw:
+        preferred = _preferred_name(value)
+        if not preferred:
+            preferred = _auto_translation_phonetic(value)
+        alts.append(preferred or value)
+    if tuple(alts) != raw:
+        variants.append(tuple(alts))
+    # Search is tolerant but the third, unquoted query catches localized / mixed-script cases.
+    if len(variants) == 1:
+        roman = tuple(_auto_translation_phonetic(x) or x for x in raw)
+        if roman != raw:
+            variants.append(roman)
+    queries, seen = [], set()
+    for a, b in variants:
+        q = f'artist:"{a}" album:"{b}"'
+        if q not in seen:
+            seen.add(q)
+            queries.append(q)
+    loose = f'{artist} {album}'.strip()
+    if loose and loose not in seen:
+        queries.append(loose)
+    return queries[:3]
+
+
+def _score_spotify_album_candidate(artist, album, item):
+    target_artist_keys = _spotify_proxy_artist_keys(artist)
+    # Prefer English/official/local aliases and the phonetic fallback for album names.
+    target_album_keys = {_spotify_proxy_norm(album)}
+    preferred = _preferred_name(album)
+    if preferred:
+        target_album_keys.add(_spotify_proxy_norm(preferred))
+    roman = _auto_translation_phonetic(album)
+    if roman:
+        target_album_keys.add(_spotify_proxy_norm(roman))
+    candidate_artists = [str(a.get('name') or '') for a in item.get('artists', [])]
+    artist_score = max((_proxy_similarity(a, k) for a in candidate_artists
+                        for k in target_artist_keys), default=0.0)
+    album_score = max((_proxy_similarity(item.get('name', ''), k) for k in target_album_keys), default=0.0)
+    combined = 0.58 * album_score + 0.42 * artist_score
+    external_url = (item.get('external_urls') or {}).get('spotify', '')
+    return {
+        'name': str(item.get('name') or ''), 'artists': candidate_artists,
+        'album_score': round(album_score, 3), 'artist_score': round(artist_score, 3),
+        'score': round(combined, 3), 'release_date': str(item.get('release_date') or ''),
+        'url': external_url,
+    }
+
+
+def _classify_spotify_candidates(candidates):
+    """Solo match forti = presente; vicini incerti = review, mai auto-proxy."""
+    candidates.sort(key=lambda x: (x['score'], x['album_score'], x['artist_score']), reverse=True)
+    if not candidates:
+        return 'not_found', []
+    if any((c['album_score'] >= 0.92 and c['artist_score'] >= 0.82) or
+           (c['album_score'] >= 0.97 and c['artist_score'] >= 0.72) for c in candidates):
+        return 'found', candidates[:3]
+    if any(c['album_score'] >= 0.72 and c['artist_score'] >= 0.48 for c in candidates):
+        return 'review', candidates[:5]
+    # Un album dal titolo quasi identico ma con artista molto diverso merita verifica manuale.
+    if any(c['album_score'] >= 0.88 for c in candidates):
+        return 'review', candidates[:5]
+    return 'not_found', candidates[:3]
+
+
+def _scan_library_album_folders(root):
+    """Un record per cartella artista/album, contando i file audio senza leggere ogni tag."""
+    rels = _walk_audio(root, INDEX_EXT)
+    albums = {}
+    for rel in rels:
+        if len(rel) < 2:
+            continue
+        artist = str(rel[0]).strip()
+        album = str(_spotify_proxy_rel_album(rel) or '').strip()
+        if not artist or not album or artist.startswith('.'):
+            continue
+        key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(album))
+        if not key[0] or not key[1]:
+            continue
+        row = albums.setdefault(key, {'artist': artist, 'album': album, 'tracks': 0})
+        row['tracks'] += 1
+    return [albums[k] for k in sorted(albums)]
+
+
+def _atomic_write_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f'.tmp-{os.getpid()}')
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    os.replace(tmp, path)
+
+
+def run_sync_spotify_proxy_config(dry_run=True, apply=False, library_root=None,
+                                  limit=0, force_refresh=False, report_path=None):
+    """Confronta gli album disco con Spotify Search e propone/aggiorna auto_albums.
+
+    Nessuna modifica al JSON live senza apply=True. Se anche un solo controllo fallisce, non
+    sostituisce l'elenco automatico: un timeout non deve sembrare una prova di assenza dal catalogo.
+    """
+    if not SPOTIFY_LOCAL_PROXY_CONFIG.get('enabled', True):
+        print('[ERRORE] SPOTIFY_LOCAL_PROXY.enabled=false: scansione annullata')
+        return {'errors': 1}
+    root = Path(library_root or LIBRARY_ROOT).expanduser().resolve()
+    if not root.is_dir():
+        print(f'[ERRORE] root della libreria non accessibile: {root}', file=sys.stderr)
+        return {'errors': 1}
+    albums = _scan_library_album_folders(root)
+    if not albums:
+        print(f'[ERRORE] nessun album audio trovato sotto {root}', file=sys.stderr)
+        return {'errors': 1}
+
+    cfg_path = _USER_CFG
+    try:
+        config_existed = cfg_path.exists()
+        original_bytes = cfg_path.read_bytes() if config_existed else None
+        original_config = json.loads(original_bytes.decode('utf-8')) if original_bytes is not None else {}
+        original_config_digest = (hashlib.sha256(original_bytes).hexdigest()
+                                  if original_bytes is not None else None)
+    except Exception as e:
+        print(f'[ERRORE] impossibile leggere {cfg_path}: {e}', file=sys.stderr)
+        return {'errors': 1}
+
+    def config_unchanged_since_scan_start():
+        """Evita di sovrascrivere modifiche manuali fatte mentre lo scan era in corso."""
+        try:
+            exists_now = cfg_path.exists()
+            if exists_now != config_existed:
+                return False
+            if not exists_now:
+                return True
+            return hashlib.sha256(cfg_path.read_bytes()).hexdigest() == original_config_digest
+        except OSError:
+            return False
+
+    proxy_json = original_config.setdefault('SPOTIFY_LOCAL_PROXY', {})
+    if not isinstance(proxy_json, dict):
+        print('[ERRORE] SPOTIFY_LOCAL_PROXY nel JSON non e\' un oggetto', file=sys.stderr)
+        return {'errors': 1}
+
+    market = str(os.environ.get('SPOTIFY_MARKET') or proxy_json.get('market') or 'IT').upper()
+    if not re.fullmatch(r'[A-Z]{2}', market):
+        print(f'[ERRORE] market Spotify non valido: {market!r}', file=sys.stderr)
+        return {'errors': 1}
+    try:
+        cache_days = int(proxy_json.get('catalog_cache_days', 90))
+    except (TypeError, ValueError):
+        print('[ERRORE] SPOTIFY_LOCAL_PROXY.catalog_cache_days deve essere un intero', file=sys.stderr)
+        return {'errors': 1}
+    if not 0 <= cache_days <= 3650:
+        print('[ERRORE] SPOTIFY_LOCAL_PROXY.catalog_cache_days deve essere tra 0 e 3650', file=sys.stderr)
+        return {'errors': 1}
+    ttl = cache_days * 86400
+    cache = _spotify_catalog_cache_load()
+    now = int(time.time())
+
+    def cache_is_fresh(entry):
+        if ttl <= 0 or not isinstance(entry, dict):
+            return False
+        try:
+            checked_at = int(entry.get('checked_at') or 0)
+        except (TypeError, ValueError):
+            return False
+        return checked_at > 0 and now - checked_at <= ttl
+    manual = list(proxy_json.get('albums') or [])
+    previous_auto = list(proxy_json.get('auto_albums') or [])
+    manual_keys = {(_spotify_proxy_norm(x.get('artist')), _spotify_proxy_norm(x.get('album')))
+                   for x in manual if isinstance(x, dict)}
+    manual_keys.discard(('', ''))
+    # Fail early, rather than printing one error per album, if this scan needs uncached API data
+    # but OAuth credentials are missing. A complete cache can still be reviewed offline.
+    needs_query = []
+    for row in albums:
+        key = (_spotify_proxy_norm(row['artist']), _spotify_proxy_norm(row['album']))
+        if key in manual_keys:
+            continue
+        ident = hashlib.sha256((market + '\0' + key[0] + '\0' + key[1]).encode()).hexdigest()
+        entry = None if force_refresh else cache.get(ident)
+        if (not cache_is_fresh(entry) or
+                entry.get('status') not in {'found', 'review', 'not_found'}):
+            needs_query.append(row)
+    if limit:
+        needs_query = needs_query[:limit]
+    if needs_query and (not os.environ.get('SPOTIFY_CLIENT_ID') or not os.environ.get('SPOTIFY_CLIENT_SECRET')):
+        print('[ERRORE] la scansione richiede nuove query Spotify ma mancano SPOTIFY_CLIENT_ID e/o '
+              'SPOTIFY_CLIENT_SECRET nel .env. Nessun JSON modificato.', file=sys.stderr)
+        print(f'[i] {len(needs_query)} album richiedono una query non presente in cache.', file=sys.stderr)
+        return {'errors': 1}
+
+    print(f'[i] confronto {len(albums)} album della libreria con Spotify, mercato {market}')
+    # Avoid acquiring credentials for a fully cached offline review; acquire on first cache miss.
+    token = None
+    records, errors, checked = [], 0, 0
+    uncached_checked = 0
+    for idx, album_row in enumerate(albums, 1):
+        artist, album = album_row['artist'], album_row['album']
+        key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(album))
+        identity = hashlib.sha256((market + '\0' + key[0] + '\0' + key[1]).encode()).hexdigest()
+        if key in manual_keys:
+            records.append({**album_row, 'status': 'manual_keep', 'candidates': []})
+            continue
+        entry = None if force_refresh else cache.get(identity)
+        if not cache_is_fresh(entry):
+            entry = None
+        if isinstance(entry, dict) and entry.get('status') in {'found', 'review', 'not_found'}:
+            status = entry['status']
+            candidates = entry.get('candidates', [])
+        else:
+            if limit and uncached_checked >= limit:
+                records.append({**album_row, 'status': 'not_checked_limit', 'candidates': []})
+                continue
+            uncached_checked += 1
+            try:
+                if token is None:
+                    token = _spotify_catalog_token()
+                results = []
+                seen_results = set()
+                for query in _proxy_query_variants(artist, album):
+                    for item in _spotify_catalog_search(query, market, token):
+                        sid = (item.get('id') or '')
+                        dedupe_key = sid or (_spotify_proxy_norm(item.get('name')), tuple(
+                            _spotify_proxy_norm(a.get('name')) for a in item.get('artists', [])))
+                        if dedupe_key in seen_results:
+                            continue
+                        seen_results.add(dedupe_key)
+                        results.append(_score_spotify_album_candidate(artist, album, item))
+                    status_now, top_now = _classify_spotify_candidates(list(results))
+                    if status_now == 'found':
+                        break
+                status, candidates = _classify_spotify_candidates(results)
+                cache[identity] = {'artist': artist, 'album': album, 'market': market,
+                                   'status': status, 'candidates': candidates, 'checked_at': now}
+                checked += 1
+                # Persist regularly, so interruption or rate limiting loses little progress.
+                if checked % 10 == 0:
+                    _spotify_catalog_cache_save(cache)
+            except Exception as e:
+                errors += 1
+                records.append({**album_row, 'status': 'error', 'error': f'{type(e).__name__}: {e}',
+                                'candidates': []})
+                print(f'[ERRORE] {artist} — {album}: {type(e).__name__}: {e}', file=sys.stderr)
+                # Errori API sono di norma globali (credenziali, quota, rete); fermarsi riduce
+                # richieste inutili e garantisce che l'elenco automatico non venga rimpiazzato.
+                for remaining in albums[idx:]:
+                    rkey = (_spotify_proxy_norm(remaining['artist']), _spotify_proxy_norm(remaining['album']))
+                    if rkey == key:
+                        continue
+                    if rkey in manual_keys:
+                        records.append({**remaining, 'status': 'manual_keep', 'candidates': []})
+                    else:
+                        records.append({**remaining, 'status': 'error',
+                                        'error': 'scan interrotta dopo errore API; stato sconosciuto',
+                                        'candidates': []})
+                errors += sum(1 for r in records if r.get('status') == 'error') - errors
+                break
+        records.append({**album_row, 'status': status, 'candidates': candidates})
+        if idx % 25 == 0:
+            print(f'  ...{idx}/{len(albums)} album valutati ({checked} nuove query, {errors} errori)', flush=True)
+
+    _spotify_catalog_cache_save(cache)
+    not_found = [r for r in records if r['status'] == 'not_found']
+    review = [r for r in records if r['status'] == 'review']
+    found = [r for r in records if r['status'] == 'found']
+    unknown = [r for r in records if r['status'] in {'error', 'not_checked_limit'}]
+    if limit:
+        # Limited/batch scan is additive only; don't remove previous automatic entries based
+        # on albums that haven't been checked in this run.
+        auto_new_by_key = {(_spotify_proxy_norm(x.get('artist')), _spotify_proxy_norm(x.get('album'))): x
+                           for x in previous_auto if isinstance(x, dict)}
+        for r in not_found:
+            auto_new_by_key[(_spotify_proxy_norm(r['artist']), _spotify_proxy_norm(r['album']))] = {
+                'artist': r['artist'], 'album': r['album']}
+        proposed_auto = [auto_new_by_key[k] for k in sorted(auto_new_by_key)]
+    else:
+        proposed_auto = [{'artist': r['artist'], 'album': r['album']} for r in not_found]
+    # Avoid automatic entries duplicating manual overrides.
+    proposed_auto = [x for x in proposed_auto
+                     if (_spotify_proxy_norm(x.get('artist')), _spotify_proxy_norm(x.get('album'))) not in manual_keys]
+    proposed_auto.sort(key=lambda x: (_spotify_proxy_norm(x['artist']), _spotify_proxy_norm(x['album'])))
+    proposed_config = json.loads(json.dumps(original_config))
+    proposed_config.setdefault('SPOTIFY_LOCAL_PROXY', {})['auto_albums'] = proposed_auto
+
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    report_path = Path(report_path).expanduser() if report_path else LOG_DIR / f'spotify_proxy_sync_{stamp}.txt'
+    preview_json = LOG_DIR / f'exportify_names_proxy_preview_{stamp}.json'
+    lines = [
+        f'Spotify Local Files proxy catalog scan — {datetime.now():%Y-%m-%d %H:%M:%S}',
+        f'Library root: {root}', f'Spotify market: {market}',
+        f'Album folders found: {len(albums)}', f'New catalog queries: {checked}',
+        f'Found on Spotify: {len(found)}',
+        f'Not found / likely unavailable in market {market}: {len(not_found)}',
+        f'Ambiguous candidates (manual review; not auto-added): {len(review)}',
+        f'Manually configured albums: {sum(r["status"] == "manual_keep" for r in records)}',
+        f'Unverified because of errors/limit: {len(unknown)}',
+        f'Existing auto_albums: {len(previous_auto)}', f'Proposed auto_albums: {len(proposed_auto)}',
+        '', ('Only confirmed not_found albums are proposed automatically. Spotify search is not a full '
+             'catalog export; “not found” means no sufficiently similar result was returned in the configured market.'),
+        'Ambiguous candidates are intentionally excluded until reviewed.', '',
+    ]
+    labels = {'not_found': 'ADD PROXY (not found)', 'review': 'REVIEW (possible catalog match)',
+              'found': 'SPOTIFY MATCH', 'manual_keep': 'MANUAL OVERRIDE',
+              'error': 'ERROR / UNKNOWN', 'not_checked_limit': 'NOT CHECKED (limit)'}
+    for status in ('not_found', 'review', 'found', 'manual_keep', 'error', 'not_checked_limit'):
+        subset = [r for r in records if r['status'] == status]
+        if not subset:
+            continue
+        lines.extend([f'--- {labels[status]} ({len(subset)}) ---'])
+        for r in subset:
+            lines.append(f'{r["artist"]} — {r["album"]} [{r["tracks"]} files]')
+            if r.get('error'):
+                lines.append(f'    error: {r["error"]}')
+            for c in r.get('candidates', [])[:3]:
+                artists_text = ', '.join(c.get('artists') or [])
+                lines.append(f'    candidate: {artists_text} — {c.get("name")} '
+                             f'(album={c.get("album_score"):.3f}, artist={c.get("artist_score"):.3f}) '
+                             f'{c.get("url", "")}')
+    if errors:
+        lines.extend(['', 'SCAN INCOMPLETE: no replacement auto_albums list is safe to apply.',
+                      'The existing auto_albums list will be preserved. Candidate additions from successful queries only:'])
+        lines.extend(f'  - {r["artist"]} — {r["album"]}' for r in not_found)
+    else:
+        lines.extend(['', 'Proposed automatic proxy albums (auto_albums):'])
+        lines.extend(f'  - {x["artist"]} — {x["album"]}' for x in proposed_auto)
+    lines.append('')
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text('\n'.join(lines), encoding='utf-8')
+    print('\n'.join(lines[:13]))
+    print(f'[i] report: {report_path}')
+
+    if errors:
+        print('[ERRORE] almeno una richiesta catalogo è fallita: JSON non aggiornato; correggi il problema e ripeti.',
+              file=sys.stderr)
+        return {'errors': errors, 'report': str(report_path), 'added': len(not_found)}
+    if limit:
+        # Qualunque --proxy-limit e' esplicitamente una scansione a batch: non rimuove
+        # automaticamente voci esistenti neppure se la cache fa rientrare tutto nel limite.
+        _atomic_write_json(preview_json, proposed_config)
+        print(f'[i] scansione a batch additiva: ho preservato tutti gli auto_albums precedenti; JSON proposta: {preview_json}')
+        if apply and not dry_run:
+            if not config_unchanged_since_scan_start():
+                print(f"[ERRORE] {cfg_path} e' cambiato durante la scansione: nessuna modifica applicata; ripeti il dry-run.", file=sys.stderr)
+                return {'errors': 1, 'report': str(report_path), 'added': len(not_found)}
+            _atomic_write_json(cfg_path, proposed_config)
+            print(f'[OK] config aggiornata (batch additivo): {cfg_path}')
+        return {'errors': 0, 'report': str(report_path), 'added': len(not_found),
+                'preview_json': str(preview_json), 'partial': True}
+    if dry_run or not apply:
+        _atomic_write_json(preview_json, proposed_config)
+        print(f'[dry-run] JSON attivo invariato; proposta scritta in {preview_json}')
+    else:
+        if not config_unchanged_since_scan_start():
+            print(f"[ERRORE] {cfg_path} e' cambiato durante la scansione: nessuna modifica applicata; ripeti il dry-run.", file=sys.stderr)
+            return {'errors': 1, 'report': str(report_path), 'added': len(not_found)}
+        _atomic_write_json(cfg_path, proposed_config)
+        print(f'[OK] aggiornato solo SPOTIFY_LOCAL_PROXY.auto_albums in {cfg_path}')
+    if review:
+        print(f'[i] {len(review)} album ambigui esclusi automaticamente: controlla il report prima di applicare.')
+    return {'errors': 0, 'report': str(report_path), 'added': len(not_found),
+            'review': len(review), 'found': len(found), 'preview_json': str(preview_json)}
+
+
+def _proxy_manifest_path(output_root):
+    return Path(output_root) / '.spotify_proxy_manifest.json'
+
+
+def _proxy_favorites_playlist_path(output_root):
+    return Path(output_root) / 'liked.m3u'
+
+
+def _proxy_favorites_json_path(output_root):
+    return Path(output_root) / 'spotify_proxy_favorites.json'
+
+
+def _proxy_manifest_load(output_root):
+    try:
+        data = json.loads(_proxy_manifest_path(output_root).read_text(encoding='utf-8'))
+        if data.get('version') == 1 and isinstance(data.get('entries'), list):
+            return data
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return {'version': 1, 'entries': []}
+
+
+def _proxy_manifest_save(output_root, root, entries):
+    _atomic_write_json(_proxy_manifest_path(output_root), {
+        'version': 1, 'library_root': str(Path(root).resolve()),
+        'output_dir': str(Path(output_root).resolve()), 'entries': entries,
+    })
+
+
+def _resolve_navidrome_path(raw_path, root):
+    """Converte il path Subsonic (host, container o relativo) in un file del root host."""
+    raw = str(raw_path or '').strip()
+    if not raw:
+        return None
+    root = Path(root).expanduser().resolve()
+    p = Path(raw)
+    candidates = []
+
+    def add(candidate):
+        try:
+            candidate = Path(candidate).expanduser()
+            if candidate.is_file():
+                resolved = candidate.resolve()
+                resolved.relative_to(root)
+                candidates.append(resolved)
+        except (OSError, ValueError, RuntimeError):
+            return
+
+    if p.is_absolute():
+        add(p)
+        prefixes = [os.environ.get('ND_MUSIC_ROOT', ''), '/music', str(LIBRARY_ROOT), str(MUSIC_ROOT)]
+        for prefix in prefixes:
+            prefix = str(prefix or '').rstrip('/')
+            if prefix and (raw == prefix or raw.startswith(prefix + '/')):
+                tail = raw[len(prefix):].lstrip('/')
+                if tail:
+                    add(root / tail)
+        # Alcune API restituiscono /music/Artista/... senza che ND_MUSIC_ROOT sia impostato.
+        parts = p.parts[1:]
+        for i in range(len(parts)):
+            if parts[i].casefold() in {'music', 'media', 'audio'} and i + 1 < len(parts):
+                add(root.joinpath(*parts[i + 1:]))
+    else:
+        add(root / p)
+        parts = p.parts
+        for i in range(1, len(parts)):
+            add(root.joinpath(*parts[i:]))
+    return candidates[0] if candidates else None
+
+
+def _navidrome_proxy_favorite_snapshot(root):
+    """Legge i brani col cuore attivo tramite Subsonic getStarred2; fallisce senza alterare output."""
+    user = (str(SPOTIFY_LOCAL_PROXY_CONFIG.get('favorites_user') or '').strip()
+            or os.environ.get('ND_FAVORITES_USER', '').strip() or SUBSONIC_USER)
+    password, env_key = _user_password(user)
+    if not password:
+        raise RuntimeError(f'manca la password Navidrome per {user!r}; imposta {env_key} o '
+                           'SPOTIFY_LOCAL_PROXY.favorites_user')
+    data = _subsonic_req('/getStarred2', user=user, password=password).get('starred2', {})
+    raw_songs = data.get('song') or []
+    if isinstance(raw_songs, dict):
+        raw_songs = [raw_songs]
+    path_keys, signatures = set(), set()
+    count = 0
+    for song in raw_songs:
+        if not isinstance(song, dict):
+            continue
+        count += 1
+        resolved = _resolve_navidrome_path(song.get('path'), root)
+        if resolved is not None:
+            path_keys.add(os.path.normcase(str(resolved)))
+        title = str(song.get('title') or '').strip()
+        album = str(song.get('album') or '').strip()
+        artist_names = [song.get('artist'), song.get('albumArtist'), song.get('album_artist')]
+        for artist in artist_names:
+            artist = str(artist or '').strip()
+            if artist and title and album:
+                signatures.add((_spotify_proxy_norm(artist), _spotify_proxy_norm(title),
+                                _spotify_proxy_norm(album)))
+    return {'user': user, 'count': count, 'path_keys': path_keys, 'signatures': signatures}
+
+
+def _proxy_entry_is_favorite(entry, root, snapshot):
+    source = str(entry.get('source') or '').strip()
+    if source:
+        source_path = (Path(root).resolve() / Path(source)).resolve()
+        if os.path.normcase(str(source_path)) in snapshot['path_keys']:
+            return True
+    title = str(entry.get('title') or '').strip()
+    album = str(entry.get('album') or '').strip()
+    for artist_field in ('artist', 'album_artist'):
+        artist = str(entry.get(artist_field) or '').strip()
+        key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(title), _spotify_proxy_norm(album))
+        if artist and title and album and key in snapshot['signatures']:
+            return True
+    return False
+
+
+def _atomic_write_text(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f'.tmp-{os.getpid()}')
+    tmp.write_text(value, encoding='utf-8')
+    os.replace(tmp, path)
+
+
+def _sync_proxy_favorites_entries(entries, root, output_root, dry_run=True, save_manifest=True):
+    """Genera liked.m3u dai preferiti Navidrome; errori API preservano l'output precedente."""
+    root = Path(root).expanduser().resolve()
+    output_root = Path(output_root).expanduser().resolve()
+    try:
+        snapshot = _navidrome_proxy_favorite_snapshot(root)
+    except Exception as exc:
+        print(f'[warn] preferiti proxy non sincronizzati: {type(exc).__name__}: {exc}', file=sys.stderr)
+        return {'errors': 1, 'updated': False}
+
+    normalized = []
+    liked = []
+    for original in entries:
+        if not isinstance(original, dict):
+            continue
+        entry = dict(original)
+        proxy_rel = str(entry.get('proxy') or '').strip()
+        if not proxy_rel:
+            continue
+        proxy_path = (output_root / proxy_rel).resolve()
+        try:
+            proxy_path.relative_to(output_root)
+        except ValueError:
+            print(f'[warn] proxy path fuori dalla cartella output ignorato: {proxy_rel}', file=sys.stderr)
+            continue
+        exists = proxy_path.is_file()
+        if not exists and not dry_run:
+            continue
+        favorite = _proxy_entry_is_favorite(entry, root, snapshot)
+        entry['favorite'] = favorite
+        normalized.append(entry)
+        if favorite and (exists or dry_run):
+            liked.append(entry)
+
+    print(f"[i] preferiti Navidrome utente {snapshot['user']}: {snapshot['count']} brani totali; "
+          f'{len(liked)} proxy favoriti da elencare in liked.m3u')
+    for entry in liked[:30]:
+        print(f"  {'[dry-run] ' if dry_run else ''}{entry.get('artist', '?')} — "
+              f"{entry.get('title', '?')} ({entry.get('album', '?')})")
+    if len(liked) > 30:
+        print(f'  ... altri {len(liked) - 30} brani')
+    if dry_run:
+        print(f'[dry-run] nessun file scritto: anteprima di {_proxy_favorites_playlist_path(output_root)}')
+        return {'errors': 0, 'updated': False, 'favorites': len(liked), 'user': snapshot['user']}
+
+    # Nel M3U restano solo proxy che esistono davvero e hanno contenuto non vuoto.
+    actual_liked = []
+    for entry in liked:
+        path = (output_root / str(entry['proxy'])).resolve()
+        try:
+            path.relative_to(output_root)
+            if path.is_file() and path.stat().st_size > 0:
+                actual_liked.append(entry)
+        except (OSError, ValueError):
+            continue
+    lines = ['#EXTM3U']
+    for entry in actual_liked:
+        artist = str(entry.get('artist') or '').replace('\r', ' ').replace('\n', ' ').strip()
+        title = str(entry.get('title') or Path(str(entry.get('proxy') or '')).stem)
+        title = title.replace('\r', ' ').replace('\n', ' ').strip()
+        lines.append(f'#EXTINF:-1,{artist} - {title}')
+        lines.append(str(entry['proxy']).replace('\\', '/'))
+    _atomic_write_text(_proxy_favorites_playlist_path(output_root), '\n'.join(lines) + '\n')
+    _atomic_write_json(_proxy_favorites_json_path(output_root), {
+        'version': 1, 'source': 'Navidrome Subsonic getStarred2', 'user': snapshot['user'],
+        'updated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
+        'count': len(actual_liked), 'tracks': actual_liked,
+    })
+    if save_manifest:
+        _proxy_manifest_save(output_root, root, normalized)
+    print(f"[OK] aggiornati liked.m3u e spotify_proxy_favorites.json: {len(actual_liked)} proxy favoriti")
+    print('[i] Spotify Web API non consente di aggiungere file locali a playlist/Liked Songs: '
+          'questi file tengono traccia dei preferiti, ma la playlist Spotify nativa richiede un passaggio nel client Desktop.')
+    return {'errors': 0, 'updated': True, 'favorites': len(actual_liked), 'user': snapshot['user']}
+
+
+def _discover_proxy_manifest_entries(root, output_root):
+    """Ricostruisce una mappa di base per proxy creati prima dell'introduzione del manifest."""
+    root, output_root = Path(root).resolve(), Path(output_root).resolve()
+    if not root.is_dir() or not output_root.is_dir():
+        return []
+    audio_rels = _walk_audio(root, INDEX_EXT)
+    by_parent_stem = {}
+    for rel in audio_rels:
+        key = (tuple(part.casefold() for part in rel[:-1]), Path(rel[-1]).stem.casefold())
+        by_parent_stem.setdefault(key, []).append(rel)
+    entries = []
+    for proxy in sorted(output_root.rglob('*.mp3'), key=lambda p: str(p).casefold()):
+        try:
+            proxy_rel = proxy.relative_to(output_root).as_posix()
+            parent = proxy.relative_to(output_root).parts[:-1]
+        except ValueError:
+            continue
+        key = (tuple(part.casefold() for part in parent), proxy.stem.casefold())
+        source_rels = by_parent_stem.get(key, [])
+        source_rel = source_rels[0] if len(source_rels) == 1 else ''
+        tags = probe(proxy)
+        artist = str(tags.get('artist') or (parent[0] if parent else '')).strip()
+        album = str(tags.get('album') or _spotify_proxy_rel_album(tuple(parent) + (proxy.name,))).strip()
+        title = _spotify_proxy_title(proxy, tags)
+        album_artist = str(tags.get('albumartist') or tags.get('album_artist') or artist).strip()
+        entries.append({'source': Path(*source_rel).as_posix() if source_rel else '',
+                        'proxy': proxy_rel, 'artist': artist, 'album_artist': album_artist,
+                        'album': album, 'title': title, 'favorite': None})
+    return entries
+
+
+def run_sync_proxy_favorites(dry_run=True, library_root=None, output_dir=None):
+    """Aggiorna il manifest dei proxy e liked.m3u dai cuori correnti di Navidrome."""
+    root = Path(library_root or LIBRARY_ROOT).expanduser().resolve()
+    output_root = Path(output_dir or SPOTIFY_LOCAL_PROXY_CONFIG.get('output_dir') or
+                       '~/Music/Spotify Local Files').expanduser().resolve()
+    if not output_root.is_dir():
+        print(f'[ERRORE] cartella proxy non trovata: {output_root}', file=sys.stderr)
+        return {'errors': 1}
+    manifest = _proxy_manifest_load(output_root)
+    entries = manifest.get('entries', [])
+    # Accetta soltanto path relativi e non esce mai dalla root di libreria/output.
+    safe_entries = []
+    for e in entries:
+        if not isinstance(e, dict) or not e.get('proxy'):
+            continue
+        try:
+            proxy = (output_root / str(e['proxy'])).resolve()
+            proxy.relative_to(output_root)
+        except (OSError, ValueError):
+            continue
+        if proxy.is_file():
+            safe_entries.append(dict(e))
+    if not safe_entries:
+        safe_entries = _discover_proxy_manifest_entries(root, output_root)
+    if not safe_entries:
+        print(f'[ERRORE] nessun proxy MP3 trovato sotto {output_root}; crea prima i proxy', file=sys.stderr)
+        return {'errors': 1}
+    result = _sync_proxy_favorites_entries(safe_entries, root, output_root,
+                                           dry_run=dry_run, save_manifest=True)
+    return result
+
+
 def run_build_spotify_proxies(dry_run=False, library_root=None):
     """Crea proxy MP3 selettivi per Spotify Local Files, preservando gli originali lossless."""
     cfg = SPOTIFY_LOCAL_PROXY_CONFIG
     if not cfg.get('enabled', True):
         print('[i] SPOTIFY_LOCAL_PROXY.enabled=false: generazione proxy disabilitata')
         return {'created': 0, 'skipped': 0, 'errors': 0}
-    requested = cfg.get('albums') or []
+    requested = _spotify_proxy_items()
     if not requested:
         print('[i] nessun album in SPOTIFY_LOCAL_PROXY.albums; nessuna conversione avviata')
         print('[i] aggiungi oggetti {"artist": "Artista", "album": "Album"} per gli album assenti dal catalogo Spotify')
@@ -8831,8 +10093,52 @@ def run_build_spotify_proxies(dry_run=False, library_root=None):
             except OSError:
                 pass
     flush_probe_cache()
+    # Un manifest persistente permette di collegare i proxy ai sorgenti anche quando la
+    # prossima run deve aggiornare soltanto i preferiti, senza ricodificare gli audio.
+    manifest_entries = []
+    old_manifest = _proxy_manifest_load(output_root)
+    old_by_proxy = {str(e.get('proxy') or ''): e for e in old_manifest.get('entries', [])
+                    if isinstance(e, dict)}
+    for source, dest, rel, tags, crit in destinations:
+        try:
+            source_rel = source.resolve().relative_to(root.resolve()).as_posix()
+            proxy_rel = dest.resolve().relative_to(output_root.resolve()).as_posix()
+        except (OSError, ValueError):
+            continue
+        exists_ok = False
+        try:
+            exists_ok = dest.is_file() and dest.stat().st_size > 4096
+        except OSError:
+            pass
+        if not exists_ok and not dry_run:
+            continue
+        if not exists_ok and dry_run:
+            # Mostra anche proxy che verrebbero creati, ma non scrive nessun file.
+            pass
+        prior = old_by_proxy.get(proxy_rel, {})
+        title = _spotify_proxy_title(source, tags)
+        album = str(tags.get('album') or _spotify_proxy_rel_album(rel) or crit['album']).strip()
+        track_artist = str(tags.get('artist') or tags.get('albumartist') or tags.get('album_artist') or rel[0]).strip()
+        album_artist = str(tags.get('albumartist') or tags.get('album_artist') or rel[0]).strip()
+        manifest_entries.append({
+            'source': source_rel, 'proxy': proxy_rel, 'title': title,
+            'artist': track_artist, 'album_artist': album_artist, 'album': album,
+            'favorite': prior.get('favorite') if isinstance(prior, dict) else None,
+        })
+    if not dry_run:
+        try:
+            _proxy_manifest_save(output_root, root, manifest_entries)
+        except OSError as exc:
+            print(f'[warn] impossibile salvare manifest proxy: {exc}', file=sys.stderr)
+    favorite_result = _sync_proxy_favorites_entries(
+        manifest_entries, root, output_root, dry_run=dry_run,
+        save_manifest=not dry_run,
+    ) if manifest_entries else {'errors': 0, 'skipped': True}
+    if favorite_result.get('errors'):
+        print('[warn] proxy creati, ma la sincronizzazione dei preferiti Navidrome non e\' riuscita; '
+              'la precedente liked.m3u e\' stata preservata', file=sys.stderr)
     print(f'[i] proxy Spotify conclusi: {created} creati, {skipped} gia aggiornati, {errors} errori')
-    print('[i] aggiungi la cartella proxy in Spotify Desktop > Settings > Local Files, poi aggiungi i brani alle playlist')
+    print('[i] aggiungi la cartella proxy in Spotify Desktop > Settings > Local Files; liked.m3u e\' un elenco locale di supporto')
     print('[i] al prossimo --sync-only, Exportify puo\' esportare i metadati locali e il matcher li abbina ai file originali')
     return {'created': created, 'skipped': skipped, 'errors': errors}
 
@@ -9396,7 +10702,9 @@ def _run(args):
 
     # Utility separate dalla sync: mai incluse implicitamente in --all/--sync-only.
     utility_modes = [args.fix_all_playlist_owners is not None, args.fix_flac_safe,
-                     args.lidarr_folder_fix, args.lidarr_import_slskd, args.lb_dedup is not None]
+                     args.lidarr_folder_fix, args.lidarr_import_slskd, args.lb_dedup is not None,
+                     args.sync_spotify_proxy_config, args.build_spotify_proxies,
+                     args.sync_proxy_favorites]
     if sum(utility_modes) > 1:
         sys.exit('[ERRORE] esegui una sola utility standalone per volta')
     if any(utility_modes) and (args.all or args.sync_only or args.playlists or args.fetch or args.fetch_only):
@@ -9441,9 +10749,30 @@ def _run(args):
             raise SystemExit(1)
         return
 
+    if args.proxy_limit < 0:
+        sys.exit('[ERRORE] --proxy-limit deve essere >= 0')
+    if args.sync_proxy_favorites:
+        result = run_sync_proxy_favorites(
+            dry_run=not args.apply or args.dry_run,
+            library_root=args.library_root,
+        )
+        if not isinstance(result, dict) or result.get('errors'):
+            raise SystemExit(1)
+        return
+    if args.sync_spotify_proxy_config:
+        result = run_phase('sync_spotify_proxy_config', run_sync_spotify_proxy_config,
+                           dry_run=not args.apply or args.dry_run,
+                           apply=args.apply and not args.dry_run,
+                           library_root=args.library_root, limit=args.proxy_limit,
+                           force_refresh=args.proxy_force_refresh, report_path=args.proxy_report)
+        if not isinstance(result, dict) or result.get('errors'):
+            raise SystemExit(1)
+        return
+
     if args.build_spotify_proxies:
-        result = run_phase('build_spotify_local_proxies', run_build_spotify_proxies, dry_run=args.dry_run)
-        if isinstance(result, dict) and result.get('errors'):
+        result = run_phase('build_spotify_local_proxies', run_build_spotify_proxies,
+                           dry_run=args.dry_run, library_root=args.library_root)
+        if not isinstance(result, dict) or result.get('errors'):
             raise SystemExit(1)
         return
 
