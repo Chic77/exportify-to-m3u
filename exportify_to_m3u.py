@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-exportify2m3u.py - Exportify CSV -> playlist .m3u con path reali della libreria.
+exportify_to_m3u.py - Exportify CSV -> playlist .m3u con path reali della libreria.
 
 Sostituisce il vecchio script crontab. Migliorie:
   - intestazioni CSV italiane E inglesi, BOM-safe (utf-8-sig)
@@ -288,6 +288,12 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
                         saltano la rispettiva fase tag della pipeline playlist.
 
   --- Report e diagnostica (a sola lettura) ------------------------------------------
+  --diagnose-album-splits
+                        report di sola lettura sui gruppi album probabilmente separati nel DB;
+                        le coppie fuzzy sono suggerimenti da rivedere, non fusioni automatiche.
+  --repair-album-groups
+                        ripara tag e gruppi album. Da sola: anteprima, --apply per scrivere;
+                        in --all e' integrata nella pipeline e segue --dry-run per le scritture.
   --check-albums        confronta ogni album del DB con la tracklist di MusicBrainz e
                         scrive logs/album_incompleti_<data>.txt (tracce mancanti X/Y,
                         quali, e l'elenco da riscaricare). Usa MUSICBRAINZ_ALBUMID se c'e',
@@ -400,7 +406,61 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 CHANGELOG
 ==============================================================================
 
-Novita' 0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
+Novita' 0.68 (diagnostica album piu' efficiente e scritture piu' robuste):
+  - --diagnose-album-splits genera le coppie candidate tramite un indice inverso degli artisti:
+    evita confronti fra album che non condividono alcuna identita' artista e riduce il lavoro
+    quadratico sull'intero catalogo; i controlli di similarita' e la regola fuzzy review-only
+    restano invariati.
+  - le riscritture dei tag non-FLAC ripristinano il file originale se la sostituzione finale del
+    file temporaneo fallisce, evitando che un errore I/O lasci il brano mancante dal path atteso.
+  - la riparazione dei tag artista separati da ';' combina in modo deterministico i campi alias
+    presenti nei metadata non-FLAC, deduplicando i componenti e impedendo che un campo successivo
+    sovrascriva silenziosamente il risultato del primo.
+  - la cache MusicBrainz aggiornata durante una riparazione in anteprima viene salvata come cache
+    ausiliaria: il dry-run non modifica tag o file audio, ma evita di ripetere le stesse richieste.
+  - la correzione di [Unknown Artist] non usa piu' una semplice maggioranza di ARTIST per
+    indovinare l'artista nelle compilation: un ALBUMARTIST generico/conflittuale blocca il fallback;
+    se ALBUMARTIST manca, tutti gli artisti noti delle tracce devono concordare.
+  - la riparazione aggrega gli errori di scrittura delle fasi MBID-sanity, artist_names e album_unify;
+    non segnala piu' successo se una di queste passate ha avuto errori.
+  - l'inferenza degli artisti controlla tutti i campi alias disponibili (artist/artists e albumartist/album_artist/albumartists);
+    metadati discordanti sullo stesso file bloccano l'inferenza invece di scegliere il primo campo.
+
+Novita' beta-0.67 (integrazione album repair in --all e correzioni artisti):
+  - --all produce automaticamente il report DB di diagnosi album prima delle modifiche e include
+    le riparazioni album nella pipeline; --all --apply esegue le scritture. I candidati fuzzy restano
+    nel report e non vengono piu' uniti automaticamente, anche quando un frammento e' piccolo.
+  - Aggiunta la correzione degli ARTIST='[Unknown Artist]' quando l'album fornisce un unico artista
+    attendibile: preferisce ALBUMARTIST, altrimenti un artista non sconosciuto condiviso dalle tracce;
+    gli album compilation ambigui restano intatti e sono segnalati per revisione.
+  - Aggiunta la separazione condizionata di tag artista separati da ';': si attiva solo se almeno un
+    componente corrisponde a un artista gia' presente nel DB Navidrome. FLAC riceve ARTISTS multi-valore;
+    gli altri formati ricevono il separatore standard '; ' per lo scanner Navidrome.
+  - La riparazione album completa esegue anche queste due correzioni; nell'uso --all riutilizza le fasi
+    date_heal/artist_names/album_unify gia' presenti per evitare di ripeterle inutilmente.
+  - La diagnostica mostra anche ALBUMVERSION/releasedate/release-group ID dal DB quando disponibili,
+    perché possono separare album con lo stesso titolo visibile. ALBUMVERSION viene resa coerente per
+    album logico; edizioni/versioni discordanti tra cartelle restano review-only e non si uniscono.
+
+Novita' beta-0.66 (riparazione album frammentati e artisti CJK duplicati):
+  - album_base non elimina piu' indiscriminatamente ogni parentesi e la parola "live" interna al titolo.
+    Ora rimuove qualificatori di edizione solo quando sono marcatori/ suffissi, preserva titoli
+    significativi come "Blackbox Live Recorder" e tratta il gloss romaji CJK come alias.
+  - album_unify aggiunge un passaggio cross-folder: raggruppa titoli identici/alias e piccoli
+    frammenti supportati da titoli traccia o numerazione contigua, armonizza ALBUM/ALBUMARTIST,
+    rimuove ID album discordanti e propaga ID univoci mancanti (Animals, Finger Dancin', Saudade, ecc.).
+  - date_heal controlla MUSICBRAINZ_ALBUMID sull'intero album logico, inclusi sottodischi e tutti
+    i formati. Se un'unica cartella contiene ID album contrastanti, non sceglie arbitrariamente la
+    maggioranza: rimuove quegli ID, conservando un release-group ID solo se e' univoco. Invalida le
+    cache dopo le scritture per impedire ad album_unify di ripristinare tag vecchi.
+  - artist_names esamina anche tracce che si trovano in cartelle latine/compilation: ogni valore ARTIST/
+    ALBUMARTIST CJK diventa la forma bilingue preferita in tag FLAC multipli e non-FLAC. I valori
+    duplicati che collassano nella stessa forma vengono deduplicati, poi lo scan Navidrome aggiorna il DB.
+  - aggiunti --diagnose-album-splits (DB read-only) e --repair-album-groups (preview predefinita):
+    report con album.id/MBID/track count/path e artisti CJK doppi; la riparazione unifica tag fra cartelle,
+    rimuove MBID discordanti in tutti i formati e canonizza i valori ARTIST/ALBUMARTIST CJK ovunque.
+
+Novita' beta-0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
   - artwork: lo stato delle cover embedded viene salvato nella cache ffprobe insieme a tag/durata;
     per le cache preesistenti viene aggiunto al primo controllo. La verifica si ferma appena una
     delle prime tracce contiene una cover, invece di eseguire sempre fino a tre ffprobe per album.
@@ -414,7 +474,7 @@ Novita' 0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
     ~92 s in controlli artwork embedded, ~85 s nella traduzione HTTPS e ~69 s nei tie-break waveform.
     Queste durate sono stime a campionamento; la nuova riduzione end-to-end va verificata sul server.
 
-Novita' 0.64 (ottimizzazioni verificate sul profilo Tachyon reale):
+Novita' beta-0.64 (ottimizzazioni verificate sul profilo Tachyon reale):
   - flush_probe_cache non esegue piu' una os.path.exists su ogni chiave della cache dopo ogni fase.
     Le voci obsolete vengono eliminate in modo lazy quando un percorso richiesto non esiste; la
     cache non viene usata per un file prima di aver verificato stat, quindi i dati obsoleti non
@@ -920,7 +980,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.65"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.68"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -4747,8 +4807,8 @@ for _old in ('probe_cache.json', 'probe_cache_v2.json'):      # formati preceden
 PROBE_WORKERS = max(1, int(os.environ.get('EXPORTIFY_PROBE_WORKERS') or min(8, (os.cpu_count() or 2) * 2)))
 # solo i tag che lo script usa davvero (niente testi/commenti da KB per file)
 _PROBE_KEEP = {'title', 'artist', 'album', 'albumartist', 'album_artist', 'date',
-               'originaldate', 'musicbrainz_albumid', 'musicbrainz_releasegroupid',
-               'track', 'tracknumber'}
+               'originaldate', 'albumversion', 'album_version', 'musicbrainz_albumid',
+               'musicbrainz_releasegroupid', 'track', 'tracknumber'}
 _PROBE_MEM = None        # {path: [mtime_ns, size, tags, durata, embedded_art_opzionale]}
 _PROBE_DIRTY = False
 
@@ -4834,6 +4894,8 @@ def probe(path: Path):
     # ffmpeg scrive 'album_artist', altri tagger 'albumartist': unifica
     if 'album_artist' in tags and 'albumartist' not in tags:
         tags['albumartist'] = tags['album_artist']
+    if 'album_version' in tags and 'albumversion' not in tags:
+        tags['albumversion'] = tags['album_version']
     return tags
 
 
@@ -4843,6 +4905,20 @@ def probe_dur(path: Path):
     if ent is None:
         return {}, None
     return dict(ent[2]), ent[3]
+
+
+def invalidate_probe_cache(paths):
+    """Invalidate metadata immediately after tag/file rewrites, independent of mtime/size."""
+    global _PROBE_DIRTY
+    mem = _probe_mem()
+    changed = False
+    for path in paths:
+        key = str(path)
+        if key in mem:
+            mem.pop(key, None)
+            changed = True
+    if changed:
+        _PROBE_DIRTY = True
 
 
 def flush_probe_cache():
@@ -4913,15 +4989,21 @@ def write_flac(path: Path, targets: dict):
     args = [*METAFLAC]
     vorbis = {'album': 'ALBUM', 'albumartist': 'ALBUMARTIST',
               'date': 'DATE', 'originaldate': 'ORIGINALDATE',
+              'albumversion': 'ALBUMVERSION',
               'musicbrainz_albumid': 'MUSICBRAINZ_ALBUMID',
+              'musicbrainz_releasegroupid': 'MUSICBRAINZ_RELEASEGROUPID',
               # title/artist: servono alla riparazione da nome file e alla regola 'artist'
               # di unify. Mancavano: KeyError su OGNI FLAC (la regola 'artist' ripiegava
               # su ffmpeg, la riparazione falliva e riprovava ogni notte)
               'title': 'TITLE', 'artist': 'ARTIST'}
     for k, v in targets.items():
-        args += [f'--remove-tag={vorbis[k]}', f'--set-tag={vorbis[k]}={v}']
+        if v is None:
+            args.append(f'--remove-tag={vorbis[k]}')
+        else:
+            args += [f'--remove-tag={vorbis[k]}', f'--set-tag={vorbis[k]}={v}']
     args.append(str(path))
     subprocess.run(args, capture_output=True, timeout=120, check=True)
+    invalidate_probe_cache([path])
 
 
 CODEC_FOR = {'.flac': 'flac', '.mp3': 'libmp3lame', '.m4a': 'aac',
@@ -4942,7 +5024,7 @@ def write_ffmpeg(path: Path, targets: dict, tmp: Path, codec: str = None):
             # mappata da ffmpeg e finiva in un frame TXXX *accanto* al TPE2 originale:
             # l'mp3 aveva due album artist e Navidrome mostrava un artista in piu'.
             k = 'album_artist'
-        args += ['-metadata:s:a:0' if ogg else '-metadata', f'{k}={v}']
+        args += ['-metadata:s:a:0' if ogg else '-metadata', f'{k}={"" if v is None else v}']
     args.append(str(tmp))
     subprocess.run(args, capture_output=True, timeout=600, check=True)
 
@@ -5079,6 +5161,7 @@ def run_unify(dry_run=False, base=None):
                         write_ffmpeg(f, rep, tmp)
                         os.replace(f, f.with_name(f.name + '.meta-backup'))
                         os.replace(tmp, f)
+                        invalidate_probe_cache([f])
                     t.update(rep)
                 except Exception as e:
                     print(f'    ERRORE repair {f.name}: {e}', file=sys.stderr)
@@ -5160,6 +5243,7 @@ def run_unify(dry_run=False, base=None):
                                      codec=CODEC_FOR.get(f.suffix.lower(), 'flac'))
                     os.replace(f, backup)
                     os.replace(tmp, f)
+                invalidate_probe_cache([f])
                 changed_files += 1
             except Exception as e:
                 errors += 1
@@ -5169,17 +5253,318 @@ def run_unify(dry_run=False, base=None):
                     os.replace(backup, f)
                 f.with_name(f.stem + '.tmp' + f.suffix).unlink(missing_ok=True)
 
+    # Passaggio cross-folder: i tag coerenti dentro una cartella non bastano se lo stesso
+    # album e' stato importato in due cartelle/edizioni parziali diverse.
+    cross_groups, cross_files, cross_errors = _unify_cross_album_dirs(dirs, dry_run=dry_run)
+    errors += cross_errors
+    changed_files += cross_files
+    changed_albums += cross_groups
     removed = 0
-    for b in base.rglob('*.meta-backup'):
-        if b.with_name(b.name[:-len('.meta-backup')]).exists():
-            try:
-                b.unlink()
-                removed += 1
-            except Exception:
-                pass
-    print(f'album esaminati: {scanned} | modificati: {changed_albums} '
+    if not dry_run:
+        for b in base.rglob('*.meta-backup'):
+            if b.with_name(b.name[:-len('.meta-backup')]).exists():
+                try:
+                    b.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+    print(f'album esaminati: {scanned} | gruppi modificati: {changed_albums} '
           f'({changed_files} file) | errori: {errors} | backup rimossi: {removed}')
+    return {'albums': changed_albums, 'files': changed_files, 'errors': errors}
 
+
+
+def _track_number_for_tags(tags):
+    raw = str(tags.get('track') or tags.get('tracknumber') or '').strip()
+    m = re.match(r'(\d{1,4})', raw)
+    return int(m.group(1)) if m else None
+
+
+def _fragment_album_evidence(a, b):
+    # Evidence that a small folder is part of a fuller album, not merely a similarly named release.
+    small, large = (a, b) if len(a['files']) <= len(b['files']) else (b, a)
+    if not (1 <= len(small['files']) <= 3 and len(large['files']) >= 3):
+        return False, ''
+    small_titles = small['track_keys']
+    large_titles = large['track_keys']
+    if (small_titles and len(small_titles) == len(small['files'])
+            and small_titles <= large_titles):
+        return True, 'fragment track titles contained in fuller album'
+    sn, ln = small['track_numbers'], large['track_numbers']
+    if sn and ln and not (sn & ln):
+        all_nums = sn | ln
+        if max(all_nums) - min(all_nums) + 1 == len(all_nums):
+            return True, 'non-overlapping contiguous track numbers'
+    return False, ''
+
+
+def _album_explicit_edition_markers(values):
+    """Markers that prevent different editions being joined by normalized title aliases.
+
+    A year alone is intentionally ignored because a release year is commonly appended to
+    folder names. Explicit remaster/deluxe/expanded/anniversary markers are meaningful.
+    """
+    marker_re = re.compile(
+        r"\b(?:remaster(?:ed)?|deluxe|expanded|anniversary|special|limited|collector(?:'s|s)?|"
+        r"tour|complete|bonus tracks?|reissue|mono|stereo|live version|live recording)\b", re.I)
+    found = set()
+    for value in values:
+        for match in marker_re.finditer(str(value or '')):
+            found.add(norm_bare(match.group(0)).casefold())
+    return found
+
+
+def _unify_cross_album_dirs(dirs, dry_run=False):
+    """Unifica ALBUM/ALBUMARTIST solo per identita' esatta o alias noti.
+
+    Qualsiasi somiglianza fuzzy, anche quando un frammento sembra compatibile per titoli o numeri,
+    viene registrata per revisione e MAI unita automaticamente. Evita falsi positivi fra sequel,
+    volumi, remaster e album dal nome simile.
+    """
+    records = []
+    for album, files in dirs:
+        if not files:
+            continue
+        tags = [probe(f) for f in files]
+        album_values = [str(t.get('album') or '').strip() for t in tags if str(t.get('album') or '').strip()]
+        # The directory name is the anchor. Only add a tag title when it is a majority value;
+        # a single incorrectly tagged track must not create a false alias to an unrelated album.
+        title_values = [album.name]
+        if album_values:
+            album_counts = Counter(album_values)
+            dominant_title, dominant_count = album_counts.most_common(1)[0]
+            if len(files) == 1 or dominant_count >= max(2, (len(files) + 1) // 2):
+                title_values.append(dominant_title)
+        title_keys = set().union(*(_album_title_keys(v) for v in title_values))
+        artist_keys = _artist_identity_keys(album.parent.name)
+        rgids = {t.get('musicbrainz_releasegroupid', '').strip().lower()
+                 for t in tags if t.get('musicbrainz_releasegroupid', '').strip()}
+        albumversions = {str(t.get('albumversion') or t.get('album_version') or '').strip().casefold()
+                         for t in tags if str(t.get('albumversion') or t.get('album_version') or '').strip()}
+        edition_markers = _album_explicit_edition_markers(title_values)
+        track_keys = {norm_bare(str(t.get('title') or '').strip()) for t in tags
+                      if str(t.get('title') or '').strip()}
+        track_numbers = {_track_number_for_tags(t) for t in tags}
+        track_numbers.discard(None)
+        records.append({'album': album, 'files': files, 'tags': tags,
+                        'title_values': title_values, 'title_keys': title_keys,
+                        'artist_keys': artist_keys, 'rgids': rgids,
+                        'albumversions': albumversions, 'edition_markers': edition_markers,
+                        'track_keys': track_keys, 'track_numbers': track_numbers})
+    n = len(records)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        a, b = find(i), find(j)
+        if a != b:
+            parent[b] = a
+
+    fuzzy_pairs = []
+    for i in range(n):
+        a = records[i]
+        if not a['title_keys'] or not a['artist_keys']:
+            continue
+        for j in range(i + 1, n):
+            b = records[j]
+            if not (a['artist_keys'] & b['artist_keys']):
+                continue
+            rg_conflict = bool(a['rgids'] and b['rgids'] and not (a['rgids'] & b['rgids']))
+            sim, label = _album_title_similarity(a['title_keys'], b['title_keys'])
+            fragment_evidence, evidence_label = _fragment_album_evidence(a, b)
+            exact_title = sim == 1.0
+            edition_conflict = (a['edition_markers'] != b['edition_markers'] and
+                                bool(a['edition_markers'] or b['edition_markers']))
+            version_conflict = (a['albumversions'] != b['albumversions'] and
+                                bool(a['albumversions'] or b['albumversions']))
+            review_reason = ''
+            if edition_conflict:
+                review_reason = ('explicit edition marker differs: '
+                                 f"{sorted(a['edition_markers'])} vs {sorted(b['edition_markers'])}")
+            elif version_conflict:
+                review_reason = ('ALBUMVERSION differs: '
+                                 f"{sorted(a['albumversions'])} vs {sorted(b['albumversions'])}")
+            # Explicit edition/version conflicts override stripped title suffixes; keep them visible
+            # for review even if album_base() makes the normalized title keys identical.
+            if review_reason:
+                fuzzy_pairs.append((a, b, sim, review_reason, evidence_label, rg_conflict))
+                continue
+            # Exact/known aliases may be unified, even if inconsistent MusicBrainz IDs must be cleared.
+            if exact_title:
+                union(i, j)
+                if rg_conflict:
+                    print(f"[i] titolo esatto/alias con RGID discordanti: "
+                          f"{a['album'].name} <-> {b['album'].name}; gli ID conflittuali saranno rimossi")
+                continue
+            if sim >= 0.88:
+                # REVIEW only. Never union fuzzy title pairs.
+                fuzzy_pairs.append((a, b, sim, label, evidence_label, rg_conflict))
+
+    components = {}
+    for i in range(n):
+        components.setdefault(find(i), []).append(records[i])
+    groups = [g for g in components.values() if len(g) > 1]
+    fixed_groups = changed_files = errors = 0
+    for group in groups:
+        all_files = [f for r in group for f in r['files']]
+        all_tags = [t for r in group for t in r['tags']]
+        # Se esistono pin UNIFY_FORCE incompatibili, non sovrascriverli con una regola automatica.
+        forced_albums = set()
+        forced_albumartists = set()
+        for r in group:
+            pin = UNIFY_FORCE.get(norm(f"{r['album'].parent.name} / {r['album'].name}"), {})
+            if pin.get('album'):
+                forced_albums.add(str(pin['album']))
+            if pin.get('albumartist'):
+                forced_albumartists.add(str(pin['albumartist']))
+        if len(forced_albums) > 1 or len(forced_albumartists) > 1:
+            print('[review] CROSS-ALBUM saltato: UNIFY_FORCE contiene tag discordanti per '
+                  + ', '.join(f'{r["album"].parent.name}/{r["album"].name}' for r in group))
+            continue
+        if forced_albums:
+            target_album = next(iter(forced_albums))
+        else:
+            counts = Counter(t.get('album', '').strip() for t in all_tags if t.get('album', '').strip())
+            if counts:
+                max_count = max(counts.values())
+                candidates = [v for v, count in counts.items() if count == max_count]
+                # Tie-break conservativo: forma bilingue CJK, poi meno marcatori di edizione,
+                # poi forma piu' lunga (preserva il nome leggibile), infine deterministico.
+                def album_label_score(v):
+                    bilingual = _has_asian(v) and bool(re.search(r'\([^()]*[A-Za-z][^()]*\)', v))
+                    edition_words = len(_ALBUM_EDITION_QUALIFIER.findall(v)) + len(
+                        re.findall(r'\b(?:deluxe|remaster(?:ed)?|anniversary|bonus|reissue)\b', v, re.I))
+                    return (int(bilingual), -edition_words, len(v), v.casefold())
+                target_album = max(candidates, key=album_label_score)
+            else:
+                target_album = group[0]['album'].name
+
+        target_albumartist = next(iter(forced_albumartists)) if forced_albumartists else None
+        cjk_folders = [r['album'].parent.name for r in group if _has_asian(r['album'].parent.name)]
+        if not target_albumartist and cjk_folders and ROMAJI_TAGS_ACTIVE:
+            # Se due nomi cartella sono alias della stessa persona, la forma bilingue ha la priorita'.
+            folder_name = max(cjk_folders, key=lambda v: (bool(re.search(r'\([^()]*[A-Za-z][^()]*\)', v)), len(v)))
+            target_albumartist = _canonical_albumartist(folder_name)
+        if not target_albumartist:
+            values = [t.get('albumartist', '') for t in all_tags if t.get('albumartist', '').strip()]
+            if values:
+                target_albumartist = _canonicalize_artist_value(Counter(values).most_common(1)[0][0])
+            else:
+                # Se un frammento ha perso ALBUMARTIST, usa il nome della cartella artista
+                # condivisa dal gruppo; altrimenti Navidrome può separare proprio quel frammento.
+                target_albumartist = _canonicalize_artist_value(group[0]['album'].parent.name)
+
+        ids = {str(t.get('musicbrainz_albumid') or '').strip().lower()
+               for t in all_tags if str(t.get('musicbrainz_albumid') or '').strip()}
+        rgids_all = {str(t.get('musicbrainz_releasegroupid') or '').strip().lower()
+                     for t in all_tags if str(t.get('musicbrainz_releasegroupid') or '').strip()}
+        albumversion_values = {str(t.get('albumversion') or t.get('album_version') or '').strip()
+                               for t in all_tags if str(t.get('albumversion') or t.get('album_version') or '').strip()}
+        # Navidrome's default Album PID fallback also uses albumversion and releasedate.
+        # A missing MBID on M4A/MP4 cannot reliably be propagated, so clear a lone MBID
+        # from the whole exact-alias group instead of creating another split on every scan.
+        unwritable_missing_album_id = any(
+            f.suffix.lower() in ('.m4a', '.mp4') and
+            not str(t.get('musicbrainz_albumid') or '').strip()
+            for f, t in zip(all_files, all_tags))
+        drop_album_ids = len(ids) > 1 or (len(ids) == 1 and unwritable_missing_album_id)
+        drop_rgids = len(rgids_all) > 1
+        common_mbid = next(iter(ids)) if len(ids) == 1 and not drop_album_ids else ''
+        common_rgid = next(iter(rgids_all)) if len(rgids_all) == 1 and not drop_rgids else ''
+        common_albumversion = next(iter(albumversion_values)) if len(albumversion_values) == 1 else ''
+        date_counts = Counter(str(t.get('date') or '').strip() for t in all_tags if str(t.get('date') or '').strip())
+        originaldate_counts = Counter(str(t.get('originaldate') or '').strip() for t in all_tags if str(t.get('originaldate') or '').strip())
+        common_date = date_counts.most_common(1)[0][0] if date_counts else ''
+        common_originaldate = originaldate_counts.most_common(1)[0][0] if originaldate_counts else ''
+        changed = []
+        for f, t in zip(all_files, all_tags):
+            diff = {}
+            if target_album and t.get('album', '') != target_album:
+                diff['album'] = target_album
+            if target_albumartist and t.get('albumartist', '') != target_albumartist:
+                diff['albumartist'] = target_albumartist
+            if common_date and t.get('date', '') != common_date and _unify_applies(f, t, 'date', {'originaldate': common_originaldate}):
+                diff['date'] = common_date
+            if common_originaldate and t.get('originaldate', '') != common_originaldate and _unify_applies(f, t, 'originaldate', {'originaldate': common_originaldate}):
+                diff['originaldate'] = common_originaldate
+            current_version = str(t.get('albumversion') or t.get('album_version') or '').strip()
+            if common_albumversion and current_version != common_albumversion:
+                diff['albumversion'] = common_albumversion
+            current_mbid = str(t.get('musicbrainz_albumid') or '').strip().lower()
+            current_rgid = str(t.get('musicbrainz_releasegroupid') or '').strip().lower()
+            if drop_album_ids and current_mbid:
+                diff['musicbrainz_albumid'] = None
+            elif common_mbid and not current_mbid and f.suffix.lower() not in ('.m4a', '.mp4'):
+                diff['musicbrainz_albumid'] = common_mbid
+            if drop_rgids and current_rgid:
+                diff['musicbrainz_releasegroupid'] = None
+            elif common_rgid and not current_rgid:
+                diff['musicbrainz_releasegroupid'] = common_rgid
+            if diff:
+                changed.append((f, diff))
+        if not changed:
+            continue
+        label = ' | '.join(f"{r['album'].parent.name}/{r['album'].name} ({len(r['files'])} tracce)"
+                           for r in group)
+        fields = []
+        if target_album:
+            fields.append(f'ALBUM="{target_album[:70]}"')
+        if target_albumartist:
+            fields.append(f'ALBUMARTIST="{target_albumartist[:70]}"')
+        if drop_album_ids:
+            reason = f'{len(ids)} valori' if len(ids) > 1 else 'MBID non propagabile a M4A/MP4'
+            fields.append(f'rimuovi MBID album ({reason})')
+        if drop_rgids:
+            fields.append(f'rimuovi release-group ID conflittuali ({len(rgids_all)} valori)')
+        if common_mbid and any(not str(t.get('musicbrainz_albumid') or '').strip() for t in all_tags):
+            fields.append('propaga MBID univoco ai tag mancanti')
+        if common_rgid and any(not str(t.get('musicbrainz_releasegroupid') or '').strip() for t in all_tags):
+            fields.append('propaga release-group ID univoco ai tag mancanti')
+        if common_albumversion and any(not str(t.get('albumversion') or t.get('album_version') or '').strip() for t in all_tags):
+            fields.append('propaga ALBUMVERSION univoco')
+        if common_date and len(date_counts) > 1:
+            fields.append(f'allinea DATE a {common_date}')
+        if common_originaldate and len(originaldate_counts) > 1:
+            fields.append(f'allinea ORIGINALDATE a {common_originaldate}')
+        print(f"{'[dry] ' if dry_run else ''}CROSS-ALBUM {label}: {', '.join(fields)}; "
+              f'{len(changed)} file')
+        fixed_groups += 1
+        if dry_run:
+            changed_files += len(changed)
+            continue
+        for f, diff in changed:
+            try:
+                if f.suffix.lower() == '.flac':
+                    write_flac(f, diff)
+                else:
+                    _rewrite_nonflac(f, diff)
+                changed_files += 1
+            except Exception as e:
+                errors += 1
+                print(f'[ERRORE] CROSS-ALBUM {f}: {e}', file=sys.stderr)
+    if fuzzy_pairs:
+        report_path = SCRIPT_DIR / 'logs' / f"album_cross_folder_review_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report = [f"Cross-folder fuzzy album candidates — {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                  'These pairs are REVIEW ONLY. No fuzzy pair was merged automatically.', '']
+        for a, b, sim, label, evidence_label, rg_conflict in sorted(fuzzy_pairs, key=lambda x: -x[2]):
+            report.append(f"score={sim:.3f} {a['album'].parent.name}/{a['album'].name} "
+                          f"({len(a['files'])} tracks) <-> {b['album'].parent.name}/{b['album'].name} "
+                          f"({len(b['files'])} tracks) [{label}; "
+                          f"{evidence_label or 'no fragment evidence'}; "
+                          f"release-group conflict={'yes' if rg_conflict else 'no'}]")
+            report.extend(f'  A: {f}' for f in a['files'][:3])
+            report.extend(f'  B: {f}' for f in b['files'][:3])
+        report_path.write_text('\n'.join(report) + '\n', encoding='utf-8')
+        print(f'[review] {len(fuzzy_pairs)} coppie album fuzzy NON unite; report: {report_path}')
+    print(f'cross-folder albums: {fixed_groups} gruppi esatti/alias | '
+          f'{changed_files} file aggiornati | {len(fuzzy_pairs)} candidati fuzzy solo report | {errors} errori')
+    return fixed_groups, changed_files, errors
 
 
 def _keeper_score(f: Path, tags: dict):
@@ -5515,6 +5900,92 @@ def _remap_artist_value(v, variants, canon):
     return '; '.join(out)
 
 
+def _artist_values_equivalent(a, b):
+    """True se due valori sono alias documentati/fonetici dello stesso artista."""
+    if str(a or '').strip().casefold() == str(b or '').strip().casefold():
+        return True
+    # norm() scarta le parentesi: sui nomi solo latini potrebbe confondere un nome reale
+    # come 'Artist (Live)' con 'Artist'. Usiamo quella equivalenza solo quando e' coinvolto CJK.
+    if _has_asian(a) or _has_asian(b):
+        if norm(a) == norm(b):
+            return True
+        try:
+            return bool(_artist_variants(a) & _artist_variants(b))
+        except Exception:
+            return False
+    return False
+
+
+def _prefer_bilingual_artist(a, b):
+    """Sceglie la forma CJK + gloss latino invece del solo CJK/solo alias."""
+    def score(v):
+        has_cjk = _has_asian(v)
+        m = re.search(r'\(([^()]*)\)', v)
+        gloss = m.group(1) if m else ''
+        has_latin_gloss = bool(re.search(r'[A-Za-z]', gloss))
+        has_cjk_latin = has_cjk and has_latin_gloss
+        # Se due voci equivalenti sono già bilingui, non convertire inutilmente la grafia
+        # leggibile esistente in minuscolo solo perché la fonetica generata lo è.
+        titlecase = sum(ch.isupper() for ch in gloss)
+        return (int(has_cjk_latin), int(has_cjk), titlecase, len(v))
+    return a if score(a) >= score(b) else b
+
+
+def _titlecase_artist_gloss(value):
+    """Capitalizza il gloss latino generato dalla fonetica, senza toccare nomi gia' stilizzati."""
+    if not value or not _has_asian(value):
+        return value
+    match = re.search(r'[\(（]([^()（）]+)[\)）]\s*$', value)
+    if not match or not re.search(r'[A-Za-z]', match.group(1)):
+        return value
+    gloss = match.group(1).strip()
+    letters = ''.join(ch for ch in gloss if ch.isalpha())
+    if letters and letters == letters.lower():
+        return value[:match.start(1)] + gloss.title() + value[match.end(1):]
+    return value
+
+
+def _canonicalize_artist_value(value):
+    """Converte nomi CJK/Hangul in forma bilingue preferita e collassa gli alias ripetuti.
+
+    Non divide su virgole/&/feat: sono componenti che possono appartenere al nome o a una
+    collaborazione. Il separatore sicuro dei tag multi-valore è ';'.
+    """
+    if not value:
+        return value
+    parts = [p.strip() for p in str(value).split(';') if p.strip()]
+    if not parts:
+        return value
+    out = []
+    for part in parts:
+        canonical = _romanize_tag_value(part) if _has_asian(part) else part
+        canonical = _titlecase_artist_gloss(canonical)
+        hit = next((i for i, old in enumerate(out)
+                    if _artist_values_equivalent(old, canonical)), None)
+        if hit is None:
+            out.append(canonical)
+        else:
+            out[hit] = _prefer_bilingual_artist(out[hit], canonical)
+    return '; '.join(out)
+
+
+def _canonicalize_artist_tag_values(values):
+    """Normalizza e deduplica tag ripetuti, anche quando un valore contiene 'A; B'."""
+    out = []
+    for value in values:
+        parts = [p.strip() for p in str(value or '').split(';') if p.strip()]
+        for part in parts:
+            canonical = _romanize_tag_value(part) if _has_asian(part) else part
+            canonical = _titlecase_artist_gloss(canonical)
+            hit = next((i for i, old in enumerate(out)
+                        if _artist_values_equivalent(old, canonical)), None)
+            if hit is None:
+                out.append(canonical)
+            else:
+                out[hit] = _prefer_bilingual_artist(out[hit], canonical)
+    return out
+
+
 def _folder_canon(folder_name, values):
     """Nome canonico dell'artista di una cartella, o None se non applicabile."""
     if _has_asian(folder_name):
@@ -5545,38 +6016,67 @@ def _flac_raw_tags(path):
 
 
 def _rewrite_nonflac(f, targets):
-    """Riscrive i tag di un mp3/m4a/ogg/opus con ffmpeg (copia dello stream)."""
+    """Riscrive i tag di un mp3/m4a/ogg/opus e ripristina l'originale se lo swap fallisce."""
     tmp = f.with_name(f.stem + '.tmp' + f.suffix)
+    backup = f.with_name(f.name + '.meta-backup')
     try:
         write_ffmpeg(f, targets, tmp)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
-    os.replace(f, f.with_name(f.name + '.meta-backup'))
-    os.replace(tmp, f)
+    try:
+        os.replace(f, backup)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    try:
+        os.replace(tmp, f)
+    except Exception:
+        # Keep the source path usable if the new file cannot be committed (e.g. disk full,
+        # permission change, transient I/O error). Preserve the backup only if restoration fails.
+        try:
+            if backup.exists() and not f.exists():
+                os.replace(backup, f)
+        except OSError as restore_error:
+            raise RuntimeError(f'swap fallito per {f}; originale ancora in {backup}; '
+                               f'ripristino fallito: {restore_error}')
+        finally:
+            tmp.unlink(missing_ok=True)
+        raise
+    invalidate_probe_cache([f])
 
 
 def run_unify_artists(dry_run=False, base=None):
+    """Scrive le forme bilingui CJK/Hangul ovunque nei tag, non solo nelle cartelle CJK.
+
+    La vecchia versione saltava immediatamente le cartelle con nome latino: perciò la stessa
+    persona rimaneva come artista CJK puro nei dischi compilation/collaborativi. Ora i valori
+    ARTIST/ALBUMARTIST sono normalizzati in tutta la libreria; per i FLAC si leggono i tag grezzi
+    solo quando il probe segnala CJK o la cartella e' essa stessa CJK.
+    """
     global _NF_REV
-    _NF_REV = None                      # mapping NAME_TRANSLATIONS/NAME_FIXES puo' cambiare dopo la config
+    _NF_REV = None
     base = Path(base) if base else LIBRARY_ROOT
     have_mf = shutil.which('metaflac') is not None
     tg = '[dry] ' if dry_run else ''
     n_art = n_files = n_stray = errors = 0
 
-    # --- A. mp3 con DUE album artist: TPE2 (vecchio) + TXXX:albumartist (scritto da
-    # write_ffmpeg <= 3.21). Lo script vedeva solo il TXXX e li credeva a posto, ma
-    # Navidrome legge entrambi e mostra un artista in piu'. Teniamo il valore che lo
-    # script voleva (TXXX), lo mettiamo in TPE2 e togliamo il TXXX.
+    # A. Corregge il doppio album artist MP3 (TPE2 + TXXX) prima della normalizzazione globale.
     mp3s = [base.joinpath(*r) for r in _walk_audio(base, {'.mp3'})]
     prefetch_probe(mp3s, 'artist_names/mp3')
     for f in mp3s:
         t = probe(f)
-        if t.get('album_artist') and t.get('albumartist') \
-                and t['album_artist'] != t['albumartist']:
-            new = t['albumartist']
+        duplicate_albumartist = bool(t.get('album_artist') and t.get('albumartist') and
+                                     t['album_artist'] != t['albumartist'])
+        cjk_albumartist_needs_repair = bool(
+            (_has_asian(t.get('album_artist', '')) or _has_asian(t.get('albumartist', '')))
+            and (t.get('album_artist') or t.get('albumartist'))
+            and (_canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''))
+                 != (t.get('albumartist') or t.get('album_artist', ''))))
+        if duplicate_albumartist or cjk_albumartist_needs_repair:
+            new = _canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''))
             print(f'{tg}MP3-ALBUMARTIST {f.parent.parent.name} / {f.parent.name}: '
-                  f'TPE2="{t["album_artist"][:30]}" + TXXX="{new[:30]}" -> "{new[:40]}"')
+                  f'TPE2="{t.get("album_artist", "")[:30]}" + TXXX="{t.get("albumartist", "")[:30]}" -> "{new[:40]}"')
             if dry_run:
                 n_stray += 1
                 continue
@@ -5587,119 +6087,146 @@ def run_unify_artists(dry_run=False, base=None):
                 errors += 1
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
 
-    # --- B. un solo nome per artista, cartella per cartella
     artists = sorted(d for d in base.iterdir()
                      if d.is_dir() and d.name.lower() not in SKIP_TOP
                      and not d.name.startswith('.'))
     for art in artists:
-        variants = _artist_variants(art.name)
-        if not (_has_asian(art.name) or any(_has_asian(x) for x in variants)):
-            continue                    # nessuna scrittura CJK possibile: non leggo i tag
         files = _audio_files(art)
-        flacs = [f for f in files if f.suffix.lower() == '.flac']
-        others = [f for f in files if f.suffix.lower() in
-                  ('.mp3', '.m4a', '.mp4', '.ogg', '.opus')]
+        if not files:
+            continue
+        folder_is_asian = _has_asian(art.name)
+        prefetch_probe(files, 'artist_names')
+        probes = {f: probe(f) for f in files}
+        candidate = {}
+        values = []
+        for f, t in probes.items():
+            relevant = [t.get(k, '') for k in ('artist', 'albumartist', 'album_artist', 'artists', 'albumartists')]
+            if folder_is_asian or any(_has_asian(v) for v in relevant):
+                candidate[f] = True
+            for value in relevant:
+                values.extend(p.strip() for p in value.split(';') if p.strip())
+
+        # I valori raw FLAC conservano tag ARTISTS/ALBUMARTISTS ripetuti che ffprobe unisce.
+        raw = {}
+        flacs = [f for f in files if f.suffix.lower() == '.flac'
+                 and (folder_is_asian or f in candidate)]
         if flacs and not have_mf:
-            print(f'[ERRORE] metaflac non trovato: salto i FLAC di {art.name}',
+            print(f'[ERRORE] metaflac non trovato: salto i tag FLAC di {art.name}',
                   file=sys.stderr)
             flacs = []
-        prefetch_probe(others, 'artist_names')
-        raw, probes, vals = {}, {}, []
         for f in flacs:
             try:
                 raw[f] = _flac_raw_tags(f)
+                for k, v in raw[f]:
+                    if k in _FLAC_ARTIST_TAGS:
+                        values.extend(p.strip() for p in v.split(';') if p.strip())
             except Exception as e:
                 errors += 1
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
-                continue
-            for k, v in raw[f]:
-                if k in _FLAC_ARTIST_TAGS:
-                    vals += [p.strip() for p in v.split(';') if p.strip()]
-        for f in others:
-            probes[f] = probe(f)
-            for k in ('artist', 'albumartist'):
-                vals += [p.strip() for p in probes[f].get(k, '').split(';') if p.strip()]
-        canon = _folder_canon(art.name, vals)
-        if not canon:
-            continue
-        variants = variants | {norm(canon)}
-        changed = 0
 
-        for f in raw:
+        variants = _artist_variants(art.name)
+        canon = _folder_canon(art.name, values)
+        if canon:
+            variants |= {norm(canon)}
+
+        changed_this_folder = 0
+        # FLAC: canonicalizza ogni valore grezzo e rimuove alias duplicati in tutti i tag artista.
+        for f, raw_tags in raw.items():
             changes = {}
             for tag in _FLAC_ARTIST_TAGS:
-                olds = [v for k, v in raw[f] if k == tag]
+                olds = [v for k, v in raw_tags if k == tag]
                 if not olds:
                     continue
                 news = []
-                for v in olds:
-                    nv = _remap_artist_value(v, variants, canon)
-                    if nv not in news:
-                        news.append(nv)
+                for old in olds:
+                    new_value = _remap_artist_value(old, variants, canon) if canon else old
+                    new_value = _canonicalize_artist_value(new_value)
+                    news.append(new_value)
+                news = _canonicalize_artist_tag_values(news)
                 if news != olds:
                     changes[tag] = news
             if not changes:
                 continue
-            changed += 1
             if dry_run:
+                changed_this_folder += 1
+                print(f'[dry] ARTIST-TAG {f}: ' + ', '.join(
+                    f'{tag}={news}' for tag, news in changes.items()))
                 continue
-            args = [*METAFLAC]
-            for tag, vs in changes.items():
-                args.append(f'--remove-tag={tag}')
-                args += [f'--set-tag={tag}={v}' for v in vs]
-            args.append(str(f))
             try:
+                args = [*METAFLAC]
+                for tag, vals in changes.items():
+                    args.append(f'--remove-tag={tag}')
+                    args.extend(f'--set-tag={tag}={v}' for v in vals)
+                args.append(str(f))
                 r = subprocess.run(args, capture_output=True, timeout=120)
                 if r.returncode != 0:
                     raise RuntimeError(f'metaflac exit {r.returncode}: '
                                        f'{r.stderr.decode("utf-8", "replace").strip()[:160]}')
+                invalidate_probe_cache([f])
+                changed_this_folder += 1
             except Exception as e:
                 errors += 1
-                changed -= 1
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
 
-        for f in others:
-            t = probes[f]
+        # Non-FLAC e FLAC non grezzi: corregge globalmente i campi esposti da ffprobe.
+        for f, t in probes.items():
+            if f in raw:
+                continue
             aa_key = 'albumartist' if f.suffix.lower() in ('.ogg', '.opus') else 'album_artist'
             changes = {}
-            for src_key, out_key in (('artist', 'artist'), ('albumartist', aa_key)):
-                old = t.get(src_key, '')
-                if not old:
-                    continue
-                new = _remap_artist_value(old, variants, canon)
-                if new != old:
-                    changes[out_key] = new
+            artist_old = t.get('artist', '')
+            if artist_old:
+                artist_new = _remap_artist_value(artist_old, variants, canon) if canon else artist_old
+                artist_new = _canonicalize_artist_value(artist_new)
+                if artist_new != artist_old:
+                    changes['artist'] = artist_new
+            # ffprobe exposes MP3/M4A album artist inconsistently as album_artist or
+            # albumartist. Read either spelling and write the canonical muxer-specific key.
+            albumartist_old = t.get('albumartist') or t.get('album_artist') or ''
+            if albumartist_old:
+                albumartist_new = _remap_artist_value(albumartist_old, variants, canon) if canon else albumartist_old
+                albumartist_new = _canonicalize_artist_value(albumartist_new)
+                if albumartist_new != albumartist_old:
+                    changes[aa_key] = albumartist_new
+                if f.suffix.lower() == '.mp3' and t.get('albumartist'):
+                    changes['albumartist'] = ''  # elimina l'eventuale TXXX duplicato
             if not changes:
                 continue
-            changed += 1
             if dry_run:
+                changed_this_folder += 1
+                print(f'[dry] ARTIST-TAG {f}: ' + ', '.join(
+                    f'{key}={value}' for key, value in changes.items()))
                 continue
             try:
                 _rewrite_nonflac(f, changes)
+                changed_this_folder += 1
             except Exception as e:
                 errors += 1
-                changed -= 1
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
 
-        if changed:
+        if changed_this_folder:
             n_art += 1
-            n_files += changed
-            print(f'{tg}ARTIST-NAMES {art.name}: {changed} file -> "{canon}"')
+            n_files += changed_this_folder
+            print(f'{tg}ARTIST-NAMES {art.name}: {changed_this_folder} file modificati'
+                  + (f' -> "{canon}"' if canon else ' (normalizzazione CJK globale)'))
 
+    # I backup sono cleanup distruttivo: in dry-run non rimuoviamo nulla.
     removed = 0
-    for b in base.rglob('*.meta-backup'):
-        if b.with_name(b.name[:-len('.meta-backup')]).exists():
-            try:
-                b.unlink()
-                removed += 1
-            except OSError:
-                pass
-    print(f'artist_names: {n_art} artisti unificati ({n_files} file) | '
+    if not dry_run:
+        for b in base.rglob('*.meta-backup'):
+            if b.with_name(b.name[:-len('.meta-backup')]).exists():
+                try:
+                    b.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+    print(f'artist_names: {n_art} cartelle con tag corretti ({n_files} file) | '
           f'mp3 con doppio album artist riparati: {n_stray} | errori: {errors} | '
           f'backup rimossi: {removed}')
+    return {'folders': n_art, 'files': n_files, 'stray_albumartist': n_stray, 'errors': errors}
     if n_art or n_stray:
-        print("[i] su Navidrome le voci artista vecchie spariscono col full scan "
-              "(parte da solo a fine lavoro, salvo --no-scan)")
+        print('[i] Navidrome deve completare un full scan per rimuovere le vecchie voci artista dal DB '
+              '(lo scan parte a fine pipeline, salvo --no-scan)')
 
 
 # ===================== fase: mp3 vs flac =====================
@@ -5988,6 +6515,155 @@ def _authoritative_year(album, files, probe_fn, cache):
     return None, None
 
 
+def _root_album_title_keys(root, files):
+    """Titoli di release ricavati da cartella e tag; include il nome parent solo per sottodischi."""
+    values = [root.name]
+    tags = [probe_dur(f)[0] for f in files]
+    values.extend(t.get('album', '') for t in tags if t.get('album'))
+    # Quando il nome cartella è Disc/CD/Vinyl + numero, titolo album è spesso il parent.
+    if re.fullmatch(r'(?:cd|disc|disk|vinyl|lp)\s*\d+', root.name, re.I):
+        values.append(root.parent.name)
+    keys = set().union(*(_album_title_keys(v) for v in values)) if values else set()
+    return keys, tags
+
+
+def _remove_musicbrainz_ids(paths, dry_run=False, drop_album=True, drop_releasegroup=True):
+    """Rimuove i soli ID richiesti, su tutti i formati; preview senza modifiche."""
+    changed = errors = 0
+    for f in paths:
+        tags = probe_dur(f)[0]
+        diff = {}
+        if drop_album and tags.get('musicbrainz_albumid'):
+            diff['musicbrainz_albumid'] = None
+        if drop_releasegroup and tags.get('musicbrainz_releasegroupid'):
+            diff['musicbrainz_releasegroupid'] = None
+        if not diff:
+            continue
+        kind = '/'.join(diff)
+        print(f"    {'[dry] ' if dry_run else ''}strip {kind}: {f}")
+        if dry_run:
+            changed += 1
+            continue
+        try:
+            if f.suffix.lower() == '.flac':
+                write_flac(f, diff)
+            else:
+                _rewrite_nonflac(f, diff)
+            changed += 1
+        except Exception as e:
+            errors += 1
+            print(f'[ERRORE] rimozione MBID {f}: {e}', file=sys.stderr)
+    return changed, errors
+
+
+def _repair_mbid_sanity(base, cache, tcache, dry_run=False):
+    """Verifica MBID riutilizzati tra release e MBID discordanti dentro un album logico.
+
+    La vecchia logica guardava pochi file e ripuliva soltanto FLAC. Qui il gruppo e' l'album intero
+    (inclusi CD1/CD2), si controllano tutti i formati e non si sceglie una release a maggioranza
+    quando una singola cartella contiene piu' album-ID incompatibili.
+    """
+    base = Path(base)
+    roots = {}
+    for rel in _walk_audio(base, AUDIO_EXT):
+        if rel[-1].endswith(('.backup', '.meta-backup')) or '.tmp.' in rel[-1]:
+            continue
+        f = base.joinpath(*rel)
+        roots.setdefault(_album_root_for_file(base, f), []).append(f)
+    prefetch_probe((f for fs in roots.values() for f in fs), 'mbid_sanity')
+
+    root_tags = {root: [probe_dur(f)[0] for f in files] for root, files in roots.items()}
+    removed_roots = removed_files = errors = reviews = 0
+    roots_with_conflicting_mbids = set()
+
+    # Different MUSICBRAINZ_ALBUMID values inside one physical album tree can split it in
+    # Navidrome. Do not pick an arbitrary majority: remove those per-release IDs. Preserve a
+    # release-group ID when it is common; remove it too only when the root has conflicting groups.
+    for root, tags_for_root in root_tags.items():
+        ids_here = {str(t.get('musicbrainz_albumid') or '').strip().lower()
+                    for t in tags_for_root if str(t.get('musicbrainz_albumid') or '').strip()}
+        rgids_here = {str(t.get('musicbrainz_releasegroupid') or '').strip().lower()
+                      for t in tags_for_root if str(t.get('musicbrainz_releasegroupid') or '').strip()}
+        paths = roots[root]
+        # ffmpeg cannot reliably preserve MUSICBRAINZ_ALBUMID in M4A/MP4. A unique ID on
+        # FLAC plus an M4A without the field leaves one physical album split in Navidrome.
+        # In that case remove the ID from every track in this album root instead of repeatedly
+        # attempting an unwritable propagation every night.
+        unwritable_missing_album_id = any(
+            f.suffix.lower() in ('.m4a', '.mp4')
+            and not str(t.get('musicbrainz_albumid') or '').strip()
+            for f, t in zip(paths, tags_for_root)
+        )
+        drop_album = len(ids_here) > 1 or (len(ids_here) == 1 and unwritable_missing_album_id)
+        drop_releasegroup = len(rgids_here) > 1
+        if not (drop_album or drop_releasegroup):
+            continue
+        reasons = []
+        if len(ids_here) > 1:
+            reasons.append(f'{len(ids_here)} album ID diversi')
+        elif drop_album and unwritable_missing_album_id:
+            reasons.append('album ID presente ma non propagabile ai tag M4A/MP4')
+        if drop_releasegroup:
+            reasons.append(f'{len(rgids_here)} release-group ID diversi')
+        print(f"{'[dry] ' if dry_run else ''}MBID-SPLIT: '{root}' contiene {' e '.join(reasons)}; "
+              f"rimuovo solo le famiglie di ID discordanti")
+        n, err = _remove_musicbrainz_ids(paths, dry_run=dry_run,
+                                         drop_album=drop_album, drop_releasegroup=drop_releasegroup)
+        removed_roots += 1
+        removed_files += n
+        errors += err
+        if drop_album:
+            roots_with_conflicting_mbids.add(root)
+
+    # Find an MBID incorrectly reused across separate album roots. Roots already handled above
+    # are excluded so their stale IDs cannot trigger duplicate work in this pass.
+    mbid_roots = {}
+    for root, files in roots.items():
+        if root in roots_with_conflicting_mbids:
+            continue
+        for f, tags in zip(files, root_tags[root]):
+            mb = (tags.get('musicbrainz_albumid') or '').strip().lower()
+            if mb:
+                mbid_roots.setdefault(mb, {}).setdefault(root, set()).add(f)
+
+    for mbid, places in sorted(mbid_roots.items()):
+        if len(places) < 2:
+            continue
+        try:
+            _, release_title = _mb_release_info(None, mbid, cache, tcache)
+        except Exception as e:
+            release_title = ''
+            print(f'[review] MusicBrainz lookup fallito per {mbid}: {e}', file=sys.stderr)
+        release_keys = _album_title_keys(release_title) if release_title else set()
+        if not release_keys:
+            # Nessun titolo attendibile: non inventiamo quale directory sia quella sbagliata.
+            reviews += 1
+            print(f'[review] MBID {mbid} appare in {len(places)} cartelle ma MusicBrainz non ha '
+                  'un titolo verificabile; nessun ID rimosso')
+            for root, files_with_id in places.items():
+                print(f'    - {root}: {len(files_with_id)} file con ID')
+            continue
+
+        for root, files_with_id in places.items():
+            keys, tags = _root_album_title_keys(root, roots[root])
+            best, label = _album_title_similarity(release_keys, keys)
+            if best >= 0.90:
+                continue
+            # Rimuove il valore errato da tutti i file che lo portano, non solo il primo campione.
+            # In questo modo la fase album_unify non può ripristinarlo da un file rimasto indietro.
+            print(f"{'[dry] ' if dry_run else ''}MBID-SANITY: '{root}' contiene MBID {mbid} "
+                  f"della release '{release_title}', titolo locale non concorde "
+                  f"(similarita' {best:.2f} {label}); rimuovo l'ID dall'intero sottoinsieme")
+            n, err = _remove_musicbrainz_ids(sorted(files_with_id), dry_run=dry_run)
+            removed_roots += 1
+            removed_files += n
+            errors += err
+
+    print(f'MBID sanity: {removed_roots} root release con ID errati | '
+          f'{removed_files} file tag rimossi | {reviews} gruppi da verificare | {errors} errori')
+    return {'roots': removed_roots, 'files': removed_files, 'reviews': reviews, 'errors': errors}
+
+
 def run_date_heal(dry_run=False, base=None):
     import shutil as _sh
     if not dry_run and not _sh.which('metaflac'):
@@ -6020,71 +6696,11 @@ def run_date_heal(dry_run=False, base=None):
             folders.setdefault(f.parent, []).append(f)
     prefetch_probe([f for fl in folders.values() for f in fl], 'date_heal')
 
-    # --- FASE MBID SANITY: uno stesso MUSICBRAINZ_ALBUMID in piu' cartelle
-    # con nomi diversi = PID condiviso = album fusi per sempre (Navidrome
-    # PID.Album: musicbrainz_albumid vince su tutto). Strippo l'ID dalle
-    # cartelle il cui nome NON corrisponde al titolo della release MB.
-    mbid_map = {}
-    for album, files in folders.items():
-        for f in files[:6]:
-            t = probe_dur(f)[0]
-            mb = t.get('musicbrainz_albumid', '')
-            if mb:
-                mbid_map.setdefault(mb, {}).setdefault(album, []).append(f)
-                break
-    for mb, places in mbid_map.items():
-        if len(places) < 2:
-            continue
-        _, title = _mb_release_info(None, mb, cache, tcache)
-        nt = norm(album_base(title)) if title else ''
-        if not nt:
-            continue
-        for album, files in places.items():
-            # confronto col TAG ALBUM dei file (non col nome cartella: le
-            # convenzioni di naming variano, il tag e' la verita' di grouping)
-            alb_tags = [probe_dur(f)[0].get('album', '') for f in files[:8]]
-            alb_tags = [a for a in alb_tags if a]
-            maj = Counter(alb_tags).most_common(1)[0][0] if alb_tags else album.name
-            # nome cartella e nome GENITORE (i sottodischi 'Vinyl 01' hanno
-            # il titolo un livello sopra)
-            name_bases = [norm(album_base(album.name)),
-                          norm(album_base(album.parent.name))]
-            # tiene l'ID se: tag album corrisponde, OPPURE nome cartella
-            # corrisponde, OPPURE il titolo release e' contenuto nel nome
-            # cartella (prefissi tipo '虹伝説 The Rainbow Goblins'). Il
-            # contenimento vale SOLO title->folder, mai il contrario:
-            # 'ok computer oknotok' in 'ok computer' e' falso, cosi' la
-            # cartella 'OK Computer' pura perde l'ID del box OKNOTOK.
-            if (norm(album_base(maj)) == nt or nt in name_bases
-                    or any(len(nt) >= 4 and nt in nb for nb in name_bases)):
-                continue   # questa cartella e' la release corretta: tiene l'ID
-            print(f"{'[dry] ' if dry_run else ''}MBID-SANITY: '{album.parent.name} / {album.name}' "
-                  f"ha MUSICBRAINZ_ALBUMID di '{title}': rimuovo l'ID (merge forzato)")
-            if not dry_run:
-                ok = True
-                # `files` contiene UN solo file (quello su cui e' stato letto l'ID: il
-                # ciclo di raccolta fa break). Prima l'ID veniva tolto da quel file e
-                # album_unify lo ricopiava dagli altri la stessa notte (OK Computer,
-                # FINGER DANCIN'...): il 'merge forzato' non funzionava mai.
-                album_files = folders.get(album, files)
-                non_flac = [f for f in album_files if f.suffix.lower() != '.flac']
-                if non_flac:
-                    print(f"    [ATTENZIONE] {len(non_flac)} file non-FLAC in '{album.name}' "
-                          f"conservano l'ID (metaflac non li gestisce)", file=sys.stderr)
-                for f in album_files:
-                    if f.suffix.lower() != '.flac':
-                        continue
-                    r = subprocess.run([*METAFLAC, '--remove-tag=MUSICBRAINZ_ALBUMID',
-                                        '--remove-tag=MUSICBRAINZ_RELEASEGROUPID', str(f)],
-                                       capture_output=True, timeout=60)
-                    if r.returncode != 0:
-                        ok = False
-                        print(f'    [ERRORE] metaflac su {f.name}: '
-                              f'{r.stderr.decode()[:200]}', file=sys.stderr)
-                if not ok:
-                    print(f'    [ATTENZIONE] strip parziale in {album}: '
-                          f'alcuni file hanno ancora l\'ID', file=sys.stderr)
-                stripped += 1
+    # MBID sanity condivisa con la utility di riparazione album: verifica l'intero album
+    # logico, inclusi sottodischi e tutti i formati audio.
+    mbid_result = _repair_mbid_sanity(base, cache, tcache, dry_run=dry_run)
+    stripped = mbid_result.get('roots', 0)
+    errors += mbid_result.get('errors', 0)
 
     for album, files in sorted(folders.items()):
         if len(album.parent.name) < 1:
@@ -6161,6 +6777,7 @@ def _metaflac_run(*args, path):
     r = subprocess.run([*METAFLAC, *args, str(path)], capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         raise RuntimeError(f'metaflac exit {r.returncode}: {(r.stderr or r.stdout).strip()[:160]}')
+    invalidate_probe_cache([path])
 
 
 def _flac_tags(path, *names):
@@ -7434,6 +8051,22 @@ def _album_filter(name, artist, album_q, artist_q):
             and (not artist_q or artist_q.lower() in (artist or '').lower()))
 
 
+def _artist_entity_cjk_stem(name):
+    """Unisce artista CJK puro alla stessa forma con gloss latino finale."""
+    raw = unicodedata.normalize('NFKC', str(name or '')).strip()
+    previous = None
+    while raw and raw != previous:
+        previous = raw
+        match = re.search(r'\s*[\(（\[【]([^\)）\]】]+)[\)）\]】]\s*$', raw)
+        if not match:
+            break
+        inner = match.group(1).strip()
+        if _has_asian(inner) or not re.search(r'[A-Za-z]', inner):
+            break
+        raw = raw[:match.start()].strip()
+    return norm(raw)
+
+
 # ===================== fase: fix collab album artist =====================
 # Navidrome mostra l'album artist unendo con " • " i VALORI del tag ALBUMARTIST. Se un FLAC ha
 # ALBUMARTIST="JPEGMAFIA" e ALBUMARTIST="JPEGMAFIA & Danny Brown" (due valori: uno e' gia'
@@ -7911,17 +8544,135 @@ try:
 except Exception:
     _HAS_NP = False
 
-QUALIFIERS = re.compile(r'\(.*?\)|\[.*?\]')
+_ALBUM_EDITION_QUALIFIER = re.compile(
+    r'\b(?:19|20)\d{2}\b|\b(?:remaster(?:ed)?|deluxe|anniversary|'
+    r'special edition|limited edition|expanded edition|reissue|bonus tracks?|'
+    r'demo(?:s)?|live version|live recording|mono|stereo)\b', re.I)
+_ALBUM_TRAILING_QUALIFIERS = re.compile(
+    r'(?:\s+|^)(?:(?:19|20)\d{2}|remaster(?:ed)?|deluxe|anniversary|'
+    r'edition|version|reissue|expanded|bonus|single|ep|demo(?:s)?|live|'
+    r'mono|stereo)(?:\s+(?:edition|version|remaster(?:ed)?|deluxe|'
+    r'anniversary|expanded|bonus|tracks?))*$', re.I)
+
+
+def _album_identity_text(name: str) -> str:
+    """Remove only edition annotations; preserve meaningful parenthetical title text."""
+    raw = unicodedata.normalize('NFKC', str(name or '')).strip()
+
+    def replace_bracket(match):
+        inside = next((g for g in match.groups() if g is not None), '')
+        prefix = raw[:match.start()]
+        # Release/remaster annotations are safe to ignore for duplicate grouping.
+        if _ALBUM_EDITION_QUALIFIER.search(inside):
+            return ' '
+        # CJK title with an English/romaji gloss: the gloss is an alias, not a second title.
+        if _has_asian(prefix) and re.search(r'[A-Za-z]', inside) and not _has_asian(inside):
+            return ' '
+        # Keep semantic parentheses such as (Part II), (Drank), or (Soundtrack).
+        return ' ' + inside + ' '
+
+    raw = re.sub(r'\(([^()]*)\)|\[([^\[\]]*)\]|\{([^{}]*)\}', replace_bracket, raw)
+    return raw
 
 
 def album_base(name: str) -> str:
-    """Nome album 'fisso': senza parentesi, anni, remaster/deluxe/..."""
-    s = norm(name)
-    s = QUALIFIERS.sub(' ', s)
-    s = re.sub(r'\b(19|20)\d{2}\b', ' ', s)
-    s = re.sub(r'\b(remaster\w*|deluxe|anniversary|edition|version|reissue|'
-               r'expanded|bonus|single|ep|demos?|live)\b', ' ', s)
+    """Conservative album identity: ignores edition suffixes/years and CJK glosses.
+
+    Unlike norm(), this does not discard all parenthetical words or remove the word
+    'live' from the middle of a meaningful title such as 'Blackbox Live Recorder'.
+    """
+    original = norm_bare(_album_identity_text(name))
+    s = re.sub(r'\b(?:19|20)\d{2}\b', ' ', original)
+    # Strip only edition markers at the tail; don't rewrite words in the title body.
+    previous = None
+    while s and s != previous:
+        previous = s
+        s = _ALBUM_TRAILING_QUALIFIERS.sub('', s).strip()
+    # Do not turn legitimate titles consisting only of a year/qualifier into an empty key.
+    if not s.strip():
+        s = original
     return re.sub(r'\s+', ' ', s).strip()
+
+
+def _album_title_keys(value: str):
+    """Chiavi identita' album: title normalizzato, alias curati e fonetica CJK offline.
+
+    Non interroga il traduttore automatico durante il grouping, per evitare richieste di rete
+    dentro un'operazione di manutenzione che deve essere ripetibile.
+    """
+    raw = str(value or '').strip()
+    if not raw:
+        return set()
+    cleaned = album_base(raw)
+    keys = {norm_bare(cleaned)}
+    # NAME_TRANSLATIONS / NAME_FIXES in entrambe le direzioni.
+    for candidate in (_preferred_name_for_key(norm(cleaned)),):
+        if candidate:
+            keys.add(norm_bare(album_base(candidate)))
+    reverse = _name_fixes_rev()
+    for alias in reverse.get(norm(cleaned), set()):
+        keys.add(norm_bare(album_base(alias)))
+    # Una traduzione automatica gia' cacheata puo' collegare titoli CJK e inglesi senza
+    # generare richieste di rete durante l'analisi o la manutenzione album.
+    if _AUTO_TRANSLATABLE_RE.search(raw):
+        try:
+            entry = _auto_translation_cache_load().get(norm(raw))
+            if isinstance(entry, dict):
+                age = int(time.time()) - int(entry.get('checked_at') or 0)
+                ttl = int(AUTO_NAME_TRANSLATION_CONFIG.get('cache_days', 365)) * 86400
+                confidence = float(entry.get('confidence') or 0)
+                if age <= ttl and confidence >= float(AUTO_NAME_TRANSLATION_CONFIG.get('min_confidence', 0.72)):
+                    cached_translation = str(entry.get('translation') or '')
+                    if cached_translation:
+                        keys.add(norm_bare(album_base(cached_translation)))
+        except Exception:
+            pass
+    # Alias fonetico solo come chiave secondaria, non come valore da scrivere.
+    if _has_asian(raw):
+        phonetic = _phonetic_kakasi(cleaned)
+        if not phonetic and _HANGUL.search(cleaned) and callable(_HANGUL_FN):
+            try:
+                phonetic = norm(_HANGUL_FN(cleaned))
+            except Exception:
+                phonetic = ''
+        if phonetic:
+            keys.add(norm_bare(album_base(phonetic)))
+    return {k for k in keys if k and len(k) >= 2}
+
+
+def _album_title_similarity(keys_a, keys_b):
+    exact = set(keys_a) & set(keys_b)
+    if exact:
+        return 1.0, next(iter(exact))
+    best = (0.0, '')
+    for a in keys_a:
+        for b in keys_b:
+            if min(len(a), len(b)) < 7:
+                continue
+            score = difflib.SequenceMatcher(None, a, b).ratio()
+            if score > best[0]:
+                best = (score, f'{a} ~ {b}')
+    return best
+
+
+def _artist_identity_keys(value):
+    keys = set(_artist_variants(value))
+    if value:
+        keys.add(norm(value))
+    return {k for k in keys if k}
+
+
+def _album_root_for_file(base: Path, f: Path):
+    """Identifica Artist/Album come radice logica anche per Artist/Album/CD1/track.flac."""
+    try:
+        parts = f.relative_to(base).parts
+    except ValueError:
+        return f.parent
+    if len(parts) >= 3:
+        return base / parts[0] / parts[1]
+    if len(parts) >= 2:
+        return base / parts[0]
+    return f.parent
 
 
 def _audio_files(folder: Path):
@@ -8270,6 +9021,609 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
         print(f"[i] duplicati nel cestino: {DEDUPE_TRASH / stamp}")
     if apply:
         print("[i] dopo verifica: scan rapido su Navidrome, poi svuota il cestino.")
+
+
+def _album_candidate_pairs(albums):
+    """Return unique album-index pairs which share at least one artist identity.
+
+    An inverted index avoids comparing every album in the library against every other album.
+    The resulting pairs are sorted so diagnostic reports remain deterministic across runs.
+    """
+    indices_by_artist = {}
+    for idx, album in enumerate(albums):
+        for artist_key in album.get('artist_keys', ()):
+            if artist_key:
+                indices_by_artist.setdefault(artist_key, []).append(idx)
+    candidate_pairs = set()
+    for indices in indices_by_artist.values():
+        if len(indices) < 2:
+            continue
+        for pos, left in enumerate(indices[:-1]):
+            for right in indices[pos + 1:]:
+                candidate_pairs.add((left, right) if left < right else (right, left))
+    return sorted(candidate_pairs)
+
+
+def run_diagnose_album_splits(album_filter=None, artist_filter=None):
+    """Legge soltanto il DB Navidrome e segnala duplicati/split album e artisti CJK.
+
+    Scrive un report con id DB, titoli, artisti, MBID, conteggio tracce e percorsi d'esempio.
+    Serve a verificare sul server i casi reali prima di applicare una riparazione dei tag.
+    """
+    if not NAVIDROME_DB.exists():
+        print(f'[ERRORE] DB Navidrome non trovato: {NAVIDROME_DB}. '
+              'Esegui questa diagnostica sul server che ospita Navidrome.')
+        return False
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    report_path = SCRIPT_DIR / 'logs' / f'album_db_diagnostics_{stamp}.txt'
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f'Navidrome album/artist diagnostic — {time.strftime("%Y-%m-%d %H:%M:%S")}',
+             f'Database: {NAVIDROME_DB}', '']
+    with _nd_db(write=False) as con:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        acols = _nd_table_cols(con, 'album')
+        mcols = _nd_table_cols(con, 'media_file')
+        required_album = {'id', 'name', 'album_artist'}
+        required_media = {'album_id'}
+        if not required_album <= acols or not required_media <= mcols:
+            print(f'[ERRORE] schema DB non riconosciuto: album={sorted(acols)} media_file={sorted(mcols)}')
+            return False
+        mbid_col = 'mbz_album_id' if 'mbz_album_id' in acols else None
+        artist_id_col = next((c for c in ('album_artist_id', 'albumartist_id', 'artist_id') if c in acols), None)
+        version_col = next((c for c in ('album_version', 'albumversion', 'version') if c in acols), None)
+        release_date_col = next((c for c in ('release_date', 'releasedate', 'releaseDate') if c in acols), None)
+        rgid_col = next((c for c in ('mbz_release_group_id', 'mbz_releasegroup_id', 'mbz_release_groupid') if c in acols), None)
+        extra_cols = (mbid_col, artist_id_col, version_col, release_date_col, rgid_col)
+        extra_exprs = [f'"{col}"' if col else "''" for col in extra_cols]
+        missing_filter = ' WHERE (missing IS NULL OR missing=0)' if 'missing' in acols else ''
+        album_rows = con.execute(
+            f'SELECT id, name, album_artist, {", ".join(extra_exprs)} FROM album{missing_filter}'
+        ).fetchall()
+        m_missing = ' WHERE (missing IS NULL OR missing=0)' if 'missing' in mcols else ''
+        m_fields = ['album_id']
+        if 'path' in mcols: m_fields.append('path')
+        if 'title' in mcols: m_fields.append('title')
+        media_rows = con.execute(f"SELECT {', '.join(m_fields)} FROM media_file{m_missing}").fetchall()
+        details = {}
+        for row in media_rows:
+            aid = row[0]
+            item = details.setdefault(aid, {'count': 0, 'paths': [], 'titles': []})
+            item['count'] += 1
+            if 'path' in m_fields and row[m_fields.index('path')]:
+                item['paths'].append(row[m_fields.index('path')])
+            if 'title' in m_fields and row[m_fields.index('title')]:
+                item['titles'].append(row[m_fields.index('title')])
+        albums = []
+        for album_row in album_rows:
+            aid, name, artist, mbid, artist_db_id, album_version, release_date, release_group_id = album_row
+            detail = details.get(aid)
+            if not detail or not _album_filter(name, artist, album_filter, artist_filter):
+                continue
+            keys = _album_title_keys(name)
+            albums.append({'id': aid, 'name': name or '', 'artist': artist or '',
+                           'mbid': mbid or '', 'artist_db_id': artist_db_id or '',
+                           'album_version': album_version or '', 'release_date': release_date or '',
+                           'release_group_id': release_group_id or '',
+                           'count': detail['count'], 'paths': detail['paths'],
+                           'titles': detail['titles'], 'keys': keys,
+                           'artist_keys': _artist_identity_keys(artist or '')})
+
+        # Pairwise duplicate candidates. Exact aliases are strongest; fuzzy title matches are
+        # reported as REVIEW only and never used to edit files automatically by this command.
+        parent = list(range(len(albums)))
+        pair_reason = {}
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        def union(i, j):
+            x, y = find(i), find(j)
+            if x != y: parent[y] = x
+        # Only compare albums sharing at least one artist identity. Fuzzy candidates are
+        # still review-only, and the helper returns deterministic pair order for stable reports.
+        fuzzy = []
+        for i, j in _album_candidate_pairs(albums):
+            a, b = albums[i], albums[j]
+            sim, label = _album_title_similarity(a['keys'], b['keys'])
+            edition_a = _album_explicit_edition_markers([a['name']])
+            edition_b = _album_explicit_edition_markers([b['name']])
+            edition_conflict = (edition_a != edition_b and bool(edition_a or edition_b))
+            version_a = str(a.get('album_version') or '').strip().casefold()
+            version_b = str(b.get('album_version') or '').strip().casefold()
+            version_conflict = version_a != version_b and bool(version_a or version_b)
+            if edition_conflict or version_conflict:
+                reason = ('explicit edition qualifier differs' if edition_conflict
+                          else f'ALBUMVERSION differs: {version_a!r} vs {version_b!r}')
+                fuzzy.append((i, j, sim, reason))
+            elif sim >= 0.999:
+                union(i, j)
+                pair_reason[(i,j)] = ('SAME IDENTITY KEY', sim, label)
+            elif sim >= 0.88:
+                fuzzy.append((i,j,sim,label))
+        groups = {}
+        for i,a in enumerate(albums): groups.setdefault(find(i), []).append(i)
+        duplicate_groups = [g for g in groups.values() if len(g) > 1]
+        lines.append(f'ALBUM DUPLICATE GROUPS (exact/known alias): {len(duplicate_groups)}')
+        for ix, group in enumerate(sorted(duplicate_groups, key=lambda g: (albums[g[0]]['artist'].casefold(), albums[g[0]]['name'].casefold())), 1):
+            lines.append(f'\n[{ix}] artist family: {albums[group[0]]["artist"]!r}')
+            for i in group:
+                a = albums[i]
+                paths = a['paths'][:3]
+                reason = next((pair_reason[k][0] for k in pair_reason if i in k and k[0] in group and k[1] in group), 'shared title alias')
+                lines.append(f'  album.id={a["id"]!r} tracks={a["count"]} name={a["name"]!r} '
+                             f'album_artist={a["artist"]!r} album_artist_db_id={a["artist_db_id"]!r} '
+                             f'mbid={a["mbid"]!r} release_group_id={a["release_group_id"]!r} '
+                             f'album_version={a["album_version"]!r} release_date={a["release_date"]!r} [{reason}]')
+                lines.extend(f'    path: {x}' for x in paths)
+        # An album MBID reused across visibly different DB album names can force a bad merge.
+        by_mbid = {}
+        for a in albums:
+            if a['mbid']:
+                by_mbid.setdefault(a['mbid'].strip().lower(), []).append(a)
+        reused_mbids = []
+        for mbid, rows in by_mbid.items():
+            distinct = {(norm_bare(row['name']), norm_bare(row['artist'])) for row in rows}
+            if len(rows) > 1 and len(distinct) > 1:
+                reused_mbids.append((mbid, rows))
+        lines.append(f'\nMBID REUSED ACROSS DIFFERENT ALBUM/ARTIST LABELS: {len(reused_mbids)}')
+        for mbid, rows in sorted(reused_mbids, key=lambda item: item[0]):
+            lines.append(f'  MBID={mbid!r}')
+            for row in rows:
+                lines.append(f"    id={row['id']!r} artist={row['artist']!r} album={row['name']!r} tracks={row['count']}")
+                lines.extend(f"      path: {path}" for path in row['paths'][:2])
+
+        lines.append(f'\nFUZZY TITLE CANDIDATES (review only): {len(fuzzy)}')
+        for i,j,sim,label in sorted(fuzzy, key=lambda x: -x[2]):
+            a,b=albums[i],albums[j]
+            lines.append(f'  score={sim:.3f} {a["artist"]!r}: {a["name"]!r} '
+                         f'(id={a["id"]!r}, {a["count"]} tracks) <-> {b["name"]!r} '
+                         f'(id={b["id"]!r}, {b["count"]} tracks) [{label}]')
+
+        # Inspect actual artist entities if this Navidrome version has an artist table.
+        artist_groups = []
+        if 'artist' in tables:
+            cols = _nd_table_cols(con, 'artist')
+            name_col = next((c for c in ('name','artist_name','artist') if c in cols), None)
+            id_col = 'id' if 'id' in cols else None
+            if name_col:
+                selected = ([id_col] if id_col else []) + [name_col]
+                ar = con.execute(f"SELECT {', '.join(selected)} FROM artist").fetchall()
+                by_name = {}
+                for row in ar:
+                    aid = row[0] if id_col else None
+                    name = row[1] if id_col else row[0]
+                    if not name or not _has_asian(name):
+                        continue
+                    stem = _artist_entity_cjk_stem(name)
+                    if stem:
+                        by_name.setdefault(stem, []).append((aid, name))
+                artist_groups = [v for v in by_name.values() if len(v) > 1]
+        lines.append(f'\nDUPLICATE CJK ARTIST ENTITY GROUPS (CJK-only vs bilingual): {len(artist_groups)}')
+        for i, group in enumerate(sorted(artist_groups, key=lambda g: g[0][1].casefold()), 1):
+            def artist_preference(name):
+                gloss = re.search(r'[\(（]([^\)）]*[A-Za-z][^\)）]*)[\)）]', name)
+                return (int(bool(_has_asian(name) and gloss)), len(gloss.group(1)) if gloss else 0, len(name))
+            preferred = max((name for _, name in group), key=artist_preference)
+            lines.append(f'  [{i}] CJK identity={_artist_entity_cjk_stem(preferred)!r}; '
+                         f'preferred display={preferred!r}')
+            for aid, name in group:
+                state = 'PREFERRED' if name == preferred else 'old alias (should disappear after tag fix + full scan)'
+                lines.append(f'    artist.id={aid!r} name={name!r} [{state}]')
+        known_names = _navidrome_artist_name_map(con)
+        compound_rows = []
+        if known_names and 'artist' in tables:
+            cols = _nd_table_cols(con, 'artist')
+            name_col = next((c for c in ('name', 'artist_name', 'artist') if c in cols), None)
+            if name_col:
+                for (raw_name,) in con.execute(f'SELECT "{name_col}" FROM artist'):
+                    raw_name = str(raw_name or '').strip()
+                    parts = [x.strip() for x in re.split(r'\s*;\s*', raw_name) if x.strip()]
+                    if len(parts) < 2:
+                        continue
+                    matches = [x for x in parts if norm(x) in known_names and norm(x) != norm(raw_name)]
+                    if matches:
+                        compound_rows.append((raw_name, parts, matches))
+        lines.append(f'\nSEMICOLON ARTIST CANDIDATES (must match DB component): {len(compound_rows)}')
+        for raw_name, parts, matches in compound_rows:
+            lines.append(f'  {raw_name!r} -> {parts!r}; DB matches: {matches!r}')
+        lines.append('\nNOTE: this report is read-only. Exact groups are strong candidates; fuzzy pairs are never auto-merged by diagnosis.')
+
+    report_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    print('\n'.join(lines[:40]))
+    if len(lines) > 40:
+        print(f'... report completo: {report_path}')
+    else:
+        print(f'\nReport: {report_path}')
+    return True
+
+
+def run_repair_albumversion_pids(dry_run=False, base=None):
+    """Make ALBUMVERSION consistent per logical album root for Navidrome Album PIDs.
+
+    If all tagged tracks agree, propagate the single value to untagged tracks. If multiple
+    versions occur inside the same physical album tree, clear the conflicting field on all
+    tracks rather than arbitrarily selecting a value. Different explicit editions in separate
+    folders are stopped by the cross-folder review gate above.
+    """
+    base = Path(base) if base else LIBRARY_ROOT
+    roots = {}
+    for rel in _walk_audio(base, AUDIO_EXT):
+        if rel[-1].endswith(('.backup', '.meta-backup')) or '.tmp.' in rel[-1]:
+            continue
+        f = base.joinpath(*rel)
+        roots.setdefault(_album_root_for_file(base, f), []).append(f)
+    prefetch_probe((f for fs in roots.values() for f in fs), 'albumversion_pid_repair')
+    candidates = changed_files = errors = reviewed = 0
+    tg = '[dry] ' if dry_run else ''
+    for root, files in roots.items():
+        tags = [probe(f) for f in files]
+        values = {str(t.get('albumversion') or t.get('album_version') or '').strip()
+                  for t in tags if str(t.get('albumversion') or t.get('album_version') or '').strip()}
+        if not values:
+            continue
+        conflict = len(values) > 1
+        target = None if conflict else next(iter(values))
+        changes = []
+        for f, tag in zip(files, tags):
+            current = str(tag.get('albumversion') or tag.get('album_version') or '').strip()
+            if conflict and current:
+                changes.append((f, {'albumversion': None}))
+            elif not conflict and current != target:
+                changes.append((f, {'albumversion': target}))
+        if not changes:
+            continue
+        candidates += 1
+        if conflict:
+            reviewed += 1
+            action = f'ALBUMVERSION discordanti {sorted(values)!r}; rimuovo il campo dall’intero album logico'
+        else:
+            action = f'ALBUMVERSION unico {target!r}; propago ai tag mancanti'
+        print(f'{tg}ALBUM-PID {root}: {action}; {len(changes)} file')
+        if dry_run:
+            changed_files += len(changes)
+            continue
+        for f, diff in changes:
+            try:
+                if f.suffix.lower() == '.flac':
+                    write_flac(f, diff)
+                else:
+                    _rewrite_nonflac(f, diff)
+                changed_files += 1
+            except Exception as e:
+                errors += 1
+                print(f'[ERRORE] ALBUM-PID {f}: {type(e).__name__}: {e}', file=sys.stderr)
+    print(f'album PID version: {candidates} album logici, {changed_files} file '
+          f'{"da correggere" if dry_run else "corretti"}, {reviewed} conflitti risolti, {errors} errori')
+    return {'albums': candidates, 'files': changed_files, 'reviewed': reviewed, 'errors': errors}
+
+
+def _is_unknown_artist(value):
+    """Riconosce tag vuoti/generici comunemente mostrati come [Unknown Artist]."""
+    raw = unicodedata.normalize('NFKC', str(value or '')).strip().casefold()
+    raw = re.sub(r'^[\s\[\(\{【]+|[\s\]\)\}】]+$', '', raw).strip()
+    return raw in {'', 'unknown', 'unknown artist', 'unknownartist', '[unknown artist]',
+                   'n/a', 'na', 'none', 'null', 'unknown performer'}
+
+
+_GENERIC_ARTIST_NAMES = {
+    'various artists', 'various', 'va', 'soundtrack', 'unknown', 'unknown artist',
+    'unknownartist', 'n a', 'na', 'none', 'null',
+}
+
+
+def _artist_parts_for_inference(value):
+    """Componenti di un tag artista semplice; non interpreta '&' o virgole."""
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    return [x.strip() for x in re.split(r'\s*;\s*', raw) if x.strip()]
+
+
+def _infer_album_artist_for_unknown_tracks(tags):
+    """Infer an artist conservatively, without guessing on compilations.
+
+    A concrete, consistent ALBUMARTIST takes priority. If ALBUMARTIST is present
+    but generic or conflicting (for example, "Various Artists"), do not infer a
+    substitute from the most common track artist. Without usable ALBUMARTIST tags,
+    all known track artists must agree on a single normalized identity.
+    """
+    aa_counts = Counter()
+    aa_total = 0
+    aa_alias_conflict = False
+    aa_fields = ('albumartist', 'album_artist', 'albumartists')
+    for tag in tags:
+        values = [str(tag.get(key) or '').strip() for key in aa_fields]
+        values = [value for value in values if value and not _is_unknown_artist(value)]
+        if not values:
+            continue
+        aa_total += 1
+        # Multiple aliases on one file should describe the same artist list. If they
+        # disagree, don't hide the conflict by accepting whichever field comes first.
+        identities = {
+            tuple(sorted(norm(part) for part in _artist_parts_for_inference(value) if norm(part)))
+            for value in values
+        }
+        if len(identities) > 1:
+            aa_alias_conflict = True
+            continue
+        parts = [p for p in _artist_parts_for_inference(values[0])
+                 if norm(p) not in _GENERIC_ARTIST_NAMES]
+        if parts:
+            aa_counts['; '.join(parts)] += 1
+
+    if aa_total:
+        if not aa_alias_conflict and aa_counts:
+            best, count = aa_counts.most_common(1)[0]
+            # Include generic/conflicting albumartist tags in the denominator:
+            # they are evidence against inferring a single album identity.
+            if count / aa_total >= 0.6:
+                return _artist_parts_for_inference(best)
+        # A generic or conflicting ALBUMARTIST is a strong reason not to guess
+        # from track frequency (especially on compilations/soundtracks).
+        return []
+
+    track_artists = {}
+    for tag in tags:
+        values = [str(tag.get(key) or '').strip() for key in ('artist', 'artists')]
+        for raw in values:
+            if not raw or _is_unknown_artist(raw):
+                continue
+            for part in _artist_parts_for_inference(raw):
+                key = norm(part)
+                if key and key not in _GENERIC_ARTIST_NAMES:
+                    track_artists.setdefault(key, part)
+    if len(track_artists) == 1:
+        return [next(iter(track_artists.values()))]
+    return []
+
+
+def run_fix_unknown_artists(dry_run=False, base=None):
+    """Rimpiazza solo le tracce Unknown Artist quando l'album indica chiaramente gli artisti."""
+    base = Path(base) if base else LIBRARY_ROOT
+    dirs = list(unify_album_dirs(base))
+    prefetch_probe((f for _album, files in dirs for f in files), 'fix_unknown_artists')
+    seen = fixed_files = errors = ambiguous = 0
+    tg = '[dry] ' if dry_run else ''
+    for album, files in dirs:
+        tags = [probe(f) for f in files]
+        unknown_idxs = [i for i, tag in enumerate(tags) if _is_unknown_artist(tag.get('artist', ''))]
+        if not unknown_idxs:
+            continue
+        seen += len(unknown_idxs)
+        target = _infer_album_artist_for_unknown_tracks(tags)
+        if not target:
+            ambiguous += len(unknown_idxs)
+            print(f'[review] UNKNOWN-ARTIST {album.parent.name}/{album.name}: '
+                  f'{len(unknown_idxs)} tracce senza artista ma album multi-artista/ambiguo; lasciate intatte')
+            continue
+        display = '; '.join(target)
+        for i in unknown_idxs:
+            f = files[i]
+            print(f'{tg}UNKNOWN-ARTIST {album.parent.name}/{album.name}/{f.name}: '
+                  f'{tags[i].get("artist", "")!r} -> {display!r}')
+            if dry_run:
+                fixed_files += 1
+                continue
+            try:
+                if f.suffix.lower() == '.flac':
+                    # ARTIST singolo per il display, ARTISTS multivalore per i link DB.
+                    _flac_set_multi(f, {'ARTIST': [display], 'ARTISTS': target})
+                    invalidate_probe_cache([f])
+                else:
+                    _rewrite_nonflac(f, {'artist': display})
+                fixed_files += 1
+            except Exception as e:
+                errors += 1
+                print(f'[ERRORE] UNKNOWN-ARTIST {f}: {type(e).__name__}: {e}', file=sys.stderr)
+    print(f'unknown artist: {seen} tracce candidate, {fixed_files} '
+          f'{"da correggere" if dry_run else "corrette"}, {ambiguous} da rivedere, {errors} errori')
+    return {'candidates': seen, 'fixed': fixed_files, 'ambiguous': ambiguous, 'errors': errors}
+
+
+def _navidrome_artist_name_map(con=None):
+    """Mappa norm(nome artista) -> grafia in DB; vuota se la tabella non e' leggibile."""
+    if con is None:
+        if not NAVIDROME_DB.exists():
+            return {}
+        try:
+            with _nd_db(write=False) as db_con:
+                return _navidrome_artist_name_map(db_con)
+        except (sqlite3.Error, OSError) as e:
+            print(f'[warn] impossibile leggere gli artisti dal DB Navidrome: {e}', file=sys.stderr)
+            return {}
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'artist' not in tables:
+            return {}
+        cols = _nd_table_cols(con, 'artist')
+        name_col = next((c for c in ('name', 'artist_name', 'artist') if c in cols), None)
+        if not name_col:
+            return {}
+        found = {}
+        for row in con.execute(f'SELECT "{name_col}" FROM artist'):
+            name = str(row[0] or '').strip()
+            key = norm(name)
+            if key:
+                previous = found.get(key)
+                if previous is None or _artist_display_score(name) > _artist_display_score(previous):
+                    found[key] = name
+        return found
+    except sqlite3.Error as e:
+        print(f'[warn] impossibile leggere gli artisti dal DB Navidrome: {e}', file=sys.stderr)
+        return {}
+
+
+def _artist_display_score(name):
+    has_asian = _has_asian(name)
+    gloss = re.search(r'[\(（]([^\)）]*[A-Za-z][^\)）]*)[\)）]', str(name or ''))
+    titlecase = sum(c.isupper() for c in gloss.group(1)) if gloss else 0
+    return (int(bool(has_asian and gloss)), int(has_asian), titlecase, len(str(name or '')))
+
+
+def _split_semicolon_if_known(value, known_names):
+    """Split solo se almeno un componente e' gia' presente nel catalogo artisti Navidrome."""
+    raw = str(value or '').strip()
+    parts = [p.strip() for p in re.split(r'\s*;\s*', raw) if p.strip()]
+    if len(parts) < 2 or not any(norm(part) in known_names for part in parts):
+        return None
+    result, seen = [], set()
+    for part in parts:
+        key = norm(part)
+        canonical = known_names.get(key, part)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(canonical)
+    return result if len(result) >= 2 else None
+
+
+def run_split_known_artist_tags(dry_run=False, base=None):
+    """Normalizza i separatori ';' solo se il DB conferma almeno un componente artista."""
+    base = Path(base) if base else LIBRARY_ROOT
+    known = _navidrome_artist_name_map()
+    if not known:
+        print('[warn] split artisti con punto e virgola saltato: catalogo artisti Navidrome non leggibile',
+              file=sys.stderr)
+        return {'files': 0, 'errors': 0}
+    files = [base.joinpath(*r) for r in _walk_audio(base, AUDIO_EXT)]
+    prefetch_probe(files, 'split_known_artist_tags')
+    candidates = changed = errors = skipped = 0
+    tg = '[dry] ' if dry_run else ''
+    for f in files:
+        ext = f.suffix.lower()
+        try:
+            if ext == '.flac':
+                raw_tags = _flac_raw_tags(f)
+                values = {}
+                for key in ('ARTIST', 'ARTISTS', 'ALBUMARTIST', 'ALBUMARTISTS'):
+                    values[key] = [v for k, v in raw_tags if k == key]
+                updates = {}
+                for singular, plural in (('ARTIST', 'ARTISTS'), ('ALBUMARTIST', 'ALBUMARTISTS')):
+                    singular_values = values[singular]
+                    plural_values = values[plural]
+                    expanded_singular = []
+                    did_split = False
+                    for value in singular_values:
+                        parts = _split_semicolon_if_known(value, known)
+                        if parts:
+                            did_split = True
+                            expanded_singular.extend(parts)
+                        else:
+                            expanded_singular.append(value.strip())
+                    expanded_plural = []
+                    for value in plural_values:
+                        parts = _split_semicolon_if_known(value, known)
+                        if parts:
+                            did_split = True
+                            expanded_plural.extend(parts)
+                        else:
+                            expanded_plural.append(value.strip())
+                    if not did_split:
+                        continue
+                    # The singular tag remains one readable string with Navidrome's default '; ' delimiter.
+                    singular_display = '; '.join(dict.fromkeys(x for x in expanded_singular if x))
+                    desired_plural = []
+                    seen_plural = set()
+                    for value in expanded_plural + expanded_singular:
+                        key = norm(value)
+                        if key and key not in seen_plural:
+                            seen_plural.add(key)
+                            desired_plural.append(known.get(key, value))
+                    if singular_display and singular_values != [singular_display]:
+                        updates[singular] = [singular_display]
+                    if desired_plural and plural_values != desired_plural:
+                        updates[plural] = desired_plural
+                if not updates:
+                    continue
+                candidates += 1
+                print(f'{tg}SPLIT-ARTIST {f}: ' + ', '.join(f'{k}={v}' for k, v in updates.items()))
+                if not dry_run:
+                    _flac_set_multi(f, updates)
+                    invalidate_probe_cache([f])
+                changed += 1
+            else:
+                tag, _dur = probe_dur(f)
+                updates = {}
+                for dest_key, source_keys in (
+                    ('artist', ('artist', 'artists')),
+                    ('albumartist', ('albumartist', 'album_artist', 'albumartists')),
+                ):
+                    merged_parts, seen_parts = [], set()
+                    found_split = False
+                    for key in source_keys:
+                        value = str(tag.get(key) or '').strip()
+                        parts = _split_semicolon_if_known(value, known)
+                        if not parts:
+                            continue
+                        found_split = True
+                        for part in parts:
+                            identity = norm(part)
+                            if identity and identity not in seen_parts:
+                                seen_parts.add(identity)
+                                merged_parts.append(known.get(identity, part))
+                    if found_split and merged_parts:
+                        # Navidrome's default splitter requires '; ' (with a space).
+                        updates[dest_key] = '; '.join(merged_parts)
+                if not updates:
+                    continue
+                candidates += 1
+                print(f'{tg}SPLIT-ARTIST {f}: ' + ', '.join(f'{k}={v}' for k, v in updates.items()))
+                if not dry_run:
+                    _rewrite_nonflac(f, updates)
+                changed += 1
+        except Exception as e:
+            errors += 1
+            print(f'[ERRORE] split artisti {f}: {type(e).__name__}: {e}', file=sys.stderr)
+    print(f'split artisti da DB: {candidates} file candidati, {changed} '
+          f'{"da correggere" if dry_run else "corretti"}, {errors} errori')
+    return {'files': changed, 'errors': errors, 'skipped': skipped}
+
+
+def run_repair_album_groups(dry_run=True, base=None, include_existing_passes=True):
+    """Ripara album e artisti. --all riusa le fasi tag gia' eseguite, senza duplicarle."""
+    base = Path(base) if base else LIBRARY_ROOT
+    mbid_errors = artist_errors = unify_errors = 0
+    if include_existing_passes:
+        try:
+            mb_cache = json.loads(MBDATE_CACHE.read_text(encoding='utf-8'))
+        except Exception:
+            mb_cache = {}
+        try:
+            title_cache = json.loads(MBTITLE_CACHE.read_text(encoding='utf-8'))
+        except Exception:
+            title_cache = {}
+        mbid_result = _repair_mbid_sanity(base, mb_cache, title_cache, dry_run=dry_run)
+        stripped = mbid_result.get('roots', 0)
+        mbid_errors = mbid_result.get('errors', 0)
+        artist_result = run_unify_artists(dry_run=dry_run, base=base)
+        unify_result = run_unify(dry_run=dry_run, base=base)
+        artist_errors = artist_result.get('errors', 0) if isinstance(artist_result, dict) else 0
+        unify_errors = unify_result.get('errors', 0) if isinstance(unify_result, dict) else 0
+        # These are reusable lookup caches, not audio/tag outputs. Persist them even in
+        # preview mode so repeated --repair-album-groups dry-runs do not re-query MusicBrainz.
+        _write_json_atomic(MBDATE_CACHE, mb_cache)
+        _write_json_atomic(MBTITLE_CACHE, title_cache)
+    else:
+        stripped = 0
+    version_result = run_repair_albumversion_pids(dry_run=dry_run, base=base)
+    unknown_result = run_fix_unknown_artists(dry_run=dry_run, base=base)
+    split_result = run_split_known_artist_tags(dry_run=dry_run, base=base)
+    if not dry_run:
+        # Remove backups created by non-FLAC writes, including the extra repairs run under --all.
+        for backup in base.rglob('*.meta-backup'):
+            original = backup.with_name(backup.name[:-len('.meta-backup')])
+            if original.exists():
+                try:
+                    backup.unlink()
+                except OSError:
+                    pass
+    errors = mbid_errors + artist_errors + unify_errors + \
+             (version_result.get('errors', 0) if isinstance(version_result, dict) else 0) + \
+             (unknown_result.get('errors', 0) if isinstance(unknown_result, dict) else 0) + \
+             (split_result.get('errors', 0) if isinstance(split_result, dict) else 0)
+    print(f'album-group repair: {stripped} root con MBID errato identificati; '
+          f'{"PREVIEW" if dry_run else "APPLICATO"}; fuzzy sempre solo report; errori={errors}')
+    return errors == 0
 
 
 def rebuild_album(name_frag):
@@ -8842,11 +10196,10 @@ def main():
     ap.add_argument('--playlists', action='store_true',
                     help='forza anche la fase playlist quando combini altre fasi')
     ap.add_argument('--all', action='store_true',
-                    help='esegui TUTTE le fasi in sequenza: fix-owners -> dedupe-playlists -> '
-                         'dedupe release/tracce -> '
-                         'mp3-vs-flac -> clean-empty -> playlist+unify -> star-liked '
-                         '(dedupe e mp3-vs-flac in dry-run salvo --apply). Se esistono sessioni '
-                         'Exportify salvate scarica anche gli zip, come --fetch')
+                    help='esegui TUTTE le fasi: diagnosi album DB (fuzzy solo report), fix-owners, '
+                         'dedupe, tag/date, album repair, playlist e star-liked. --apply abilita le '
+                         'azioni dedupe; --dry-run mantiene le riparazioni tag in anteprima. Se esistono '
+                         'sessioni Exportify salvate scarica anche gli zip, come --fetch')
     ap.add_argument('--sync-only', action='store_true',
                     help='modalità quotidiana leggera: fetch + playlist M3U + fix proprietari + '
                          'star-liked; salta dedupe, mp3-vs-flac, conversione FLAC e manutenzione '
@@ -8896,6 +10249,10 @@ def main():
     ap.add_argument('--mb-no-search', action='store_true',
                     help='check-albums: controlla solo gli album con MUSICBRAINZ_ALBUMID, senza cercare '
                          'gli altri per artista+album')
+    ap.add_argument('--diagnose-album-splits', action='store_true',
+                    help='diagnostica read-only del DB: album duplicati/spezzati, fuzzy candidati (review only), artisti CJK e separatori ;')
+    ap.add_argument('--repair-album-groups', action='store_true',
+                    help='ripara tag album/artisti, Unknown Artist e artisti separati da ; se confermati dal DB; preview di default. In --all e integrato')
     ap.add_argument('--clean-empty', action='store_true',
                     help='fase: rimuovi cartelle senza audio vuote da >24h')
     ap.add_argument('--star-liked', action='store_true',
@@ -10700,17 +12057,39 @@ def _run(args):
     except Exception:
         SYNC_STATE = {}
 
-    # Utility separate dalla sync: mai incluse implicitamente in --all/--sync-only.
+    # Le utility indipendenti non si combinano con la pipeline. La diagnosi/riparazione album
+    # sono invece integrate in --all; da sole restano disponibili come comandi standalone.
     utility_modes = [args.fix_all_playlist_owners is not None, args.fix_flac_safe,
                      args.lidarr_folder_fix, args.lidarr_import_slskd, args.lb_dedup is not None,
                      args.sync_spotify_proxy_config, args.build_spotify_proxies,
                      args.sync_proxy_favorites]
     if sum(utility_modes) > 1:
         sys.exit('[ERRORE] esegui una sola utility standalone per volta')
-    if any(utility_modes) and (args.all or args.sync_only or args.playlists or args.fetch or args.fetch_only):
-        sys.exit('[ERRORE] le utility standalone non si combinano con la pipeline playlist (--all/--sync-only/--playlists/--fetch)')
+    if any(utility_modes) and (args.all or args.sync_only or args.playlists or args.fetch or args.fetch_only
+                               or args.diagnose_album_splits or args.repair_album_groups):
+        sys.exit('[ERRORE] le utility standalone non si combinano con la pipeline playlist o album repair')
     if args.lb_delete and args.lb_dedup is None:
         sys.exit('[ERRORE] --lb-delete richiede --lb-dedup UTENTE')
+    if (args.diagnose_album_splits or args.repair_album_groups) and not args.all:
+        if args.sync_only or args.playlists or args.fetch or args.fetch_only:
+            sys.exit('[ERRORE] diagnosi/riparazione album standalone non si combina con fetch/playlist; usa --all')
+        if args.diagnose_album_splits:
+            ok = run_phase('diagnose_album_splits', run_diagnose_album_splits,
+                           album_filter=args.album, artist_filter=args.artist)
+            if ok is False:
+                raise SystemExit(1)
+            if not args.repair_album_groups:
+                return
+        if args.repair_album_groups:
+            dry = not (args.apply and not args.dry_run)
+            ok = run_phase('repair_album_groups', run_repair_album_groups,
+                           dry_run=dry, base=args.library_root or LIBRARY_ROOT,
+                           include_existing_passes=True)
+            if ok is not True:
+                raise SystemExit(1)
+            if not dry and not args.no_scan:
+                run_phase('navidrome_scan', run_navidrome_scan, full_scan=True, prune_refs=True)
+            return
     if args.fix_all_playlist_owners is not None:
         result = run_phase('fix_all_playlist_owners', run_fix_all_playlist_owners,
                            args.fix_all_playlist_owners, dry_run=not (args.apply and not args.dry_run))
@@ -10849,6 +12228,13 @@ def _run(args):
 
     if args.all:
         _expand_all(args)
+        # Snapshot the pre-repair DB so duplicate albums and fuzzy REVIEW-only pairs remain
+        # visible even if later tag repair makes Navidrome rebuild these rows.
+        diag_ok = run_phase('diagnose_album_splits', run_diagnose_album_splits,
+                            album_filter=args.album, artist_filter=args.artist)
+        if diag_ok is False:
+            print('[warn] diagnostica album saltata/non riuscita; la pipeline continua con le riparazioni',
+                  file=sys.stderr)
 
     maintenance = any([args.fix_owners is not None, args.dedupe_playlists, args.dedupe_releases,
                        args.dedupe_tracks, args.mp3_vs_flac, args.clean_empty,
@@ -10927,6 +12313,13 @@ def _run(args):
         if not args.skip_unify:
             run_phase('album_unify', run_unify, args.dry_run)
 
+        if args.all:
+            # date_heal, artist_names e album_unify hanno gia' eseguito i passaggi principali
+            # della repair utility: qui aggiungiamo solo Unknown Artist e split verificato dal DB.
+            run_phase('repair_album_groups', run_repair_album_groups,
+                      dry_run=args.dry_run, base=args.library_root or LIBRARY_ROOT,
+                      include_existing_passes=False)
+
         if not args.skip_fix_dates:
             run_phase('fix_date_tags', run_fix_dates, args.dry_run)
 
@@ -10952,6 +12345,10 @@ def _run(args):
         scan_before_stars_ok = _scan_before_favorites(sel, full_scan=not args.sync_only)
         # None significa che non e' stato trovato un account con credenziali per la scansione.
         scanned_before_stars = True if scan_before_stars_ok is None else bool(scan_before_stars_ok)
+        if args.all and scan_before_stars_ok is True:
+            # Secondo report: mostra cosa e' rimasto dopo riparazione tag + full scan Navidrome.
+            run_phase('diagnose_album_splits_after_scan', run_diagnose_album_splits,
+                      album_filter=args.album, artist_filter=args.artist)
 
     if args.star_liked:
         if args.dry_run:
