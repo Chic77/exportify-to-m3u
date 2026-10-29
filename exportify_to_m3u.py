@@ -359,6 +359,12 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
                         e albums=[{"artist": "...", "album": "..."}]. Solo gli album
                         elencati sono convertiti; dopo averli importati in Spotify Desktop,
                         aggiungili alle playlist desiderate. Exportify ne esporta i metadati.
+    TERMINAL_COLORS   palette ANSI configurabile per intestazioni, contatori, info/review, stati, barra e spinner;
+                      usa nomi (blue, bright_cyan), #RRGGBB, 256:N o sgr:...; il valore
+                      none disattiva un singolo accento, enabled=false disattiva tutti i colori.
+                      Ogni ruolo può essere una stringa colore oppure {"color": "#RRGGBB",
+                      "bold": true, "dim": false, "italic": false, "underline": false,
+                      "reverse": false, "background": "#RRGGBB"}. Vedi il JSON distribuito.
 
 ------------------------------------------------------------------------------
 7. VARIABILI D'AMBIENTE
@@ -375,6 +381,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     EXPORTIFY_STATE_DIR          dove salvare le sessioni (default .exportify_sessions/)
     EXPORTIFY_NO_VENV=1          non usare il .venv accanto allo script
     EXPORTIFY_PROBE_WORKERS      processi paralleli per leggere i tag con ffprobe
+    EXPORTIFY_WAVEFORM_WORKERS  confronti waveform paralleli per dedupe (default 2, max 4)
     MB_BASE                      indirizzo dell'API MusicBrainz (per prove/mirror)
     LIDARR_URL / LIDARR_API_KEY   URL e API key per --lidarr-folder-fix / --lidarr-import-slskd
     LIDARR_MUSIC_ROOT             root host libreria per trovare le cartelle (default LIBRARY_ROOT)
@@ -406,8 +413,103 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 CHANGELOG
 ==============================================================================
 
-Novita' 0.77 (spinner regolare, alias canonici e date coerenti per album):
-  - spinner a ciclo regolare di quattro frame (/ -> ━━ -> \\ -> |), avanzamento con indice
+Novita' 0.83 (ruoli colore per riepiloghi e diagnostica):
+  - aggiunti cinque ruoli JSON indipendenti: waveform_compare, run_mode, release_summary,
+    total_label e total_duration; le righe waveform compare, modo e gruppi release sono
+    colorate come blocchi distinti, mentre TOTALE e il relativo tempo hanno colori separati.
+  - === riepilogo tempi === e === fine riepilogo tempi === usano phase; ogni nome fase nella
+    tabella tempi usa phase e ogni valore elapsed usa duration.
+  - === interrotta: ... === e [!] RUN INTERROTTA usano entrambi phase_failure.
+  - il JSON distribuito conserva la palette personalizzata aggiornata dall'utente, incluso
+    progress_unit verde #77FF94, e aggiunge i cinque ruoli con fallback coerenti.
+
+Novita' 0.82 (shutdown pulito della barra e intestazioni fase uniformi):
+  - la barra pinned viene rimossa e la regione di scrolling ripristinata su completamento,
+    eccezioni, Ctrl+C, SIGTERM e SIGHUP; atexit fornisce un ulteriore fallback. SIGKILL e
+    terminazioni forzate non intercettabili restano, per definizione, non gestibili dal processo.
+  - le intestazioni fase usano ora `=== fase nome === X/Y`, con ruolo `phase` e ruolo `counter`
+    indipendenti; le chiusure usano `=== fine fase nome === durata` e riutilizzano esattamente
+    il ruolo `phase`, mentre la durata usa `duration`.
+  - aggiunti i prefissi `[info]` e `[review]`; `[i]` e `[INFO]` sono alias di `info`.
+  - la palette viene precaricata prima delle prime righe e della fase `load_user_config`, cosi'
+    anche banner iniziale, messaggio --all e prima intestazione rispettano subito il JSON.
+  - il JSON distribuito usa la palette personalizzata fornita dall'utente, con `review` amber.
+
+Novita' beta-0.81 (palette terminale configurabile dal JSON):
+  - tutti gli accenti terminale sono configurabili in TERMINAL_COLORS di exportify_names.json:
+    titoli/fallimenti di fase, contatori, prefissi info/warning/error/dry-run/success, tempi,
+    label/contatore/unita' della barra, spinner, bordo, celle piene/vuote e percentuali.
+  - supporta nomi ANSI (es. blue, bright_cyan), colori truecolor #RRGGBB, indice 256-color
+    (256:81), SGR avanzato (sgr:1;38;5;81), sfondo e attributi bold/dim/italic/underline/reverse.
+    Il valore none disattiva il colore di quel ruolo; TERMINAL_COLORS.enabled=false disattiva tutto.
+  - i ruoli dettagliati hanno fallback sui ruoli base per mantenere compatibilita' con JSON vecchi;
+    NO_COLOR, CLICOLOR=0 e TERM=dumb continuano ad avere la precedenza. Il log e2m resta semplice.
+  - validazione rigorosa dei valori colore: un errore indica il nome del ruolo non valido e blocca
+    il caricamento della configurazione, evitando di avviare una run con palette inaspettata.
+
+Novita' beta-0.81 (palette terminale configurabile da JSON):
+  - aggiunto TERMINAL_COLORS in exportify_names.json: tutti i ruoli colore del terminale possono
+    essere modificati indipendentemente, inclusi stato delle fasi, messaggi, durata, label/counter
+    della barra, spinner, bordo, celle piene/vuote e percentuale al 100%.
+  - supportati nomi ANSI, #RRGGBB, 256:N e sgr:N;..., oltre a colori di sfondo e attributi bold,
+    dim, italic, underline e reverse. none rimuove l'accento di un singolo ruolo; enabled=false
+    spegne la palette. Il JSON distribuito usa un insieme iniziale più morbido e meno acceso.
+  - la configurazione dei colori e' validata all'avvio, con errori che indicano il ruolo difettoso;
+    i JSON vecchi senza TERMINAL_COLORS continuano a usare i colori predefiniti del codice.
+  - confermati il rispetto di NO_COLOR/CLICOLOR/TERM, il rilevamento TTY e i log e2m senza ANSI.
+
+Novita' 0.80 (spinner compatto, righe terminali atomiche e scansioni piu' rapide):
+  - spinner sostituito con frame Braille a singola colonna (⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏),
+    mantenendo il refresh a 100 ms e senza cambiare la larghezza interna della barra a 50 caratteri.
+  - Tee accumula i frammenti console fino al newline/flush e scrive ogni messaggio completo in un'unica
+    sezione critica: evita che il ticker si inserisca tra il testo di print() e il suo newline, causa
+    delle righe artwork fuse con la barra. Il log e2m continua a ricevere testo semplice.
+  - la scansione artwork aggiorna il denominatore con il numero effettivamente osservato se la cache
+    ffprobe sovrastima i file, così una scansione conclusa non resta al 99% per una stima obsoleta.
+  - _audio_files usa il walker os.scandir condiviso invece di Path.rglob ripetuto per ogni album;
+    riduce le scansioni ricorsive ridondanti nelle fasi di dedupe senza cambiare l'ordine dei file.
+  - dedupe_releases raggruppa prima i nomi delle cartelle e visita i file solo per titoli d'album ripetuti;
+    nel log allegato la fase impiegava 2m40 trovando zero gruppi. dedupe_tracks decodifica i fingerprint
+    di ogni gruppo in parallelo (EXPORTIFY_WAVEFORM_WORKERS, default 2, massimo 4), senza cambiare
+    la logica di correlazione o le regole di cancellazione.
+  - flac_16bit esegue i probe ffprobe in parallelo, con limite configurabile EXPORTIFY_FLAC_PROBE_TIMEOUT
+    (default 30 s, massimo 120) e conteggio esplicito dei timeout/errori; evita che probe sequenziali
+    lenti blocchino per decine di minuti la pipeline. La conversione e l'ordine di applicazione restano sequenziali.
+  - ffprobe seleziona esplicitamente il primo stream audio durante la lettura dei bit: una copertina
+    embedded esposta come stream video non puo' essere scambiata per lo stream audio.
+
+Novita' 0.79 (colori terminale):
+  - colori ANSI adattivi: titoli di fase in ciano/grassetto, contatori e spinner magenta,
+    barra con bordo ciano, avanzamento verde e parte residua grigio tenue; le percentuali
+    sono in ciano e diventano verdi al 100%.
+  - messaggi [i], [warn], [ERRORE], [dry] e gli esiti delle fasi hanno accenti coerenti.
+  - i colori sono soltanto per un terminale interattivo; NO_COLOR, CLICOLOR=0 e TERM=dumb
+    disabilitano la decorazione. I codici ANSI vengono sempre rimossi dai log e2m.
+  - la barra rimane fissata all'ultima riga, conserva i 50 caratteri interni e il refresh
+    dello spinner resta ogni 100 ms. I colori non influenzano allineamento o rilevamento wrap.
+
+Novita' beta-0.78 (split artisti generico e barra sempre visibile):
+  - rimossa la dipendenza da ARTIST_SPLIT_OVERRIDES: le virgole senza spazio sono delimitatori
+    generici; le virgole con spazio vengono divise quando il catalogo conferma i componenti o
+    quando una componente coincide con una cartella-artista della traccia.
+  - corretta la causa principale: split_artists accettava prima il nome composto gia' presente
+    nel DB; il riparatore tag inoltre rifiutava collaborazioni se i singoli artisti non erano
+    gia' indicizzati. Ora separatori e contesto del path sono evidenze indipendenti; i nomi reali
+    noti come 'Tyler, The Creator' restano protetti.
+  - corretta una collisione del catalogo: norm() rimuove le parentesi quadre, per cui
+    'The Cure, [Unknown Artist]' collideva con 'The Cure' e la stringa corrotta poteva vincere
+    come grafia canonica. La mappa ignora righe artista che contengono componenti placeholder.
+  - la normalizzazione artisti riusa il contesto di cartella gia' calcolato per file, e quando
+    una lista confermata contiene un artista reale piu' [Unknown Artist], rimuove il placeholder.
+  - barra TTY fissata all'ultima riga fisica: il terminale scrolla nella regione superiore,
+    il ridisegno salva/ripristina il cursore e clear() non cancella piu' la barra prima di ogni
+    messaggio. Anche dopo un ridimensionamento verticale, il cursore di output viene riportato
+    nella regione di scroll prima di riprendere la stampa. I controlli ANSI restano esclusi dal log.
+  - rimossa un'implementazione duplicata di _split_artist_tag_if_known. Il vecchio campo JSON
+    ARTIST_SPLIT_OVERRIDES viene ignorato e segnalato come legacy, mai usato per decidere lo split.
+
+Novita' beta-0.77 (spinner regolare, alias canonici e date coerenti per album):
+  - spinner a ciclo regolare di quattro frame (/ -> ── -> \\ -> |), avanzamento con indice
     monotono ogni 100 ms; niente salti legati al clock assoluto, mantenuta la casella a due colonne.
   - la forma bilingue CJK riusa anche la capitalizzazione esatta della voce canonica gia' nel catalogo;
     la title-case non crea piu' varianti artificiali come '高中正義 (Masayoshi Takanaka)' rispetto a
@@ -422,7 +524,7 @@ Novita' 0.77 (spinner regolare, alias canonici e date coerenti per album):
   - il rapporto di verifica distingue i fix proposti dalla convergenza del DB: --dry-run non scrive tag
     e non esegue la scansione Navidrome, quindi non puo' attestare che gli album siano gia' fusi nel DB.
 
-Novita' 0.76 (split artisti, deduplica e consolidamento album):
+Novita' beta-0.76 (split artisti, deduplica e consolidamento album):
   - barra fissa da 50 caratteri con spinner a due colonne (trattino lungo incluso), refresh ogni
     100 ms; la fase/contatore resta a sinistra e spinner + barra + percentuale a destra.
   - split esplicito e configurabile dei tag composti 'Afro Medusa,West Way' e
@@ -474,7 +576,7 @@ Novita' beta-0.73 (MP3 ID3 convergenti, exit status e report robusti):
   - aggiornata la guida per mutagen e chiarito che album_incompleti e' un nome storico: il
     report completo e' consolidato in mancanti_<data>.txt.
 
-Novita' 0.72 (ottimizzazione artist split, report persistenti e log piu' chiari):
+Novita' beta-0.72 (ottimizzazione artist split, report persistenti e log piu' chiari):
   - split_known_artist_tags prefiltra i file con i tag ffprobe e invoca metaflac solo sui candidati
     reali, evitando migliaia di processi per file senza separatori utili.
   - aggiunti artists/albumartists alla cache ffprobe e incrementata la versione della cache per
@@ -486,7 +588,7 @@ Novita' 0.72 (ottimizzazione artist split, report persistenti e log piu' chiari)
   - README aggiornato e configurazione SKIP_PLAYLISTS documentata per utente; PLAYLIST_PREFIXES
     non e' piu' una funzione/configurazione attiva.
 
-Novita' 0.71 (skip playlist per utente e report consolidati):
+Novita' beta-0.71 (skip playlist per utente e report consolidati):
   - SKIP_PLAYLISTS ora e' un oggetto per utente: le esclusioni attuali appartengono solo a chic;
     --skip resta invece un override globale per la singola esecuzione. Accetta ancora la vecchia
     lista JSON assegnandola a DEFAULT_USER con avviso di compatibilita'.
@@ -503,7 +605,7 @@ Novita' 0.71 (skip playlist per utente e report consolidati):
   - star_liked restituisce esito fallito se almeno un utente ha un errore API, anziche' mostrare
     la fase come completata quando il log contiene [ERRORE].
 
-Novita' 0.70 (progress bar terminale per scansioni e fasi lunghe):
+Novita' beta-0.70 (progress bar terminale per scansioni e fasi lunghe):
   - le fasi con un insieme di elementi misurabile usano una barra dinamica su una sola riga:
     contatore corrente/totale, indicatore visuale, percentuale stimata ed elementi rimanenti.
     Su terminale interattivo la riga viene aggiornata con carriage return; nei log non interattivi
@@ -988,6 +1090,7 @@ Novita' beta-3.20 (ottimizzazioni + bugfix):
 """
 
 import argparse
+import atexit
 import base64
 import contextlib
 import csv
@@ -996,6 +1099,7 @@ import fnmatch
 import http.client
 import random
 import shutil
+import signal
 import sqlite3
 import string
 import subprocess
@@ -1019,19 +1123,306 @@ import zipfile
 from functools import lru_cache
 from pathlib import Path
 import zlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# ANSI colors are configurable through exportify_names.json -> TERMINAL_COLORS.
+# Only the interactive terminal receives ANSI escapes; e2m logs always stay plain text.
+_ANSI_RESET = '\x1b[0m'
+_ANSI_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+_ANSI_PALETTE_DEFAULTS = {
+    'phase': '1;38;2;119;255;148',          # user's preferred green
+    'counter': '1;38;2;255;178;15',         # amber
+    'info': '1;38;2;0;161;228',             # blue
+    'review': '1;38;2;255;178;15',          # amber review marker
+    'warn': '1;38;2;255;178;15',
+    'error': '1;38;2;227;23;10',
+    'dry': '1;38;2;0;161;228',
+    'success': '1;38;2;119;255;148',
+    'duration': '38;2;255;178;15',
+    'bar_border': '1;38;2;0;161;228',
+    'bar_fill': '1;38;2;112;214;255',
+    'bar_empty': '38;2;255;178;15',
+    'spinner': '1;38;2;255;178;15',
+    'percent': '1;38;2;0;161;228',
+    'waveform_compare': '1;38;2;0;161;228',
+    'run_mode': '1;38;2;0;161;228',
+    'release_summary': '1;38;2;255;178;15',
+    'total_label': '1;38;2;119;255;148',
+    'total_duration': '38;2;255;178;15',
+}
+_ANSI_PALETTE = dict(_ANSI_PALETTE_DEFAULTS)
+_TERMINAL_COLORS_ENABLED = True
+_TERMINAL_COLOR_ROLES = frozenset({
+    *_ANSI_PALETTE_DEFAULTS,
+    'phase_success', 'phase_failure', 'phase_warning',
+    'progress_label', 'progress_counter', 'progress_unit', 'percent_complete',
+    'waveform_compare', 'run_mode', 'release_summary', 'total_label', 'total_duration',
+})
+_TERMINAL_COLOR_FALLBACKS = {
+    'phase_success': 'success',
+    'phase_failure': 'error',
+    'phase_warning': 'warn',
+    'progress_label': 'phase',
+    'progress_counter': 'counter',
+    'progress_unit': 'duration',
+    'percent_complete': 'success',
+    'waveform_compare': 'info',
+    'run_mode': 'dry',
+    'release_summary': 'warn',
+    'total_label': 'phase',
+    'total_duration': 'duration',
+}
+
+_ANSI_NAMED_COLORS = {
+    'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
+    'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37,
+    'gray': 90, 'grey': 90,
+    'bright_black': 90, 'bright_red': 91, 'bright_green': 92,
+    'bright_yellow': 93, 'bright_blue': 94, 'bright_magenta': 95,
+    'bright_cyan': 96, 'bright_white': 97,
+}
+
+
+def _ansi_color_component(value, *, background=False, role='color'):
+    """Convert a friendly color name, #RRGGBB, 256:N or sgr:N;... to SGR codes."""
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        raise ValueError(f'TERMINAL_COLORS.{role}: il colore deve essere una stringa')
+    color = value.strip().lower().replace('-', '_').replace(' ', '_')
+    if color in ('', 'none', 'off', 'default', 'inherit'):
+        return []
+    if re.fullmatch(r'#[0-9a-f]{6}', color):
+        rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+        return [str(48 if background else 38), '2', *(str(x) for x in rgb)]
+    match = re.fullmatch(r'(?:256|ansi256):([0-9]{1,3})', color)
+    if match:
+        index = int(match.group(1))
+        if not 0 <= index <= 255:
+            raise ValueError(f'TERMINAL_COLORS.{role}: indice 256-color fuori intervallo 0..255')
+        return [str(48 if background else 38), '5', str(index)]
+    if color.startswith('sgr:'):
+        raw = color[4:]
+        if not re.fullmatch(r'[0-9]{1,3}(?:;[0-9]{1,3})*', raw):
+            raise ValueError(f'TERMINAL_COLORS.{role}: usa solo codici numerici SGR, es. sgr:38;5;81')
+        values = [int(part) for part in raw.split(';')]
+        if any(value > 255 for value in values):
+            raise ValueError(f'TERMINAL_COLORS.{role}: codici SGR fuori intervallo 0..255')
+        return [str(x) for x in values]
+    if color == 'reset':
+        return ['49' if background else '39']
+    code = _ANSI_NAMED_COLORS.get(color)
+    if code is None:
+        raise ValueError(
+            f'TERMINAL_COLORS.{role}: colore {value!r} non riconosciuto; usa un nome ANSI, '
+            '#RRGGBB, 256:N, sgr:... oppure none'
+        )
+    if background:
+        code = code + 10 if code < 90 else code + 10
+    return [str(code)]
+
+
+def _terminal_style_to_sgr(value, role):
+    """Accept a color string or a style object with color/background/attributes."""
+    if isinstance(value, str):
+        style = {'color': value}
+    elif isinstance(value, dict):
+        style = value
+    else:
+        raise ValueError(f'TERMINAL_COLORS.{role}: usa una stringa colore o un oggetto stile')
+    allowed = {'color', 'background', 'bold', 'dim', 'italic', 'underline', 'reverse'}
+    extra = set(style) - allowed
+    if extra:
+        raise ValueError(f'TERMINAL_COLORS.{role}: proprietà sconosciute: {sorted(extra)}')
+    codes = []
+    attrs = {'bold': '1', 'dim': '2', 'italic': '3', 'underline': '4', 'reverse': '7'}
+    for attr, code in attrs.items():
+        if attr in style and not isinstance(style[attr], bool):
+            raise ValueError(f'TERMINAL_COLORS.{role}.{attr} deve essere booleano')
+        if style.get(attr, False):
+            codes.append(code)
+    codes.extend(_ansi_color_component(style.get('color', 'none'), role=role))
+    if style.get('background') not in (None, '', 'none', 'off', 'default', 'inherit'):
+        codes.extend(_ansi_color_component(style['background'], background=True, role=role + '.background'))
+    return ';'.join(codes)
+
+
+def _apply_terminal_colors_config(config):
+    """Reset defaults, then validate/apply JSON terminal color overrides."""
+    global _TERMINAL_COLORS_ENABLED
+    _ANSI_PALETTE.clear()
+    _ANSI_PALETTE.update(_ANSI_PALETTE_DEFAULTS)
+    _TERMINAL_COLORS_ENABLED = True
+    if config is None:
+        return
+    if not isinstance(config, dict):
+        raise ValueError('TERMINAL_COLORS deve essere un oggetto JSON')
+    enabled = config.get('enabled', True)
+    if not isinstance(enabled, bool):
+        raise ValueError('TERMINAL_COLORS.enabled deve essere booleano')
+    _TERMINAL_COLORS_ENABLED = enabled
+    unknown = set(config) - {'enabled'} - _TERMINAL_COLOR_ROLES
+    if unknown:
+        raise ValueError(f'TERMINAL_COLORS contiene ruoli sconosciuti: {sorted(unknown)}')
+    for role in _TERMINAL_COLOR_ROLES:
+        if role in config:
+            _ANSI_PALETTE[role] = _terminal_style_to_sgr(config[role], role)
+
+
+def _colors_allowed(stream=None):
+    """Return True only for a TTY when both JSON settings and environment allow colors."""
+    if not _TERMINAL_COLORS_ENABLED:
+        return False
+    if os.environ.get('NO_COLOR', '') != '' or os.environ.get('CLICOLOR') == '0':
+        return False
+    if os.environ.get('TERM', '').lower() == 'dumb':
+        return False
+    stream = sys.stderr if stream is None else stream
+    try:
+        return bool(stream.isatty())
+    except Exception:
+        return False
+
+
+def _paint(text, role, enabled=True):
+    if not enabled or not text:
+        return str(text)
+    if role in _ANSI_PALETTE:
+        code = _ANSI_PALETTE[role]
+    else:
+        code = _ANSI_PALETTE.get(_TERMINAL_COLOR_FALLBACKS.get(role, ''), '')
+    return f'\x1b[{code}m{text}{_ANSI_RESET}' if code else str(text)
+
+
+def _colorize_terminal_text(text, stream):
+    """Colorize structured console prefixes; leave arbitrary message bodies untouched."""
+    if not text or not _colors_allowed(stream):
+        return text
+    out = []
+    for raw_line in text.splitlines(keepends=True):
+        ending = ''
+        line = raw_line
+        if line.endswith('\r\n'):
+            line, ending = line[:-2], '\r\n'
+        elif line.endswith('\n') or line.endswith('\r'):
+            line, ending = line[:-1], line[-1:]
+        if not line:
+            out.append(raw_line)
+            continue
+
+        # Run-mode/status lines have dedicated JSON roles, independent of generic [i] text.
+        if re.match(r'^waveform compare:\s*', line, flags=re.IGNORECASE):
+            out.append(_paint(line, 'waveform_compare') + ending)
+            continue
+        if re.match(r'^modo:\s*', line, flags=re.IGNORECASE):
+            out.append(_paint(line, 'run_mode') + ending)
+            continue
+        if re.match(r'^gruppi release:\s*', line, flags=re.IGNORECASE):
+            out.append(_paint(line, 'release_summary') + ending)
+            continue
+
+        # The total row intentionally has two independent roles: label and elapsed time.
+        total_row = re.match(
+            r'^(\s*)(TOTALE)(\s+)(\d{2}:\d{2}(?::\d{2})?\.\d{3})$', line,
+            flags=re.IGNORECASE)
+        if total_row:
+            out.append(total_row.group(1) + _paint(total_row.group(2), 'total_label') +
+                       total_row.group(3) + _paint(total_row.group(4), 'total_duration') + ending)
+            continue
+
+        # Timing-summary phase names and elapsed values use phase/duration independently.
+        if re.fullmatch(r'=== (?:riepilogo tempi|fine riepilogo tempi) ===', line,
+                        flags=re.IGNORECASE):
+            out.append(_paint(line, 'phase') + ending)
+            continue
+        timing_row = re.match(
+            r'^(\s+)(.+?)(\s{2,})(\d{2}:\d{2}(?::\d{2})?\.\d{3})$', line)
+        if timing_row:
+            out.append(timing_row.group(1) + _paint(timing_row.group(2).rstrip(), 'phase') +
+                       timing_row.group(3) + _paint(timing_row.group(4), 'duration') + ending)
+            continue
+
+        # Phase heading and its counter are separate palette roles. Counter has no
+        # parentheses in the new terminal layout: === fase name === 2/22.
+        phase_start = re.match(r'^(=== fase .+? ===)(?:\s+(\d+/\d+))?$', line)
+        if phase_start:
+            colored = _paint(phase_start.group(1), 'phase')
+            if phase_start.group(2):
+                colored += ' ' + _paint(phase_start.group(2), 'counter')
+            out.append(colored + ending)
+            continue
+
+        # Successful phase-end headings deliberately share the exact same `phase`
+        # role as opening headings. Only the elapsed time uses `duration`.
+        phase_finish = re.match(r'^(=== fine fase .+? ===)(?:\s+(\S+))?$', line)
+        if phase_finish:
+            colored = _paint(phase_finish.group(1), 'phase')
+            if phase_finish.group(2):
+                colored += ' ' + _paint(phase_finish.group(2), 'duration')
+            out.append(colored + ending)
+            continue
+
+        phase_failure = re.match(
+            r'^(=== (?:interrotta|fallita|terminata con errore).*? ===)(?:\s+(\S+))?$', line,
+            flags=re.IGNORECASE)
+        if phase_failure:
+            colored = _paint(phase_failure.group(1), 'phase_failure')
+            if phase_failure.group(2):
+                colored += ' ' + _paint(phase_failure.group(2), 'duration')
+            out.append(colored + ending)
+            continue
+        phase_warning = re.match(r'^(=== uscita anticipata.*? ===)(?:\s+(\S+))?$', line,
+                                 flags=re.IGNORECASE)
+        if phase_warning:
+            colored = _paint(phase_warning.group(1), 'phase_warning')
+            if phase_warning.group(2):
+                colored += ' ' + _paint(phase_warning.group(2), 'duration')
+            out.append(colored + ending)
+            continue
+
+        # The complete interruption notice belongs to phase_failure, not only its marker.
+        if re.match(r'^\s*\[!\]\s*RUN INTERROTTA\b', line, flags=re.IGNORECASE):
+            out.append(_paint(line, 'phase_failure') + ending)
+            continue
+
+        # Prefix-only coloring protects artist names, titles, paths, URLs and values.
+        patterns = (
+            (r'^(\s*)\[ERRORE\]', 'error'),
+            (r'^(\s*)\[(?:ERROR|FATAL)\]', 'error'),
+            (r'^(\s*)\[(?:warn|WARN|WARNING)\]', 'warn'),
+            (r'^(\s*)\[review\]', 'review'),
+            (r'^(\s*)\[(?:i|info|INFO)\]', 'info'),
+            (r'^(\s*)\[(?:dry|DRY)\]', 'dry'),
+            (r'^(\s*)\[(?:ok|OK|SUCCESS)\]', 'success'),
+        )
+        for pattern, role in patterns:
+            line, count = re.subn(
+                pattern,
+                lambda m: m.group(1) + _paint(m.group(0)[len(m.group(1)):], role),
+                line, count=1)
+            if count:
+                break
+        out.append(line + ending)
+    return ''.join(out)
+
+
+_PROGRESS_TTY_STACK = []
+_PROGRESS_TTY_MANAGER_LOCK = threading.RLock()
+_PROGRESS_TERMINAL_IO_LOCK = threading.RLock()
 
 
 class _ProgressBar:
-    """Progress display with a 50-character bar and a 100ms terminal spinner.
+    """Pinned terminal progress row with a fixed 50-character bar and 100ms spinner.
 
-    TTY updates are rendered by a small timer thread so the spinner keeps moving even
-    while a single file/album takes longer than one refresh interval. Redirected logs
-    remain compact and receive occasional checkpoints rather than carriage returns.
+    Interactive terminals reserve the last screen row for status and restrict normal
+    scrolling to the rows above it. Rendering saves/restores the log cursor, so new
+    stdout/stderr messages scroll above the bar instead of covering it. Redirected logs
+    remain compact and receive periodic checkpoints.
     """
     BAR_WIDTH = 50
     REFRESH_SECONDS = 0.1
-    SPINNER_FRAMES = ('/ ', '──', '\\ ', '| ')
+    SPINNER_FRAMES = ('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
 
     def __init__(self, label, total, unit='brani', stream=None):
         self.label = str(label)
@@ -1041,10 +1432,20 @@ class _ProgressBar:
             self.total = 0
         self.unit = str(unit)
         self.stream = stream or sys.stderr
+        # Tee forwards ordinary output to the console and log file; terminal controls
+        # must go directly to the actual TTY, never into the text log.
+        self.terminal_stream = self.stream
         try:
-            self.tty = bool(self.stream.isatty())
+            nested_streams = getattr(self.stream, 'streams', None)
+            if nested_streams and nested_streams[0].isatty():
+                self.terminal_stream = nested_streams[0]
         except Exception:
-            self.tty = False
+            pass
+        try:
+            is_tty = bool(self.terminal_stream.isatty())
+        except Exception:
+            is_tty = False
+        self.tty = bool(is_tty and self.total > 0)
         self.display_label = self.label
         self.display_unit = self.unit
         self.bar_width = self.BAR_WIDTH
@@ -1052,93 +1453,142 @@ class _ProgressBar:
         self.last_pct = None
         self.last_checkpoint = 0
         self.last_render_at = 0.0
-        # Advance from the previous frame rather than deriving it from absolute clock time.
-        # A delayed scheduler tick must not skip visual frames or make the spinner jitter.
         self._spinner_index = 0
         self.last_width = 0
         self.active = False
         self.closed = False
+        self._terminal_suspended = False
+        self._terminal_parent = None
+        self._pin_rows = None
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread = None
         if self.tty:
-            columns = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
-            # The bar itself stays exactly 50 characters. Shorten only the label/unit
-            # on small terminal widths; do not silently shrink the requested bar.
+            columns, _rows = self._terminal_size()
             digits = max(1, len(str(max(1, self.total))))
             def minimum_width():
                 left = f'{self.display_label}: {"8" * digits}/{"8" * digits} {self.display_unit}'
-                right = f'{self.SPINNER_FRAMES[0]:>2} [' + ('#' * self.BAR_WIDTH) + '] 100%'
+                right = f'{self.SPINNER_FRAMES[0]} [' + ('#' * self.BAR_WIDTH) + '] 100%'
                 return len(left) + 2 + len(right)
             while minimum_width() > columns - 1 and len(self.display_label) > 8:
                 self.display_label = self.display_label[:-2].rstrip() + '…'
             while minimum_width() > columns - 1 and len(self.display_unit) > 2:
                 self.display_unit = self.display_unit[:-2].rstrip() + '…'
-            # Very narrow terminals cannot fit a fixed 50-character bar and the counter
-            # on one row. Disable terminal autowrap for the status row and restore it at close.
-            if minimum_width() > columns - 1:
-                try:
-                    self.stream.write('\x1b[?7l')
-                    self.stream.flush()
-                    self._wrap_disabled = True
-                    self._wrap_active = True
-                except Exception:
-                    self._wrap_disabled = False
-                    self._wrap_active = False
-            else:
-                self._wrap_disabled = False
-                self._wrap_active = False
-            self._thread = threading.Thread(target=self._ticker, name='exportify-progress', daemon=True)
+            with _PROGRESS_TTY_MANAGER_LOCK:
+                if _PROGRESS_TTY_STACK:
+                    self._terminal_parent = _PROGRESS_TTY_STACK[-1]
+                    self.terminal_stream = self._terminal_parent.terminal_stream
+                    self._pin_rows = self._terminal_parent._pin_rows
+                    with self._terminal_parent._lock:
+                        self._terminal_parent._terminal_suspended = True
+                else:
+                    self._configure_terminal_pin()
+                _PROGRESS_TTY_STACK.append(self)
+            self._thread = threading.Thread(target=self._ticker,
+                                            name='exportify-progress', daemon=True)
             self._thread.start()
-            if self.total:
-                self.update(0, force=True)
-        else:
-            self._wrap_disabled = False
-            self._wrap_active = False
+            self.update(0, force=True)
 
-    def _disable_wrap_locked(self):
-        if self._wrap_disabled and not self._wrap_active:
-            self.stream.write('\x1b[?7l')
-            self._wrap_active = True
+    def _configure_terminal_pin(self):
+        """Reserve the physical last row and leave the log cursor in the row above it."""
+        rows = max(3, shutil.get_terminal_size(fallback=(120, 24)).lines)
+        self._pin_rows = rows
+        # DECSTBM sets the scrolling region to all but the final screen row. Moving to
+        # its bottom and issuing LF scrolls ordinary output into a fresh row above status.
+        with _PROGRESS_TERMINAL_IO_LOCK:
+            self.terminal_stream.write(f'\x1b[1;{rows - 1}r')
+            self.terminal_stream.write(f'\x1b[{rows - 1};1H\n')
+            self.terminal_stream.flush()
 
-    def _enable_wrap_locked(self):
-        if self._wrap_active:
-            self.stream.write('\x1b[?7h')
-            self._wrap_active = False
+    def _terminal_size(self):
+        size = shutil.get_terminal_size(fallback=(120, 24))
+        return max(40, size.columns), max(3, size.lines)
+
+    def _restore_terminal_pin(self):
+        if not self._pin_rows:
+            return
+        try:
+            with _PROGRESS_TERMINAL_IO_LOCK:
+                # Clear the pinned status row, restore normal full-screen scrolling, then
+                # return the cursor to where ordinary log output left it.
+                self.terminal_stream.write('\x1b[s')
+                self.terminal_stream.write(f'\x1b[{self._pin_rows};1H\x1b[2K')
+                self.terminal_stream.write('\x1b[r')
+                self.terminal_stream.write('\x1b[u')
+                self.terminal_stream.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
 
     def _format(self, done, spinner):
         pct = min(100, max(0, done * 100 // self.total)) if self.total else 100
         filled = min(self.bar_width, max(1, pct * self.bar_width // 100) if pct > 0 else 0)
-        bar = '[' + ('#' * filled) + ('-' * (self.bar_width - filled)) + ']'
-        left = f'{self.display_label}: {done}/{self.total} {self.display_unit}'
-        right = f'{spinner:>2} {bar} {pct}%'
-        if self.tty:
-            columns = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
-            gap = max(2, columns - len(left) - len(right) - 1)
-            line = left + (' ' * gap) + right
-        else:
-            line = f'{left} {right}'
-        return line, pct
+        left_plain = f'{self.display_label}: {done}/{self.total} {self.display_unit}'
+        bar_plain = '[' + ('#' * filled) + ('-' * (self.bar_width - filled)) + ']'
+        right_plain = f'{spinner} {bar_plain} {pct}%'
+        if not self.tty:
+            return f'{left_plain} {right_plain}', pct
+
+        # Apply color only after measuring the unstyled text: ANSI sequences must not affect
+        # right alignment, terminal-width checks or the exact 50-character inner bar.
+        enabled = _colors_allowed(self.terminal_stream)
+        left = (_paint(self.display_label, 'progress_label', enabled) + ': ' +
+                _paint(f'{done}/{self.total}', 'progress_counter', enabled) + ' ' +
+                _paint(self.display_unit, 'progress_unit', enabled))
+        border_left = _paint('[', 'bar_border', enabled)
+        fill = _paint('#' * filled, 'bar_fill', enabled)
+        empty = _paint('-' * (self.bar_width - filled), 'bar_empty', enabled)
+        border_right = _paint(']', 'bar_border', enabled)
+        percent_role = 'percent_complete' if pct >= 100 else 'percent'
+        right = (_paint(spinner, 'spinner', enabled) + ' ' + border_left + fill +
+                 empty + border_right + ' ' + _paint(f'{pct}%', percent_role, enabled))
+        columns, _rows = self._terminal_size()
+        gap = max(2, columns - len(left_plain) - len(right_plain) - 1)
+        return left + (' ' * gap) + right, pct
 
     def _render_tty_locked(self, now=None):
-        if self.closed or not self.tty or not self.active:
+        if self.closed or not self.tty or not self.active or self._terminal_suspended:
             return
         now = time.monotonic() if now is None else now
-        self._disable_wrap_locked()
-        line, pct = self._format(self.last_done, self.SPINNER_FRAMES[self._spinner_index])
-        pad = max(0, self.last_width - len(line))
-        self.stream.write('\r' + line + (' ' * pad))
-        self.stream.flush()
-        self.last_width = len(line)
+        columns, rows = self._terminal_size()
+        # Keep the bar on the physical last row without changing the log-output cursor.
+        # Serialize rendering with Tee writes to avoid a warning splitting a spinner frame.
+        with _PROGRESS_TERMINAL_IO_LOCK:
+            if rows != self._pin_rows:
+                old_rows = self._pin_rows or rows
+                self.terminal_stream.write('\x1b[s')
+                self.terminal_stream.write(f'\x1b[1;{rows - 1}r')
+                if rows < old_rows:
+                    # On a shrink, the saved cursor may now be exactly on the new
+                    # status row. Move it back inside the scrolling region instead of
+                    # restoring an out-of-region cursor that could let the next print
+                    # overwrite the pinned bar. On growth, the old cursor is still safe.
+                    self.terminal_stream.write(f'\x1b[{rows - 1};1H')
+                else:
+                    self.terminal_stream.write('\x1b[u')
+                self.terminal_stream.flush()
+                self._pin_rows = rows
+            line, pct = self._format(self.last_done, self.SPINNER_FRAMES[self._spinner_index])
+            self.terminal_stream.write('\x1b[s')
+            self.terminal_stream.write(f'\x1b[{rows};1H\x1b[2K')
+            visible_line = _ANSI_RE.sub('', line)
+            disable_wrap = len(visible_line) >= columns
+            if disable_wrap:
+                self.terminal_stream.write('\x1b[?7l')
+            try:
+                self.terminal_stream.write(line)
+            finally:
+                if disable_wrap:
+                    self.terminal_stream.write('\x1b[?7h')
+                self.terminal_stream.write('\x1b[u')
+                self.terminal_stream.flush()
+        self.last_width = len(_ANSI_RE.sub('', line))
         self.last_render_at = now
         self.last_pct = pct
 
     def _ticker(self):
         while not self._stop_event.wait(self.REFRESH_SECONDS):
             with self._lock:
-                if self.active and not self.closed:
-                    # Exactly one frame per successful refresh tick. When the bar is cleared
-                    # for a log line it pauses and resumes at the next frame without a jump.
+                if self.active and not self.closed and not self._terminal_suspended:
                     self._spinner_index = (self._spinner_index + 1) % len(self.SPINNER_FRAMES)
                     try:
                         self._render_tty_locked()
@@ -1147,16 +1597,11 @@ class _ProgressBar:
                         return
 
     def clear(self):
-        """Clear the active status row before printing a diagnostic/log message."""
-        if self.tty:
-            with self._lock:
-                if self.active and not self.closed:
-                    self.stream.write('\r' + (' ' * self.last_width) + '\r')
-                    self._enable_wrap_locked()
-                    self.stream.flush()
-                    self.active = False
-                    self.last_pct = None
-                    self.last_render_at = 0.0
+        """Keep the status pinned; normal output is emitted in the scrolling region above it."""
+        # Previously this erased the bar before every warning/result line, making it vanish
+        # for a frame and allowing output to reuse its row. The reserved-row display removes
+        # the need to erase/redraw around ordinary messages.
+        return
 
     def update(self, done, force=False):
         if self.closed or self.total <= 0:
@@ -1169,8 +1614,6 @@ class _ProgressBar:
             with self._lock:
                 self.last_done = done
                 self.active = True
-                # Force an immediate refresh at phase start; later updates are handled
-                # by the 100ms ticker whether or not the caller increments the counter.
                 if force or not self.last_render_at:
                     self._render_tty_locked()
             return
@@ -1179,7 +1622,7 @@ class _ProgressBar:
         line, pct = self._format(done, self.SPINNER_FRAMES[0])
         now = time.monotonic()
         checkpoint = pct // 5
-        # Compact non-interactive log snapshots; the live terminal alone refreshes at 100ms.
+        # Compact non-interactive log snapshots; never emit carriage-return animations.
         if not force and done < self.total and checkpoint == self.last_checkpoint:
             if now - self.last_render_at < 1.0:
                 return
@@ -1192,31 +1635,105 @@ class _ProgressBar:
         self.last_pct = pct
         self.last_render_at = now
 
-    def close(self, complete=False):
+    def close(self, complete=False, *, render_final=True, restore_parent=True):
         if self.closed:
             return
-        final_done = self.total if complete else min(self.last_done, self.total)
         if self.tty:
             with self._lock:
+                final_done = self.total if complete else min(self.last_done, self.total)
                 self.last_done = final_done
-                self.active = True
-                self._render_tty_locked()
+                if render_final:
+                    self.active = True
+                    self._render_tty_locked()
                 self.active = False
                 self.closed = True
             self._stop_event.set()
             if self._thread and self._thread is not threading.current_thread():
                 self._thread.join(timeout=0.5)
-            self.stream.write('\n')
-            self._enable_wrap_locked()
-            self.stream.flush()
+            with _PROGRESS_TTY_MANAGER_LOCK:
+                was_top = bool(_PROGRESS_TTY_STACK and _PROGRESS_TTY_STACK[-1] is self)
+                try:
+                    _PROGRESS_TTY_STACK.remove(self)
+                except ValueError:
+                    pass
+                if was_top and _PROGRESS_TTY_STACK and restore_parent:
+                    parent = _PROGRESS_TTY_STACK[-1]
+                    with parent._lock:
+                        parent._terminal_suspended = False
+                        parent.active = True
+                        parent._render_tty_locked()
+                elif not _PROGRESS_TTY_STACK:
+                    self._restore_terminal_pin()
         else:
             if self.total > 0:
-                final_pct = final_done * 100 // self.total
+                final_pct = (self.total if complete else min(self.last_done, self.total)) * 100 // self.total
                 if self.last_pct != final_pct or self.last_checkpoint != final_pct // 5:
-                    self.update(final_done, force=True)
+                    self.update(self.total if complete else self.last_done, force=True)
             self.closed = True
             self._stop_event.set()
 
+
+
+def _cleanup_active_progress_bars():
+    """Release every reserved terminal row without leaving a stale progress bar behind."""
+    with _PROGRESS_TTY_MANAGER_LOCK:
+        bars = list(reversed(_PROGRESS_TTY_STACK))
+    for bar in bars:
+        try:
+            bar.close(complete=False, render_final=False, restore_parent=False)
+        except Exception:
+            # Last-resort terminal reset: cleanup must not hide the original exception or
+            # KeyboardInterrupt. The root bar owns the terminal scrolling-region snapshot.
+            try:
+                bar._restore_terminal_pin()
+            except Exception:
+                pass
+    with _PROGRESS_TTY_MANAGER_LOCK:
+        if _PROGRESS_TTY_STACK:
+            root = _PROGRESS_TTY_STACK[0]
+            try:
+                root._restore_terminal_pin()
+            except Exception:
+                pass
+            _PROGRESS_TTY_STACK.clear()
+
+
+def _progress_signal_handler(signum, frame):
+    """Unpin the terminal immediately on Ctrl+C/SIGTERM/SIGHUP, then exit normally."""
+    _cleanup_active_progress_bars()
+    if signum == getattr(signal, 'SIGINT', None):
+        raise KeyboardInterrupt
+    raise SystemExit(128 + int(signum))
+
+
+def _install_progress_signal_handlers():
+    """Install temporary shutdown handlers; return previous handlers for restoration."""
+    previous = {}
+    for signal_name in ('SIGINT', 'SIGTERM', 'SIGHUP'):
+        signum = getattr(signal, signal_name, None)
+        if signum is None:
+            continue
+        try:
+            previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, _progress_signal_handler)
+        except (ValueError, OSError):
+            # signal.signal is restricted to the main thread and may be unavailable on
+            # some platforms; the atexit and KeyboardInterrupt paths still remain active.
+            continue
+    return previous
+
+
+def _restore_progress_signal_handlers(previous):
+    for signum, handler in (previous or {}).items():
+        try:
+            signal.signal(signum, handler)
+        except (ValueError, OSError):
+            pass
+
+
+# atexit covers ordinary completion and uncaught exceptions. Explicit signal handlers cover
+# Ctrl+C and catchable termination signals; SIGKILL cannot be intercepted by any process.
+atexit.register(_cleanup_active_progress_bars)
 
 def _maybe_reexec_in_venv():
     """Debian 12+/13 blocca 'pip install --user' (PEP 668): le librerie opzionali
@@ -1304,7 +1821,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.77"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.83"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -2800,12 +3317,8 @@ EMOJI_WORDS = {
 # ENTRAMBI i lati (libreria e Spotify). Scrivi tutto minuscolo, senza punteggiatura.
 ARTIST_GROUPS = []
 
-# Collaborazioni note che alcuni tag salvano senza spazi dopo la virgola.
-# Le chiavi sono normalizzate durante il caricamento della config.
-ARTIST_SPLIT_OVERRIDES = {
-    'afro medusa,west way': ['Afro Medusa', 'West Way'],
-    'chiello,powv_fsk': ['Chiello', 'Powv_FSK'],
-}
+# Artist-tag splitting is inferred from delimiter syntax and catalog evidence.
+# Do not add per-collaboration exceptions here: malformed joined artist tags are open-ended.
 
 # Etichetta stabile per alias che differiscono soltanto per punteggiatura.
 ARTIST_CANONICAL_ALIASES = {'m o o n': 'M.O.O.N'}
@@ -2846,11 +3359,33 @@ NAME_FIXES = {
 _USER_CFG = Path(__file__).with_name('exportify_names.json')
 
 
+def _preload_terminal_colors():
+    """Load only the palette before the first banner/phase is printed.
+
+    The full user configuration still loads as the first measured pipeline phase. This
+    lightweight pre-read ensures the startup [i] lines and load_user_config phase heading
+    already honor the palette selected in JSON. Invalid JSON/palette errors are left for
+    load_user_config to report through the normal phase/error path.
+    """
+    try:
+        raw = json.loads(_USER_CFG.read_text(encoding='utf-8'))
+        if isinstance(raw, dict):
+            _apply_terminal_colors_config(raw.get('TERMINAL_COLORS'))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
+        return False
+    return True
+
+
 def load_user_config():
     if not _USER_CFG.exists():
         return
     try:
         _cfg = json.loads(_USER_CFG.read_text(encoding='utf-8'))
+        _apply_terminal_colors_config(_cfg.get('TERMINAL_COLORS'))
+        if 'ARTIST_SPLIT_OVERRIDES' in _cfg:
+            print("[warn] ARTIST_SPLIT_OVERRIDES e\' legacy e viene ignorato: lo split usa separatori, "
+                  'catalogo e cartella-artista; puoi rimuovere il campo da exportify_names.json',
+                  file=sys.stderr)
         # EMOJI_WORDS PRIMA di tutto: norm() lo usa per normalizzare le chiavi
         # delle tabelle qui sotto (prima veniva applicato dopo)
         EMOJI_WORDS.update(_cfg.get('EMOJI_WORDS', {}))
@@ -2859,6 +3394,8 @@ def load_user_config():
         if 'norm' in globals():
             norm.cache_clear()
             norm_bare.cache_clear()
+        if '_artist_context_from_parent' in globals():
+            globals()['_artist_context_from_parent'].cache_clear()
         translations_cfg = _cfg.get('NAME_TRANSLATIONS', {})
         if not isinstance(translations_cfg, dict):
             raise ValueError('NAME_TRANSLATIONS deve essere un oggetto JSON {testo_originale: traduzione_inglese}')
@@ -3021,22 +3558,6 @@ def load_user_config():
             sg = {norm(x) for x in g}
             if sg and sg not in ARTIST_GROUPS:
                 ARTIST_GROUPS.append(sg)
-        split_cfg = _cfg.get('ARTIST_SPLIT_OVERRIDES', {})
-        if not isinstance(split_cfg, dict):
-            raise ValueError('ARTIST_SPLIT_OVERRIDES deve essere un oggetto {tag_composto: [artisti]}')
-        # Le impostazioni JSON sostituiscono/estendono i default con la stessa chiave normalizzata.
-        normalized_splits = {norm(k): [str(x).strip() for x in parts if str(x).strip()]
-                             for k, parts in ARTIST_SPLIT_OVERRIDES.items()}
-        for key, parts in split_cfg.items():
-            if not isinstance(parts, list) or len(parts) < 2 or any(not isinstance(x, str) for x in parts):
-                raise ValueError(f'ARTIST_SPLIT_OVERRIDES.{key} deve essere una lista di almeno due artisti')
-            nk = norm(key)
-            cleaned = [x.strip() for x in parts if x.strip()]
-            if not nk or len(cleaned) < 2:
-                raise ValueError(f'ARTIST_SPLIT_OVERRIDES.{key} non contiene una chiave/componenti validi')
-            normalized_splits[nk] = cleaned
-        ARTIST_SPLIT_OVERRIDES.clear()
-        ARTIST_SPLIT_OVERRIDES.update(normalized_splits)
         to_romaji.cache_clear()
         _preferred_name_for_key.cache_clear()
         if '_NF_REV' in globals():
@@ -3363,36 +3884,42 @@ def _has_qualifier(nt: str) -> bool:
                for word in _title_qualifier_phrases())
 
 
-def _artist_split_override(value):
-    """Restituisce un override esplicito di collaborazione, indipendente dal catalogo."""
-    key = norm(value)
-    if not key:
-        return None
-    parts = ARTIST_SPLIT_OVERRIDES.get(key)
-    if parts and len(parts) >= 2:
-        return list(parts)
-    for raw_key, raw_parts in ARTIST_SPLIT_OVERRIDES.items():
-        if norm(raw_key) == key and isinstance(raw_parts, (list, tuple)) and len(raw_parts) >= 2:
-            return list(raw_parts)
-    return None
+def _has_tight_comma_separator(value):
+    """True for a comma used as a delimiter without whitespace after it (``A,B``).
+
+    This is a strong generic collaboration cue in exported tags. Unlike a spaced comma,
+    it is not normally used in real artist names such as ``Tyler, The Creator``.
+    """
+    return bool(re.search(r',(?=\S)', str(value or '')))
 
 
 def split_artists(s, by_artist):
-    """Spezza 'Artista1, Artista2' in componenti, RICOMPOSTI usando la libreria
-    come riferimento: 'Tyler, The Creator' e' UN artista (la virgola e' nel nome),
-    'Tyler, The Creator, Kali Uchis' sono DUE. Se nessuna ricomposizione
-    corrisponde a un artista noto, fallback allo split semplice."""
-    override = _artist_split_override(s)
-    if override:
-        return [norm(x) for x in override if norm(x)]
-    ns = norm(s)
+    """Split artist lists before accepting an already-indexed joined artist name.
+
+    ``;`` and tight commas are strong delimiters. For spaced commas, known components are
+    tested before the joined key, which fixes the prior precedence bug while preserving a
+    known solo artist such as ``Tyler, The Creator`` when its components are not both known.
+    """
+    raw = str(s or '').strip()
+    if not raw:
+        return []
+    if ';' in raw:
+        return [norm(x.strip()) for x in raw.split(';') if norm(x.strip())]
+    comma_parts = [x.strip() for x in re.split(r'\s*,\s*', raw) if x.strip()]
+    if _has_tight_comma_separator(raw):
+        return [norm(x) for x in re.split(r',(?=\S)', raw) if norm(x)]
+    ns = norm(raw)
+    if len(comma_parts) >= 2:
+        component_keys = [norm(part) for part in comma_parts]
+        if all(key in by_artist for key in component_keys):
+            return component_keys
     if ns in by_artist:
         return [ns]
-    parts = [norm(x) for x in re.split(r'[,;/]', s) if norm(x)]
+    parts = [norm(x) for x in re.split(r'[,;/]', raw) if norm(x)]
     out, i = [], 0
     while i < len(parts):
         hit = None
-        for j in range(len(parts), i, -1):          # prova il gruppo piu' lungo prima
+        for j in range(len(parts), i, -1):
             cand = norm(' '.join(parts[i:j]))
             if cand in by_artist:
                 hit, i = cand, j
@@ -3403,7 +3930,6 @@ def split_artists(s, by_artist):
             out.append(parts[i])
             i += 1
     return out
-
 
 def _canon(a):
     """Se 'a' appartiene a un ARTIST_GROUPS, ritorna il nome rappresentante
@@ -4816,20 +5342,67 @@ SKIP_TOP = {'playlists', '.stfolder', '@eadir'}
 
 
 class Tee(io.TextIOBase):
-    """Scrivi su piu' stream insieme (console + file di log)."""
+    """Write atomically to the terminal and a plain-text log.
+
+    ``print()`` normally calls ``write(text)`` and ``write("\n")`` separately.
+    Without line buffering, the progress ticker could redraw between those calls,
+    leaving a message suffix attached to the pinned status row. Console fragments are
+    therefore held until newline/flush and emitted as one locked write. The log still
+    receives each fragment immediately, without ANSI controls.
+    """
     def __init__(self, *streams):
         self.streams = streams
+        self._console_pending = ''
+        self._console_lock = threading.RLock()
+        self._log_lock = threading.RLock()
+
+    def _flush_console_pending_locked(self, force=False):
+        if not self.streams:
+            self._console_pending = ''
+            return
+        pending = self._console_pending
+        if not pending:
+            return
+        if not force and '\n' not in pending:
+            return
+        if force:
+            ready, self._console_pending = pending, ''
+        else:
+            # Emit all complete lines together; keep only the final partial line buffered.
+            end = pending.rfind('\n') + 1
+            ready, self._console_pending = pending[:end], pending[end:]
+        if not ready:
+            return
+        st = self.streams[0]
+        terminal_text = _colorize_terminal_text(ready, st)
+        with _PROGRESS_TERMINAL_IO_LOCK:
+            st.write(terminal_text)
+            st.flush()
 
     def write(self, s):
-        # Progress redraws contain carriage returns but no newline. Send those only to
-        # the interactive console: the e2m log should remain readable, not contain CR bars.
+        if not s:
+            return 0
+        # Legacy carriage-return redraws are console-only. Flush any preceding partial
+        # line first so a redraw cannot leapfrog buffered user output.
         is_redraw = ('\r' in s and '\n' not in s) or s in {'\x1b[?7l', '\x1b[?7h'}
-        targets = self.streams[:1] if is_redraw else self.streams
-        for st in targets:
-            try:
-                st.write(s)
-            except Exception:
-                pass
+        with self._console_lock:
+            if is_redraw:
+                self._flush_console_pending_locked(force=True)
+                if self.streams:
+                    with _PROGRESS_TERMINAL_IO_LOCK:
+                        self.streams[0].write(s)
+                        self.streams[0].flush()
+            else:
+                self._console_pending += s
+                self._flush_console_pending_locked(force=False)
+        # Preserve message order in the e2m file and never copy ANSI escapes into it.
+        if not is_redraw:
+            with self._log_lock:
+                for st in self.streams[1:]:
+                    try:
+                        st.write(_ANSI_RE.sub('', s))
+                    except Exception:
+                        pass
         return len(s)
 
     def isatty(self):
@@ -4839,11 +5412,13 @@ class Tee(io.TextIOBase):
             return False
 
     def flush(self):
-        for st in self.streams:
-            try:
-                st.flush()
-            except Exception:
-                pass
+        with self._console_lock:
+            self._flush_console_pending_locked(force=True)
+            for st in self.streams:
+                try:
+                    st.flush()
+                except Exception:
+                    pass
 
 
 RUN_LOG_PATH = None
@@ -5259,6 +5834,10 @@ for _old in ('probe_cache.json', 'probe_cache_v2.json', 'probe_cache_v3.json'): 
         pass
 # thread di ffprobe in parallelo (EXPORTIFY_PROBE_WORKERS=2 se la musica sta su un NAS lento)
 PROBE_WORKERS = max(1, int(os.environ.get('EXPORTIFY_PROBE_WORKERS') or min(8, (os.cpu_count() or 2) * 2)))
+try:
+    WAVEFORM_WORKERS = max(1, min(4, int(os.environ.get('EXPORTIFY_WAVEFORM_WORKERS', '2'))))
+except (TypeError, ValueError):
+    WAVEFORM_WORKERS = 2
 # solo i tag che lo script usa davvero (niente testi/commenti da KB per file)
 _PROBE_KEEP = {'title', 'artist', 'artists', 'album', 'albumartist', 'albumartists', 'album_artist', 'date',
                'originaldate', 'albumversion', 'album_version', 'musicbrainz_albumid',
@@ -6146,7 +6725,15 @@ def _cluster_by_waveform(files, meta, corr, max_dur, trust_format=False):
     la correlazione >= corr. Coppie non verificabili (fingerprint None,
     es. file <5s) non vengono MAI unite: sicurezza prima di tutto.
     Ritorna (lista di cluster, dict fingerprint)."""
-    fps = {f: fingerprint(f) for f in files}
+    # Fingerprinting invokes ffmpeg and dominated the supplied dry-run's 21m54s
+    # dedupe_tracks phase. Decode a small group concurrently, with an explicit low default
+    # for NAS-friendly behavior. Correlation and clustering order remain deterministic.
+    workers = max(1, min(WAVEFORM_WORKERS, len(files)))
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            fps = dict(zip(files, executor.map(fingerprint, files)))
+    else:
+        fps = {f: fingerprint(f) for f in files}
     parent = {f: f for f in files}
 
     def find(a):
@@ -6651,7 +7238,7 @@ def run_phase(logname, fn, *args, **kwargs):
     _PHASE_PROGRESS_INDEX += 1
     if _PHASE_PROGRESS_INDEX > _PHASE_PROGRESS_TOTAL:
         _PHASE_PROGRESS_TOTAL = _PHASE_PROGRESS_INDEX
-    print(f'=== fase {logname} === ({_PHASE_PROGRESS_INDEX}/{_PHASE_PROGRESS_TOTAL})', flush=True)
+    print(f'=== fase {logname} === {_PHASE_PROGRESS_INDEX}/{_PHASE_PROGRESS_TOTAL}', flush=True)
     started = time.perf_counter()
     result = None
     status = 'completata'
@@ -6685,7 +7272,7 @@ def run_phase(logname, fn, *args, **kwargs):
             label = f'fine fase {logname}'
         else:
             label = f'{status}: {logname}'
-        print(f'=== {label} | durata {_elapsed_text(elapsed)} ===', flush=True)
+        print(f'=== {label} === {_elapsed_text(elapsed)}', flush=True)
     return result
 
 
@@ -6826,21 +7413,31 @@ def _known_artist_display(value, known_names):
     return max(candidates, key=_artist_display_score)
 
 
-def _canonicalize_artist_value(value, known_names=None):
-    """Canonicalizza artisti CJK/Hangul e deduplica alias/nomi bilingui equivalenti.
+def _canonicalize_artist_value(value, known_names=None, context_names=None):
+    """Canonicalize artist aliases and collaboration components.
 
-    known_names e' la mappa dal DB Navidrome (normalizzato -> display name preferito).
-    Il separatore ';' e' esplicito; la virgola divide soltanto se il catalogo conferma
-    almeno due artisti, per non spezzare nomi propri come "Tyler, The Creator".
+    ``context_names`` contains folder labels from the track path. Semicolons and tight
+    commas are explicit delimiters; spaced commas need catalog or folder evidence.
     """
     if not value:
         return value
     known_names = known_names or {}
-    chunks = [p.strip() for p in str(value).split(';') if p.strip()]
+    raw_value = str(value)
+    # Strip a placeholder suffix even when it is appended without a comma/semicolon.
+    # Such brackets are annotations, not a real artist credit. If the value consists only
+    # of placeholders, preserve it: the inference phase must decide whether it is safe to
+    # clear a genuinely unknown album artist (especially on compilations).
+    raw_value = re.sub(r'[\[(]\s*unknown\s+artist\s*[\])]', '', raw_value, flags=re.I)
+    if not raw_value.strip():
+        return value
+    raw_value = re.sub(r'\s*[;,]\s*$', '', raw_value).strip()
+    if not raw_value:
+        return value
+    chunks = [p.strip() for p in raw_value.split(';') if p.strip()]
     parts = []
     for chunk in chunks:
-        split = (_split_artist_tag_if_known(chunk, known_names)
-                 if ',' in chunk and (known_names or _artist_split_override(chunk)) else None)
+        split = (_split_artist_tag_if_known(chunk, known_names, context_names)
+                 if ',' in chunk else None)
         parts.extend(split or [chunk])
     if not parts:
         return value
@@ -6884,11 +7481,12 @@ def _canonicalize_artist_value(value, known_names=None):
     return '; '.join(out)
 
 
-def _canonicalize_artist_tag_values(values, known_names=None):
-    """Normalizza tag ripetuti e deduplica alias, anche tra valori plurimi equivalenti."""
+def _canonicalize_artist_tag_values(values, known_names=None, context_names=None):
+    """Canonicalize repeated artist tags, including folder-evidenced collaborations."""
     out = []
     for value in values:
-        canonical_value = _canonicalize_artist_value(value, known_names=known_names)
+        canonical_value = _canonicalize_artist_value(value, known_names=known_names,
+                                                    context_names=context_names)
         parts = [p.strip() for p in str(canonical_value or '').split(';') if p.strip()]
         for canonical in parts:
             hit = next((i for i, old in enumerate(out)
@@ -7024,11 +7622,13 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
             (_has_asian(t.get('album_artist', '')) or _has_asian(t.get('albumartist', '')))
             and (t.get('album_artist') or t.get('albumartist'))
             and (_canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''),
-                                          known_names=known_artist_names)
+                                          known_names=known_artist_names,
+                                          context_names=_artist_context_from_path(f, base))
                  != (t.get('albumartist') or t.get('album_artist', ''))))
         if duplicate_albumartist or cjk_albumartist_needs_repair:
             new = _canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''),
-                                                known_names=known_artist_names)
+                                                known_names=known_artist_names,
+                                                context_names=_artist_context_from_path(f, base))
             progress.clear()
             print(f'{tg}MP3-ALBUMARTIST {f.parent.parent.name} / {f.parent.name}: '
                   f'TPE2="{t.get("album_artist", "")[:30]}" + TXXX="{t.get("albumartist", "")[:30]}" -> "{new[:40]}"')
@@ -7069,19 +7669,21 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
         progress.clear()
         prefetch_probe(files, 'artist_names')
         probes = {f: probe(f) for f in files}
+        path_contexts = {f: _artist_context_from_path(f, base) for f in files}
         candidate = {}
         values = []
         for f, t in probes.items():
             relevant = [t.get(k, '') for k in ('artist', 'albumartist', 'album_artist', 'artists', 'albumartists')]
             if folder_is_asian or any(_has_asian(v) for v in relevant):
                 candidate[f] = True
-            elif any(value and _canonicalize_artist_value(value, known_names=known_artist_names) != value
+            elif any(value and _canonicalize_artist_value(
+                    value, known_names=known_artist_names, context_names=path_contexts[f]) != value
                      for value in relevant):
                 # Still prefilter with ffprobe, but include Latin tags that need alias,
                 # punctuation or comma-collaboration repair (M_O_O_N, Afro Medusa,West Way).
                 candidate[f] = True
             for value in relevant:
-                values.extend(_artist_parts_for_inference(value, known_artist_names))
+                values.extend(_artist_parts_for_inference(value, known_artist_names, path_contexts[f]))
 
         # I valori raw FLAC conservano tag ARTISTS/ALBUMARTISTS ripetuti che ffprobe unisce.
         # Se metaflac non riesce a leggere un FLAC, non deve finire nel fallback non-FLAC.
@@ -7099,7 +7701,7 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
                 raw[f] = _flac_raw_tags(f)
                 for k, v in raw[f]:
                     if k in _FLAC_ARTIST_TAGS:
-                        values.extend(_artist_parts_for_inference(v, known_artist_names))
+                        values.extend(_artist_parts_for_inference(v, known_artist_names, path_contexts[f]))
             except Exception as e:
                 # An unreadable file is excluded from all subsequent rewrites. Keep the
                 # problem visible but do not fail every album repair because one FLAC
@@ -7125,9 +7727,11 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
                 news = []
                 for old in olds:
                     new_value = _remap_artist_value(old, variants, canon) if canon else old
-                    new_value = _canonicalize_artist_value(new_value, known_names=known_artist_names)
+                    new_value = _canonicalize_artist_value(
+                        new_value, known_names=known_artist_names, context_names=path_contexts[f])
                     news.append(new_value)
-                news = _canonicalize_artist_tag_values(news, known_names=known_artist_names)
+                news = _canonicalize_artist_tag_values(
+                    news, known_names=known_artist_names, context_names=path_contexts[f])
                 if news != olds:
                     changes[tag] = news
             if not changes:
@@ -7165,7 +7769,8 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
             artist_old = t.get('artist', '')
             if artist_old:
                 artist_new = _remap_artist_value(artist_old, variants, canon) if canon else artist_old
-                artist_new = _canonicalize_artist_value(artist_new, known_names=known_artist_names)
+                artist_new = _canonicalize_artist_value(
+                    artist_new, known_names=known_artist_names, context_names=path_contexts[f])
                 if artist_new != artist_old:
                     changes['artist'] = artist_new
             # ffprobe exposes MP3/M4A album artist inconsistently as album_artist or
@@ -7173,7 +7778,8 @@ def run_unify_artists(dry_run=False, base=None, files_only=None):
             albumartist_old = t.get('albumartist') or t.get('album_artist') or ''
             if albumartist_old:
                 albumartist_new = _remap_artist_value(albumartist_old, variants, canon) if canon else albumartist_old
-                albumartist_new = _canonicalize_artist_value(albumartist_new, known_names=known_artist_names)
+                albumartist_new = _canonicalize_artist_value(
+                    albumartist_new, known_names=known_artist_names, context_names=path_contexts[f])
                 if albumartist_new != albumartist_old:
                     changes[aa_key] = albumartist_new
                 if f.suffix.lower() == '.mp3' and t.get('albumartist'):
@@ -7881,9 +8487,13 @@ def run_fix_dates(dry_run=False, base=None, files_only=None):
                     continue
                 proposed += 1
                 progress.clear()
+                actions = []
+                if orig_v != shared:
+                    actions.append(f"ORIGINALDATE {orig_v or '(assente)'} -> {shared}")
+                if date_v:
+                    actions.append(f"rimuovo DATE={date_v}")
                 print(f"{'[dry] ' if dry_run else ''}FIX(album-date): {f.name}  "
-                      f"DATE={date_v or '(assente)'} ORIGINALDATE={orig_v or '(assente)'} "
-                      f"-> ORIGINALDATE={shared}")
+                      f"{' ; '.join(actions)}")
             elif orig_v:
                 # The documented invariant is one original-date field only, even if DATE
                 # happens to contain the same value. Navidrome should not have two sources.
@@ -7936,21 +8546,42 @@ FLAC16_MIN_GAIN = 0.98       # sostituisci solo se il nuovo e' < 98% del vecchio
 FLAC16_MIN_FREE = 512 * 1024 * 1024   # spazio libero minimo (oltre alla dimensione del file)
 
 
-def _probe_flac(path):
+try:
+    FLAC16_PROBE_TIMEOUT = max(5, min(120, int(os.environ.get('EXPORTIFY_FLAC_PROBE_TIMEOUT', '30'))))
+except (TypeError, ValueError):
+    FLAC16_PROBE_TIMEOUT = 30
+
+
+def _probe_flac_detailed(path):
+    """Return bit-depth metadata plus a compact failure reason for batch diagnostics."""
     try:
-        r = subprocess.run(['ffprobe', '-v', 'quiet', '-print_format', 'json',
-                            '-show_entries',
+        r = subprocess.run(['ffprobe', '-v', 'quiet', '-select_streams', 'a:0',
+                            '-print_format', 'json', '-show_entries',
                             'format=duration:stream=channels,sample_rate,'
                             'bits_per_raw_sample', str(path)],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=FLAC16_PROBE_TIMEOUT)
+        if r.returncode != 0:
+            return 0, 0, 0, 0.0, f'exit_{r.returncode}'
         d = json.loads(r.stdout or '{}')
-        st = (d.get('streams') or [{}])[0]
-        return (int(st.get('bits_per_raw_sample') or 0),
-                int(st.get('channels') or 0),
-                int(st.get('sample_rate') or 0),
-                float(d.get('format', {}).get('duration') or 0))
-    except Exception:
-        return 0, 0, 0, 0.0
+        streams = d.get('streams') or []
+        if not streams:
+            return 0, 0, 0, 0.0, 'no_stream'
+        st = streams[0]
+        result = (int(st.get('bits_per_raw_sample') or 0),
+                  int(st.get('channels') or 0),
+                  int(st.get('sample_rate') or 0),
+                  float(d.get('format', {}).get('duration') or 0))
+        if not all(result):
+            return (*result, 'incomplete_metadata')
+        return (*result, None)
+    except subprocess.TimeoutExpired:
+        return 0, 0, 0, 0.0, 'timeout'
+    except Exception as exc:
+        return 0, 0, 0, 0.0, type(exc).__name__
+
+
+def _probe_flac(path):
+    return _probe_flac_detailed(path)[:4]
 
 
 def _flac16_convert(src, tmp):
@@ -7972,6 +8603,8 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
     cache_path = Path(cache_path) if cache_path else FLAC16_CACHE
     try:
         cache = json.loads(cache_path.read_text())
+        if not isinstance(cache, dict):
+            cache = {}
     except Exception:
         cache = {}
     converted = skipped = errors = nogain = 0
@@ -7979,22 +8612,62 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
     stopped = ''
     attempts = 0
     cache_updates = 0
-    # _walk_audio usa os.scandir, normalizza estensioni e ignora directory non musicali.
+    # _walk_audio usa os.scandir: niente rglob annidati per ogni album.
     flac_files = [base.joinpath(*rel) for rel in _walk_audio(base, {'.flac'})]
-    progress = _ProgressBar('flac_16bit', len(flac_files), 'file')
-    for file_index, p in enumerate(flac_files, 1):
-        progress.update(file_index)
-        if p.name.casefold().endswith('.flac.flac') or p.name.casefold().endswith('.backup'):
+
+    # Pre-stat in one pass and prepare only files missing a valid path+mtime+size cache hit.
+    # Previously all uncached FLACs were ffprobed sequentially; a handful of 120s probes
+    # could hold the entire all/dry-run pipeline for 30 minutes. This read-only preflight
+    # uses bounded concurrency and a much shorter, configurable metadata-probe timeout.
+    file_stats = {}
+    to_probe = []
+    for p in flac_files:
+        if p.name.casefold().endswith(('.flac.flac', '.backup')):
             continue
         try:
             st = p.stat()
-        except Exception:
+        except OSError:
+            continue
+        file_stats[p] = st
+        if cache.get(str(p)) != [st.st_mtime, st.st_size]:
+            to_probe.append(p)
+
+    probe_results = {}
+    probe_failures = Counter()
+    if to_probe:
+        probe_progress = _ProgressBar('ffprobe/flac16', len(to_probe), 'file')
+        workers = max(1, min(PROBE_WORKERS, 8))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_paths = {executor.submit(_probe_flac_detailed, p): p for p in to_probe}
+            for completed, future in enumerate(as_completed(future_paths), 1):
+                path = future_paths[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = (0, 0, 0, 0.0, type(exc).__name__)
+                probe_results[path] = result[:4]
+                if result[4]:
+                    probe_failures[result[4]] += 1
+                probe_progress.update(completed)
+        probe_progress.close(complete=True)
+        if probe_failures:
+            details = ', '.join(f'{reason}={count}' for reason, count in sorted(probe_failures.items()))
+            print(f'[warn] flac_16bit: ffprobe non riuscito su {sum(probe_failures.values())} file '
+                  f'({details}); file saltati senza modificarli', file=sys.stderr, flush=True)
+
+    progress = _ProgressBar('flac_16bit', len(flac_files), 'file')
+    for file_index, p in enumerate(flac_files, 1):
+        progress.update(file_index)
+        if p.name.casefold().endswith(('.flac.flac', '.backup')):
+            continue
+        st = file_stats.get(p)
+        if st is None:
             continue
         key = str(p)
         if cache.get(key) == [st.st_mtime, st.st_size]:
             skipped += 1
             continue
-        bps, ch, sr, dur = _probe_flac(p)
+        bps, ch, sr, dur = probe_results.get(p, (0, 0, 0, 0.0))
         if not bps or not ch or not sr or not dur:
             skipped += 1
             continue
@@ -8002,23 +8675,19 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
         ratio = st.st_size / raw if raw else 1.0
         if bps <= 16 and ratio <= FLAC16_MAX_RATIO:
             skipped += 1
-            # Questo risultato e' stabile per path+mtime+size. Prima non veniva memorizzato,
-            # quindi un FLAC gia' efficiente veniva interrogato da ffprobe a ogni esecuzione.
+            # Non scrivere cache in dry-run: resta senza effetti collaterali sugli ausiliari.
             if not dry_run:
                 cache[key] = [st.st_mtime, st.st_size]
                 cache_updates += 1
                 if cache_updates % 1000 == 0:
                     _write_json_atomic(cache_path, cache)
-            continue          # gia' ben compresso: non toccare
+            continue
         tag = f'24->16bit ({bps}bit)' if bps > 16 else f'16bit ricomprimo (ratio {ratio:.2f})'
         if dry_run:
             progress.clear()
             print(f'[dry] {tag}: {p.name}')
             converted += 1
             continue
-        # spazio: serve ~ la dimensione del file nuovo (<= originale) + margine. Ieri il
-        # disco si e' riempito a meta' fase ('No space left on device') e le ultime
-        # decine di file sono fallite una dopo l'altra.
         try:
             free = shutil.disk_usage(p.parent).free
         except OSError:
@@ -8040,20 +8709,16 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
                                    f'invece di {ch}/{sr}/{dur})')
             newsize = tmp.stat().st_size
             if bps <= 16 and newsize > st.st_size * FLAC16_MIN_GAIN:
-                # nessun guadagno: NON e' un errore. Lo ricordiamo (path+mtime+size) cosi'
-                # non si rifa' ogni notte (prima: ~230 ricompressioni inutili a notte)
                 cache[key] = [st.st_mtime, st.st_size]
                 nogain += 1
-                continue                       # il finally cancella il tmp
+                continue
             backup = p.with_name(p.name + '.backup')
             os.replace(p, backup)
             os.replace(tmp, p)
-            # verifica del file finale e SUBITO via il backup (prima restavano tutti
-            # fino a fine fase: lo spazio occupato cresceva a ogni conversione)
             fb, fch, fsr, _fd = _probe_flac(p)
             if not fb or fch != ch or fsr != sr:
                 os.replace(backup, p)
-                raise RuntimeError("verifica finale fallita: ripristinato l'originale")
+                raise RuntimeError('verifica finale fallita: ripristinato l’originale')
             backup.unlink(missing_ok=True)
             cache[key] = [p.stat().st_mtime, p.stat().st_size]
             saved += st.st_size - newsize
@@ -8085,7 +8750,7 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
             b = Path(root_dir) / name
             original = b.with_name(b.name[:-len('.backup')])
             if not original.exists():
-                continue  # possibile recupero dopo interruzione: conservare il solo backup
+                continue
             if dry_run:
                 print(f'[dry] RIMUOVEREI backup ridondante: {b}')
                 continue
@@ -8094,7 +8759,6 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
                 removed += 1
             except OSError as e:
                 print(f'[warn] backup non rimosso {b}: {e}', file=sys.stderr)
-    # Elimina dal cache le voci obsolete sotto la radice corrente, evitando crescita indefinita.
     if not dry_run:
         live_keys = {str(p) for p in flac_files
                      if not p.name.casefold().endswith('.flac.flac')}
@@ -8112,7 +8776,8 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
         print(f'[STOP] fase interrotta: {stopped}. Libera spazio e rilancia.', file=sys.stderr)
     print(f'convertiti: {converted} | saltati (cache o gia ok): {skipped} | '
           f'scartati (nessun guadagno): {nogain} | errori: {errors} | '
-          f'spazio recuperato: {saved // 1024}K | backup residui rimossi: {removed}')
+          f'probe fallite: {sum(probe_failures.values())} | spazio recuperato: {saved // 1024}K | '
+          f'backup residui rimossi: {removed}')
 
 
 # ===================== pulizia reference playlist morte =====================
@@ -9990,8 +10655,14 @@ def _album_root_for_file(base: Path, f: Path):
 
 
 def _audio_files(folder: Path):
-    return [f for f in sorted(folder.rglob('*'))
-            if f.is_file() and f.suffix.lower() in AUDIO_EXT]
+    """Return audio paths in deterministic order using the shared scandir walker.
+
+    Path.rglob()+is_file() recursively restatted every entry and was called once per
+    album in dedupe_releases/dedupe_tracks, making a cold NAS run repeatedly traverse
+    the same tree. _walk_audio performs one scandir pass per directory and sorts once.
+    """
+    folder = Path(folder)
+    return [folder.joinpath(*parts) for parts in _walk_audio(folder, AUDIO_EXT)]
 
 
 def folder_year(folder: Path, files) -> int:
@@ -10240,16 +10911,29 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
     progress = _ProgressBar('dedupe_releases', len(artists), 'artisti')
     for artist_index, art in enumerate(artists, 1):
         progress.update(artist_index)
-        groups = {}
+        # First group only by folder names. The old order scanned every album's files
+        # before discovering that its normalized title was unique; the supplied run spent
+        # 2m40 in this phase while finding zero release groups. Walk audio files only for
+        # names that actually have a possible release counterpart.
+        album_dirs_by_base = {}
         for album in sorted(art.iterdir()):
             if not album.is_dir():
                 continue
-            files = _audio_files(album)
-            if not files:
-                continue
             b = album_base(album.name)
             if b:
-                groups.setdefault(b, []).append((album, files))
+                album_dirs_by_base.setdefault(b, []).append(album)
+
+        groups = {}
+        for b, album_dirs in album_dirs_by_base.items():
+            if len(album_dirs) < 2:
+                continue
+            releases = []
+            for album in album_dirs:
+                files = _audio_files(album)
+                if files:
+                    releases.append((album, files))
+            if len(releases) >= 2:
+                groups[b] = releases
 
         for b, releases in groups.items():
             if len(releases) < 2:
@@ -10656,8 +11340,13 @@ def _is_unknown_artist(value):
 
 
 def _has_unknown_artist_component(value):
-    raw = str(value or '').strip()
+    raw = unicodedata.normalize('NFKC', str(value or '')).strip()
     if _is_unknown_artist(raw):
+        return True
+    # norm() strips bracketed/parenthesized annotations before keying. Detect placeholder
+    # tokens inside a larger label too, or "The Cure [Unknown Artist]" can collide with
+    # the real "The Cure" row just like "The Cure, [Unknown Artist]" does.
+    if re.search(r'[\[(]\s*unknown\s+artist\s*[\])]', raw, re.I):
         return True
     return any(_is_unknown_artist(part.strip())
                for part in re.split(r'\s*[;,]\s*', raw) if part.strip())
@@ -10669,8 +11358,8 @@ _GENERIC_ARTIST_NAMES = {
 }
 
 
-def _artist_parts_for_inference(value, known_names=None):
-    """Componenti artista: ';' e' esplicito, ',' solo se confermata dal catalogo."""
+def _artist_parts_for_inference(value, known_names=None, context_names=None):
+    """Split artist components using delimiters, catalog evidence, or folder context."""
     raw = str(value or '').strip()
     if not raw:
         return []
@@ -10680,8 +11369,8 @@ def _artist_parts_for_inference(value, known_names=None):
         chunk = chunk.strip()
         if not chunk:
             continue
-        split = (_split_artist_tag_if_known(chunk, known_names)
-                 if ',' in chunk and (known_names or _artist_split_override(chunk)) else None)
+        split = (_split_artist_tag_if_known(chunk, known_names, context_names)
+                 if ',' in chunk else None)
         out.extend(split or [chunk])
     return out
 
@@ -10974,6 +11663,12 @@ def _navidrome_artist_name_map(con=None):
         found = {}
         for row in con.execute(f'SELECT "{name_col}" FROM artist'):
             name = str(row[0] or '').strip()
+            # norm() deliberately strips square-bracketed annotations. Thus a corrupted
+            # composite label such as "The Cure, [Unknown Artist]" normalizes to the same
+            # key as "The Cure" and, because it is longer, could otherwise replace the real
+            # catalog spelling. Never index an artist row containing a placeholder component.
+            if _has_unknown_artist_component(name):
+                continue
             key = norm(name)
             if key:
                 previous = found.get(key)
@@ -10994,70 +11689,109 @@ def _artist_display_score(name):
             int('_' not in raw), int('.' in raw and '_' not in raw), len(raw), raw.casefold())
 
 
-def _split_artist_tag_if_known(value, known_names):
-    """Split artist collaborations even when Navidrome already indexed the joined tag.
+@lru_cache(maxsize=8192)
+def _artist_context_from_parent(parent_path, base_path):
+    """Cached candidate artist-folder labels for a directory, most-specific first."""
+    parent, root = Path(parent_path), Path(base_path)
+    names = []
+    try:
+        relative = parent.relative_to(root)
+        names.extend(reversed(relative.parts))
+    except (ValueError, OSError):
+        pass
+    names.append(root.name)
+    result, seen = [], set()
+    for name in names:
+        key = norm(name)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(name)
+    return tuple(result)
 
-    Component-by-component known names take precedence over a previously-created joined
-    artist entity (e.g. ``Afro Medusa,West Way``). A genuine comma-containing artist name
-    (e.g. ``Tyler, The Creator``) remains whole unless the catalog confirms both components.
+
+def _artist_context_from_path(file_path, base):
+    """Artist-folder evidence for a file, cached for all tracks in the same directory."""
+    return _artist_context_from_parent(str(Path(file_path).parent), str(Path(base)))
+
+
+def _split_artist_tag_if_known(value, known_names, context_names=None):
+    """Separate artist lists without per-name overrides.
+
+    Semicolons are explicit artist delimiters. A comma with no following whitespace is
+    treated as a malformed collaboration delimiter even when Navidrome has indexed the
+    full joined string as one artist. For spaced commas, catalog components or a matching
+    artist-folder label provide evidence; known comma-bearing solo names remain intact.
     """
     raw = str(value or '').strip()
     if not raw:
         return None
     known_names = known_names or {}
-    explicit = ';' in raw
-    # Known split overrides win even if the combined form already exists as a Navidrome artist.
-    override = _artist_split_override(raw) if not explicit else None
-    if override:
-        canonical = []
-        seen_override = set()
-        for part in override:
-            key = norm(part)
-            display = known_names.get(key, part.strip())
-            if key and key not in seen_override:
-                seen_override.add(key)
-                canonical.append(display)
-        return canonical if len(canonical) >= 2 else None
-    chunks = [x.strip() for x in raw.split(';')] if explicit else [raw]
-    out, recognized = [], 0
+    explicit_chunks = [x.strip() for x in raw.split(';') if x.strip()]
+    explicit = len(explicit_chunks) > 1
+    if not explicit:
+        explicit_chunks = [raw]
+    out = []
+    recognized = 0
+    forced_split = explicit
 
-    for chunk in chunks:
+    for chunk in explicit_chunks:
         if not chunk:
             continue
+        if _has_tight_comma_separator(chunk):
+            # Do not let the exact joined catalog key mask a collaboration delimiter.
+            comma_parts = [x.strip() for x in re.split(r',(?=\S)', chunk) if x.strip()]
+            if len(comma_parts) >= 2:
+                forced_split = True
+                for part in comma_parts:
+                    key = norm(part)
+                    out.append(known_names.get(key, part))
+                    recognized += int(key in known_names)
+                continue
+
         comma_parts = [x.strip() for x in re.split(r'\s*,\s*', chunk) if x.strip()]
         if len(comma_parts) == 1:
             key = norm(chunk)
-            if key in known_names:
-                out.append(known_names[key])
-                recognized += 1
-            else:
-                out.append(chunk)
+            out.append(known_names.get(key, chunk))
+            recognized += int(key in known_names)
+            continue
+
+        context_keys = set()
+        for context_name in (context_names or ()):
+            context_key = norm(context_name)
+            if context_key:
+                context_keys.add(context_key)
+        # A matching artist directory is useful evidence when this component has never
+        # been indexed separately. This generalizes to all artist folders and does not
+        # require a JSON rule for each joined collaboration.
+        if any(norm(part) in context_keys for part in comma_parts):
+            forced_split = True
+            for part in comma_parts:
+                key = norm(part)
+                out.append(known_names.get(key, part))
+                recognized += int(key in known_names)
             continue
 
         atom_keys = [norm(part) for part in comma_parts]
-        # The key difference from the previous implementation: even if the joined form is
-        # already in Navidrome, split when every comma-separated component is independently
-        # known. This repairs old joined entities without splitting comma-style artist names.
+        whole_key = norm(chunk)
         component_is_safe = all(
             (key and key in known_names) or _is_unknown_artist(part)
             for key, part in zip(atom_keys, comma_parts))
         has_real_catalog_component = any(key in known_names for key in atom_keys)
-        if len(comma_parts) >= 2 and component_is_safe and has_real_catalog_component:
+        if component_is_safe and has_real_catalog_component:
             out.extend(known_names.get(key, part) for key, part in zip(atom_keys, comma_parts))
             recognized += sum(1 for key, part in zip(atom_keys, comma_parts)
                               if key in known_names or _is_unknown_artist(part))
+            forced_split = True
             continue
 
-        # If the whole string is a known artist but its components are not all known, retain
-        # it as one performer (protects "Tyler, The Creator" and similar names).
-        whole_key = norm(chunk)
+        # A spaced comma on a catalog-known whole-name is not enough evidence to split.
         if whole_key in known_names:
             out.append(known_names[whole_key])
             recognized += 1
             continue
 
-        # Otherwise greedily reconstruct the longest known names, which allows multi-part
-        # names containing commas while still separating collaborations around them.
+        # Reconstruct longest known names. This preserves known comma-bearing solo artists
+        # while still allowing an additional catalog-recognized collaborator after them.
         i = 0
         while i < len(comma_parts):
             hit = None
@@ -11076,14 +11810,10 @@ def _split_artist_tag_if_known(value, known_names):
                 i += 1
 
     out = [part.strip() for part in out if part and part.strip()]
-    if len(out) < 2:
-        return None
-    if explicit:
-        if recognized < 1:
-            return None
-    elif recognized < 2:
-        return None
-
+    reliable = [part for part in out if not _is_unknown_artist(part)]
+    if reliable:
+        # A generic placeholder must not remain as an extra artist beside real names.
+        out = reliable
     result, seen = [], set()
     for part in out:
         key = norm(part)
@@ -11091,7 +11821,15 @@ def _split_artist_tag_if_known(value, known_names):
         if key and key not in seen:
             seen.add(key)
             result.append(canonical)
-    return result if len(result) >= 2 else None
+    if len(result) >= 2:
+        return result
+    # When an evidenced multi-artist tag collapses to one reliable artist after dropping
+    # placeholders, return that one artist so callers can remove the stale placeholder.
+    if forced_split and reliable and result:
+        return result
+    if not forced_split and recognized < 2:
+        return None
+    return None
 
 
 # Compatibilita' interna con il nome precedente.
@@ -11100,15 +11838,11 @@ def _split_semicolon_if_known(value, known_names):
 
 
 def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
-    """Normalizza ';' / ',' quando il catalogo conferma i componenti senza spezzare nomi propri."""
+    """Normalize multi-artist tags using separators, catalog evidence, and artist folders."""
     base = Path(base) if base else LIBRARY_ROOT
     known = _navidrome_artist_name_map()
-    if not known and not ARTIST_SPLIT_OVERRIDES:
-        print('[warn] split artisti saltato: catalogo Navidrome non leggibile e nessun override esplicito configurato',
-              file=sys.stderr)
-        return {'files': 0, 'errors': 0}
-    if not known and ARTIST_SPLIT_OVERRIDES:
-        print('[i] catalogo artisti non leggibile: applico solo ARTIST_SPLIT_OVERRIDES espliciti',
+    if not known:
+        print('[warn] catalogo artisti Navidrome non leggibile: uso separatori espliciti e contesto della cartella-artista',
               file=sys.stderr)
     files = [base.joinpath(*r) for r in _walk_audio(base, AUDIO_EXT)]
     if files_only is not None:
@@ -11124,9 +11858,11 @@ def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
     for scan_index, f in enumerate(files, 1):
         scan_progress.update(scan_index)
         tags = probe(f)
+        path_context = _artist_context_from_path(f, base)
         values_to_check = (tags.get('artist'), tags.get('artists'), tags.get('albumartist'),
                            tags.get('album_artist'), tags.get('albumartists'))
-        if any(_split_artist_tag_if_known(value, known) for value in values_to_check if value):
+        if any(_split_artist_tag_if_known(value, known, path_context)
+               for value in values_to_check if value):
             candidate_files.append(f)
     scan_progress.close(complete=True)
     print(f'[i] split artisti: {len(candidate_files)}/{len(files)} file hanno tag candidati', flush=True)
@@ -11136,6 +11872,7 @@ def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
         progress.update(file_index)
         ext = f.suffix.lower()
         try:
+            path_context = _artist_context_from_path(f, base)
             if ext == '.flac':
                 try:
                     raw_tags = _flac_raw_tags(f)
@@ -11155,7 +11892,7 @@ def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
                     expanded_singular = []
                     did_split = False
                     for value in singular_values:
-                        parts = _split_artist_tag_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known, path_context)
                         if parts:
                             did_split = True
                             expanded_singular.extend(parts)
@@ -11163,7 +11900,7 @@ def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
                             expanded_singular.append(value.strip())
                     expanded_plural = []
                     for value in plural_values:
-                        parts = _split_artist_tag_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known, path_context)
                         if parts:
                             did_split = True
                             expanded_plural.extend(parts)
@@ -11204,7 +11941,7 @@ def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
                     found_split = False
                     for key in source_keys:
                         value = str(tag.get(key) or '').strip()
-                        parts = _split_artist_tag_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known, path_context)
                         if not parts:
                             continue
                         found_split = True
@@ -11615,7 +12352,13 @@ def _load_artwork_album_groups():
                         groups.setdefault(album_dir, []).append(track)
             except OSError:
                 continue
-    scan_progress.close(complete=(audio_seen >= estimated_audio_total if estimated_audio_total else True))
+    # The probe-cache estimate can be stale by a deleted/moved file. Once the walk ends,
+    # retarget the final display to the observed count so a completed scan never remains at
+    # 99% or shows a denominator that cannot be reached.
+    if audio_seen > 0 and scan_progress.total != audio_seen:
+        scan_progress.total = audio_seen
+        scan_progress.update(audio_seen, force=True)
+    scan_progress.close(complete=True)
     if estimated_audio_total and audio_seen != estimated_audio_total:
         print(f'[artwork] file audio rilevati: {audio_seen}; totale cache stimato: '
               f'{estimated_audio_total}', flush=True)
@@ -12008,6 +12751,10 @@ def main():
     logf = open_run_log(_log_command_tag(sys.argv[1:], tuple(getattr(ap, '_option_string_actions', {}))))
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = Tee(old_out, logf), Tee(old_err, logf)
+    # Apply the JSON palette before _run prints its startup banner and before the first
+    # measured phase heading. load_user_config still loads the remaining settings normally.
+    _preload_terminal_colors()
+    previous_signal_handlers = _install_progress_signal_handlers()
     global _RUN_STARTED_AT, _PHASE_TIMINGS, _RUN_INTERRUPTED, _RUN_FAILED_PHASES
     _RUN_STARTED_AT = time.perf_counter()
     _PHASE_TIMINGS.clear()
@@ -12025,10 +12772,17 @@ def main():
             print(e.code, file=sys.stderr)
             raise SystemExit(1)
         raise
+    except KeyboardInterrupt:
+        _RUN_INTERRUPTED = True
+        _cleanup_active_progress_bars()
+        raise SystemExit(130)
     except Exception:
         traceback.print_exc()
         raise SystemExit(1)
     finally:
+        # First remove the pinned row; then timing/log messages can use the full terminal.
+        _cleanup_active_progress_bars()
+        _restore_progress_signal_handlers(previous_signal_handlers)
         flush_probe_cache()
         _print_timing_summary()
         print(f"[i] log: {RUN_LOG_PATH}", file=sys.stderr)
