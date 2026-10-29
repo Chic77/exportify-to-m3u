@@ -20,7 +20,7 @@ Sostituisce il vecchio script crontab. Migliorie:
 
 Requisiti (Debian 12+/13: 'pip install --user' e' bloccato da PEP 668 -> venv):
     cd ~/homelab/scripts && python3 -m venv .venv
-    .venv/bin/pip install pykakasi hangul-romanize numpy
+    .venv/bin/pip install pykakasi hangul-romanize numpy mutagen
   Se .venv esiste accanto allo script viene usato in automatico (cron compreso);
   EXPORTIFY_NO_VENV=1 lo disattiva. Servono anche ffmpeg/ffprobe e metaflac.
 
@@ -78,8 +78,8 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     NAVIDROME_DB       il file navidrome.db (lo script lo legge e, per alcune fasi, lo
                        scrive fermando il container 'navidrome' per pochi secondi)
     DEDUPE_TRASH       cestino dei file spostati dai dedupe (senza --hard-delete)
-    logs/              log di ogni run (e2m_<opzioni>_<data>.log), mancanti_<data>.txt,
-                       album_incompleti_<data>.txt
+    logs/              log di ogni run (e2m_<opzioni>_<data>.log), mancanti_<data>.txt;
+                        i report diagnostici completi sono incorporati nel log e2m
     .exportify_sessions/  sessioni Spotify salvate da --fetch-login (riservate, permessi 600)
                        (consigliato nel .gitignore: .exportify_sessions/ spotify_cookies/
                        spotify_csv/)
@@ -90,7 +90,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 2. PRIMA INSTALLAZIONE (una volta sola)
 ------------------------------------------------------------------------------
     cd ~/homelab/scripts && python3 -m venv .venv
-    .venv/bin/pip install pykakasi hangul-romanize numpy
+    .venv/bin/pip install pykakasi hangul-romanize numpy mutagen
     sudo apt install ffmpeg flac                      # ffmpeg, ffprobe, metaflac
     # SOLO se vuoi scaricare gli zip in automatico (--fetch*):
     .venv/bin/pip install playwright && .venv/bin/playwright install chromium
@@ -294,10 +294,10 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --repair-album-groups
                         ripara tag e gruppi album. Da sola: anteprima, --apply per scrivere;
                         in --all e' integrata nella pipeline e segue --dry-run per le scritture.
-  --check-albums        confronta ogni album del DB con la tracklist di MusicBrainz e
-                        scrive logs/album_incompleti_<data>.txt (tracce mancanti X/Y,
-                        quali, e l'elenco da riscaricare). Usa MUSICBRAINZ_ALBUMID se c'e',
+  --check-albums        confronta gli album del DB con MusicBrainz e scrive
+                        report completo integrato in logs/mancanti_<data>.txt. Usa MUSICBRAINZ_ALBUMID se c'e',
                         altrimenti cerca per artista+album (--mb-no-search lo evita).
+                        In --all, la fase automatica controlla SOLO album con MBID.
                         1 richiesta/secondo: la prima run e' lunga, poi c'e' la cache.
   --missing [FILE]      elenca TUTTE le tracce mancanti, ricalcolate ora dai CSV contro la
                         libreria. Con FILE le salva li', senza le stampa.
@@ -336,15 +336,15 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 ------------------------------------------------------------------------------
   E' il posto per le TUE regole: sopravvive agli aggiornamenti dello script. Un JSON
   non valido ferma lo script (meglio che importare playlist indesiderate). Chiavi:
-    SKIP_PLAYLISTS   nomi di playlist da non importare mai (confronto tollerante; '*'
-                     finale = tutte quelle che iniziano cosi': "daylist*")
+    SKIP_PLAYLISTS   oggetto per utente: {"chic": ["daylist*", "nome playlist"],
+                     "stello": ["altra playlist"]}. Le voci si applicano solo a quell'utente;
+                     '*' finale = tutte quelle che iniziano cosi': "daylist*"
     SPOTIFY_USERS    {"<id spotify>": "<utente navidrome>"}: lega gli zip senza il nome
                      utente (lo script puo' aggiungere voci da solo, vedi passo 3)
     FETCH_IGNORED_USERS ["octochic", ...]: utenti da NON aggiornare con Exportify;
                      i loro CSV/ZIP locali possono comunque essere usati
     PLAYLIST_FOLDERS {"nome playlist": "sottocartella"}: dove mettere certe m3u
-    PLAYLIST_PREFIXES ["color", ...]: "color yellow" diventa "color - yellow" (si
-                     raggruppano in tutti i client)
+    I nomi playlist vengono importati come sono in Spotify; rinominali direttamente li'.
     NAME_TRANSLATIONS traduzione inglese o nome latino ufficiale per testo CJK/Hangul; precede gli altri
     NAME_FIXES       alias/romanizzazione manuale, compatibile con i JSON precedenti; precede il fallback fonetico
     ALIASES          artista scritto diversamente su Spotify e in libreria
@@ -406,7 +406,133 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 CHANGELOG
 ==============================================================================
 
-Novita' 0.68 (diagnostica album piu' efficiente e scritture piu' robuste):
+Novita' 0.77 (spinner regolare, alias canonici e date coerenti per album):
+  - spinner a ciclo regolare di quattro frame (/ -> ━━ -> \\ -> |), avanzamento con indice
+    monotono ogni 100 ms; niente salti legati al clock assoluto, mantenuta la casella a due colonne.
+  - la forma bilingue CJK riusa anche la capitalizzazione esatta della voce canonica gia' nel catalogo;
+    la title-case non crea piu' varianti artificiali come '高中正義 (Masayoshi Takanaka)' rispetto a
+    '高中正義 (masayoshi takanaka)'.
+  - M.O.O.N e' ora un alias canonico forte: il nome gia' presente nel DB non puo' reintrodurre
+    il punto finale in M.O.O.N. o ripristinare M_O_O_N. La grafia finale resta M.O.O.N.
+  - fix_date_tags calcola una data originale affidabile a livello di album logico (incluse cartelle CD1/CD2)
+    usando solo una maggioranza datata >=60% con almeno due tracce. Se esiste, uniforma ORIGINALDATE
+    sulle tracce FLAC dell'album e rimuove DATE discordanti; nel dry-run mostra ogni modifica proposta.
+  - quando ORIGINALDATE esiste, DATE viene rimosso anche se i due valori sono identici: elimina il doppio
+    campo in coerenza con la regola documentata e rende deterministica la data letta da Navidrome.
+  - il rapporto di verifica distingue i fix proposti dalla convergenza del DB: --dry-run non scrive tag
+    e non esegue la scansione Navidrome, quindi non puo' attestare che gli album siano gia' fusi nel DB.
+
+Novita' 0.76 (split artisti, deduplica e consolidamento album):
+  - barra fissa da 50 caratteri con spinner a due colonne (trattino lungo incluso), refresh ogni
+    100 ms; la fase/contatore resta a sinistra e spinner + barra + percentuale a destra.
+  - split esplicito e configurabile dei tag composti 'Afro Medusa,West Way' e
+    'Chiello,Powv_FSK', anche se Navidrome ha gia' indicizzato la stringa unita.
+  - canonizzazione stabile M_O_O_N/M.O.O.N e unificazione dei nomi CJK puri con la forma
+    bilingue in catalogo; le collaborazioni non si affidano piu' soltanto al catalogo preesistente.
+  - album_unify sceglie ORIGINALDATE soltanto quando l'anno dominante compare in almeno due
+    tracce e copre il 60% dei tag datati; rimuove ID MusicBrainz non uniformabili anche su M4A/MP4
+    e cancella ALBUMVERSION discordanti quando un titolo/artista esatti vengono consolidati.
+  - dedupe_tracks usa il fallback conservativo FLAC/lossy con titolo esatto e durata quasi uguale
+    anche quando manca un numero traccia; una nuova fase post-unificazione in --all trova doppioni
+    tra cartelle album diverse e li sposta nel cestino solo con --apply. Qualificatori e marcatori
+    espliciti di edizione restano protetti.
+  - corretto NameError in _unify_cross_album_dirs (mappa artisti non inizializzata); UNKNOWN-ALBUMARTIST
+    ignora i componenti placeholder in 'The Cure; Unknown Artist' solo quando resta un nome concreto.
+
+Novita' beta-0.75 (normalizzazione artisti e riparazione album):
+  - barra terminale larga 50 caratteri esatti tra parentesi quadre, spinner animato ogni 100 ms
+    e ridisegno temporizzato della stessa riga; i log e2m non ricevono CR né sequenze ANSI.
+  - la normalizzazione artisti canonizza anche le varianti di punteggiatura (M_O_O_N/M.O.O.N),
+    preferisce il nome bilingue CJK già presente nel catalogo e divide collaborazioni con virgole
+    senza spaccare nomi propri con virgola quando il catalogo riconosce il nome completo.
+  - la riparazione di [Unknown Artist] interviene anche su ALBUMARTIST/ALBUM_ARTIST espliciti,
+    usando cartella e metadati delle tracce solo quando non indicano una compilation.
+  - album_unify ora aggiorna DATE anche sui FLAC senza ORIGINALDATE: un ORIGINALDATE trovato
+    su un'altra traccia non blocca più il campo DATE dell'intero album e non lascia split evitabili.
+  - dedupe_tracks ha un fallback conservativo per doppioni con titolo esatto, stesso numero traccia,
+    durata quasi identica e senza qualificatori live/demo/mix; le diverse incisioni restano protette.
+  - report album_db_diagnostics e album_cross_folder_review sono scritti direttamente nel log e2m,
+    senza creare file autonomi temporanei; il report MusicBrainz resta in mancanti.
+
+Novita' beta-0.74 (progress bar terminale e log consolidati):
+  - la progress bar ridisegna la stessa riga ogni 500 ms in terminale, non a soglie del 5%;
+    contatore e fase restano a sinistra, barra completa e percentuale sono allineate a destra.
+  - Tee rileva se la console e' interattiva e manda i redraw solo al terminale, senza inserire
+    caratteri CR nel log e2m. I log reindirizzati mantengono checkpoint temporizzati leggibili.
+  - album_db_diagnostics e album_cross_folder_review vengono incorporati nel log e2m e poi
+    cancellati come file autonomi; il report MusicBrainz resta incorporato in mancanti.
+
+Novita' beta-0.73 (MP3 ID3 convergenti, exit status e report robusti):
+  - MP3: la pulizia dell'alias TXXX albumartist usa mutagen/ID3 invece di tentare di
+    cancellarlo con ffmpeg (che nei log continuava a lasciare il frame e riscrivere 168 file
+    a ogni run). Conserva gli altri frame ID3 e non ricodifica l'audio.
+  - run_phase registra le fasi con ritorno False, eccezioni o risultato con errori>0; la
+    pipeline completa continua per produrre tutti i report ma termina con exit code 1 se una
+    fase e' fallita, cosi' cron/monitoring non vedono una run fallita come successo.
+  - check-albums ritorna un esito coerente con gli errori MusicBrainz e sostituisce anche un
+    eventuale blocco MusicBrainz troncato in mancanti, senza duplicarlo.
+  - aggiornata la guida per mutagen e chiarito che album_incompleti e' un nome storico: il
+    report completo e' consolidato in mancanti_<data>.txt.
+
+Novita' 0.72 (ottimizzazione artist split, report persistenti e log piu' chiari):
+  - split_known_artist_tags prefiltra i file con i tag ffprobe e invoca metaflac solo sui candidati
+    reali, evitando migliaia di processi per file senza separatori utili.
+  - aggiunti artists/albumartists alla cache ffprobe e incrementata la versione della cache per
+    evitare di riutilizzare voci prive dei campi plurali.
+  - un export tag FLAC non leggibile viene segnalato come WARN e saltato; non blocca il repair
+    dell'intera libreria. Gli errori di scrittura restano ERROR e fanno fallire la fase.
+  - la sezione completa MusicBrainz di mancanti_<data>.txt viene preservata quando il report
+    playlist viene rigenerato piu' tardi nella giornata; il controllo album aggiorna il blocco.
+  - README aggiornato e configurazione SKIP_PLAYLISTS documentata per utente; PLAYLIST_PREFIXES
+    non e' piu' una funzione/configurazione attiva.
+
+Novita' 0.71 (skip playlist per utente e report consolidati):
+  - SKIP_PLAYLISTS ora e' un oggetto per utente: le esclusioni attuali appartengono solo a chic;
+    --skip resta invece un override globale per la singola esecuzione. Accetta ancora la vecchia
+    lista JSON assegnandola a DEFAULT_USER con avviso di compatibilita'.
+  - rimosso PLAYLIST_PREFIXES: il nome della playlist viene rispettato come arriva da Spotify;
+    rinomina le playlist direttamente in Spotify invece di trasformarle durante l'import.
+  - i report completi album_db_diagnostics e album_cross_folder_review sono incorporati nel log
+    principale e2m, con marcatori di inizio/fine; i file separati vengono eliminati dopo l'incorporazione.
+  - il controllo MusicBrainz scrive l'intero report, incluse tracce mancanti e album non trovati,
+    in fondo a mancanti_<data>.txt; non crea piu' nuovi album_incompleti_<data>.txt separati.
+  - UNKNOWN-ARTIST prova anche ARTISTS per la singola traccia e un suffisso artista attendibile
+    nel nome file (es. 'Titolo - Artista') prima di arrendersi per un album multi-artista.
+  - i FLAC il cui export dei tag fallisce vengono esclusi dal fallback non-FLAC, evitando una
+    seconda riscrittura impropria; l'errore resta esplicito nel log per riparare/verificare il file.
+  - star_liked restituisce esito fallito se almeno un utente ha un errore API, anziche' mostrare
+    la fase come completata quando il log contiene [ERRORE].
+
+Novita' 0.70 (progress bar terminale per scansioni e fasi lunghe):
+  - le fasi con un insieme di elementi misurabile usano una barra dinamica su una sola riga:
+    contatore corrente/totale, indicatore visuale, percentuale stimata ed elementi rimanenti.
+    Su terminale interattivo la riga viene aggiornata con carriage return; nei log non interattivi
+    vengono emessi solo aggiornamenti periodici per non riempire i log con una riga per elemento.
+  - sostituiti i contatori a righe multiple per scansione libreria, matching playlist, prefetch ffprobe,
+    romaji_tags, album_unify, dedupe tracce/release, normalizzazione artisti, MP3-vs-FLAC, scan Navidrome,
+    check MusicBrainz, confronto catalogo Spotify, download artwork e fix-flac-safe.
+  - aggiunti contatori anche a repair collaborazioni/album artist, repair ownership e dedupe playlist,
+    clean-empty e conversione FLAC; le barre avanzano con item controllati, percentuale e rimanenti.
+  - su TTY la barra usa carriage return e sovrascrive la riga attiva; nei log non interattivi conserva solo
+    checkpoint periodici. Messaggi di errore e modifiche effettivamente applicate restano log separati.
+
+Novita' beta-0.69 (riparazione artisti, contatore fasi e verifica MusicBrainz):
+  - i tag ARTIST/ARTISTS/ALBUMARTIST/ALBUMARTISTS riconoscono anche la virgola come separatore,
+    ma solo quando almeno due componenti sono confermati dal catalogo Navidrome; nomi propri
+    come 'Tyler, The Creator' vengono ricomposti e non spezzati.
+  - la normalizzazione artisti armonizza le forme CJK pure e bilingui fra i campi singoli/plurali,
+    scegliendo una grafia canonica per evitare duplicati 'kanji' / 'kanji (traduzione)'.
+  - UNKNOWN-ARTIST usa prima l'album artist coerente, poi il nome cartella attendibile, quindi
+    una maggioranza di artisti traccia solo se chiara e non esplicitamente una compilation.
+  - ogni fase mostra il numero progressivo e il totale previsto; il riepilogo finale continua a
+    mostrare le durate misurate.
+  - --all controlla gli album che hanno MUSICBRAINZ_ALBUMID, elenca i brani mancanti in fondo a
+    logs/mancanti_<data>.txt e include li' il report MusicBrainz completo (nessun file album_incompleti separato).
+  - dopo lo scan Navidrome confronta lo stato degli album prima/dopo, stampa i nuovi album e le
+    voci cambiate/accorpate, riapplica le fasi tag solo ai file degli album interessati e chiude
+    con uno scan incrementale. Il confronto usa i path dei brani, non solo gli ID DB volatili.
+
+Novita' beta-0.68 (diagnostica album piu' efficiente e scritture piu' robuste):
   - --diagnose-album-splits genera le coppie candidate tramite un indice inverso degli artisti:
     evita confronti fra album che non condividono alcuna identita' artista e riduce il lavoro
     quadratico sull'intero catalogo; i controlli di similarita' e la regola fuzzy review-only
@@ -726,9 +852,10 @@ Novita' beta-3.30:
     altri formati sono elencati). Dopo --apply serve uno scan di Navidrome (lo fa la run).
     Percorsi: media_file.path e' quello DENTRO il container; la fase lo riporta sul host
     (ND_MUSIC_ROOT=/music se serve; di solito lo riconosce da sola)
-  - --check-albums: confronta ogni album del DB con la tracklist di MusicBrainz e scrive
-    logs/album_incompleti_<data>.txt: album con tracce mancanti (X/Y, %), quali tracce, e
-    l'elenco "Artista - Album - Titolo" da riscaricare. Usa MUSICBRAINZ_ALBUMID del DB
+  - --check-albums (vecchie versioni: album_incompleti_<data>.txt): confronta ogni album del DB con
+    la tracklist di MusicBrainz; nelle versioni attuali il report intero e' in fondo a
+    logs/mancanti_<data>.txt. Include tracce mancanti (X/Y, %), quali tracce e l'elenco
+    "Artista - Album - Titolo" da riscaricare. Usa MUSICBRAINZ_ALBUMID del DB
     (release esatta); senza, cerca per artista+album (--mb-no-search = solo gli album
     taggati). 1 richiesta/secondo come chiede MusicBrainz, cache in .mb_albums_cache.json:
     la prima run su una libreria grande e' lunga (si puo' interrompere e riprendere),
@@ -873,6 +1000,7 @@ import sqlite3
 import string
 import subprocess
 import time
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -892,6 +1020,202 @@ from functools import lru_cache
 from pathlib import Path
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+
+
+class _ProgressBar:
+    """Progress display with a 50-character bar and a 100ms terminal spinner.
+
+    TTY updates are rendered by a small timer thread so the spinner keeps moving even
+    while a single file/album takes longer than one refresh interval. Redirected logs
+    remain compact and receive occasional checkpoints rather than carriage returns.
+    """
+    BAR_WIDTH = 50
+    REFRESH_SECONDS = 0.1
+    SPINNER_FRAMES = ('/ ', '──', '\\ ', '| ')
+
+    def __init__(self, label, total, unit='brani', stream=None):
+        self.label = str(label)
+        try:
+            self.total = max(0, int(total or 0))
+        except (TypeError, ValueError):
+            self.total = 0
+        self.unit = str(unit)
+        self.stream = stream or sys.stderr
+        try:
+            self.tty = bool(self.stream.isatty())
+        except Exception:
+            self.tty = False
+        self.display_label = self.label
+        self.display_unit = self.unit
+        self.bar_width = self.BAR_WIDTH
+        self.last_done = 0
+        self.last_pct = None
+        self.last_checkpoint = 0
+        self.last_render_at = 0.0
+        # Advance from the previous frame rather than deriving it from absolute clock time.
+        # A delayed scheduler tick must not skip visual frames or make the spinner jitter.
+        self._spinner_index = 0
+        self.last_width = 0
+        self.active = False
+        self.closed = False
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread = None
+        if self.tty:
+            columns = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
+            # The bar itself stays exactly 50 characters. Shorten only the label/unit
+            # on small terminal widths; do not silently shrink the requested bar.
+            digits = max(1, len(str(max(1, self.total))))
+            def minimum_width():
+                left = f'{self.display_label}: {"8" * digits}/{"8" * digits} {self.display_unit}'
+                right = f'{self.SPINNER_FRAMES[0]:>2} [' + ('#' * self.BAR_WIDTH) + '] 100%'
+                return len(left) + 2 + len(right)
+            while minimum_width() > columns - 1 and len(self.display_label) > 8:
+                self.display_label = self.display_label[:-2].rstrip() + '…'
+            while minimum_width() > columns - 1 and len(self.display_unit) > 2:
+                self.display_unit = self.display_unit[:-2].rstrip() + '…'
+            # Very narrow terminals cannot fit a fixed 50-character bar and the counter
+            # on one row. Disable terminal autowrap for the status row and restore it at close.
+            if minimum_width() > columns - 1:
+                try:
+                    self.stream.write('\x1b[?7l')
+                    self.stream.flush()
+                    self._wrap_disabled = True
+                    self._wrap_active = True
+                except Exception:
+                    self._wrap_disabled = False
+                    self._wrap_active = False
+            else:
+                self._wrap_disabled = False
+                self._wrap_active = False
+            self._thread = threading.Thread(target=self._ticker, name='exportify-progress', daemon=True)
+            self._thread.start()
+            if self.total:
+                self.update(0, force=True)
+        else:
+            self._wrap_disabled = False
+            self._wrap_active = False
+
+    def _disable_wrap_locked(self):
+        if self._wrap_disabled and not self._wrap_active:
+            self.stream.write('\x1b[?7l')
+            self._wrap_active = True
+
+    def _enable_wrap_locked(self):
+        if self._wrap_active:
+            self.stream.write('\x1b[?7h')
+            self._wrap_active = False
+
+    def _format(self, done, spinner):
+        pct = min(100, max(0, done * 100 // self.total)) if self.total else 100
+        filled = min(self.bar_width, max(1, pct * self.bar_width // 100) if pct > 0 else 0)
+        bar = '[' + ('#' * filled) + ('-' * (self.bar_width - filled)) + ']'
+        left = f'{self.display_label}: {done}/{self.total} {self.display_unit}'
+        right = f'{spinner:>2} {bar} {pct}%'
+        if self.tty:
+            columns = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
+            gap = max(2, columns - len(left) - len(right) - 1)
+            line = left + (' ' * gap) + right
+        else:
+            line = f'{left} {right}'
+        return line, pct
+
+    def _render_tty_locked(self, now=None):
+        if self.closed or not self.tty or not self.active:
+            return
+        now = time.monotonic() if now is None else now
+        self._disable_wrap_locked()
+        line, pct = self._format(self.last_done, self.SPINNER_FRAMES[self._spinner_index])
+        pad = max(0, self.last_width - len(line))
+        self.stream.write('\r' + line + (' ' * pad))
+        self.stream.flush()
+        self.last_width = len(line)
+        self.last_render_at = now
+        self.last_pct = pct
+
+    def _ticker(self):
+        while not self._stop_event.wait(self.REFRESH_SECONDS):
+            with self._lock:
+                if self.active and not self.closed:
+                    # Exactly one frame per successful refresh tick. When the bar is cleared
+                    # for a log line it pauses and resumes at the next frame without a jump.
+                    self._spinner_index = (self._spinner_index + 1) % len(self.SPINNER_FRAMES)
+                    try:
+                        self._render_tty_locked()
+                    except (BrokenPipeError, OSError, ValueError):
+                        self.active = False
+                        return
+
+    def clear(self):
+        """Clear the active status row before printing a diagnostic/log message."""
+        if self.tty:
+            with self._lock:
+                if self.active and not self.closed:
+                    self.stream.write('\r' + (' ' * self.last_width) + '\r')
+                    self._enable_wrap_locked()
+                    self.stream.flush()
+                    self.active = False
+                    self.last_pct = None
+                    self.last_render_at = 0.0
+
+    def update(self, done, force=False):
+        if self.closed or self.total <= 0:
+            return
+        try:
+            done = max(0, min(int(done), self.total))
+        except (TypeError, ValueError):
+            return
+        if self.tty:
+            with self._lock:
+                self.last_done = done
+                self.active = True
+                # Force an immediate refresh at phase start; later updates are handled
+                # by the 100ms ticker whether or not the caller increments the counter.
+                if force or not self.last_render_at:
+                    self._render_tty_locked()
+            return
+
+        self.last_done = done
+        line, pct = self._format(done, self.SPINNER_FRAMES[0])
+        now = time.monotonic()
+        checkpoint = pct // 5
+        # Compact non-interactive log snapshots; the live terminal alone refreshes at 100ms.
+        if not force and done < self.total and checkpoint == self.last_checkpoint:
+            if now - self.last_render_at < 1.0:
+                return
+        if not force and done == 0:
+            return
+        if not force and checkpoint == self.last_checkpoint and done < self.total:
+            return
+        print(line, file=self.stream, flush=True)
+        self.last_checkpoint = checkpoint
+        self.last_pct = pct
+        self.last_render_at = now
+
+    def close(self, complete=False):
+        if self.closed:
+            return
+        final_done = self.total if complete else min(self.last_done, self.total)
+        if self.tty:
+            with self._lock:
+                self.last_done = final_done
+                self.active = True
+                self._render_tty_locked()
+                self.active = False
+                self.closed = True
+            self._stop_event.set()
+            if self._thread and self._thread is not threading.current_thread():
+                self._thread.join(timeout=0.5)
+            self.stream.write('\n')
+            self._enable_wrap_locked()
+            self.stream.flush()
+        else:
+            if self.total > 0:
+                final_pct = final_done * 100 // self.total
+                if self.last_pct != final_pct or self.last_checkpoint != final_pct // 5:
+                    self.update(final_done, force=True)
+            self.closed = True
+            self._stop_event.set()
 
 
 def _maybe_reexec_in_venv():
@@ -980,7 +1304,7 @@ _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
 
-VERSION = "0.68"   # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.77"   # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -2406,8 +2730,8 @@ ALIASES = {
 # sovrascrivono/integrano questa tabella: il cron rigenera SEMPRE nella cartella giusta.
 PLAYLIST_FOLDERS = {}
 
-# Playlist da NON importare mai (nomi come i file .csv). Dal JSON: "SKIP_PLAYLISTS".
-SKIP_PLAYLISTS = []
+# Playlist da escludere per utente Navidrome. Dal JSON: {"SKIP_PLAYLISTS": {"chic": [...], ...}}.
+SKIP_PLAYLISTS = {}
 
 # Penalita' per versioni alternative del brano. A parita' di titolo, una traccia
 # con live/demo/instrumental/rehearsal nel titolo del file perde contro l'originale.
@@ -2464,10 +2788,6 @@ AUTO_NAME_TRANSLATION_CACHE = None
 AUTO_NAME_TRANSLATION_NEW = 0
 _AUTO_TRANSLATION_CACHE_DIRTY = False
 
-# Prefissi tipo "color yellow": il nome diventa "color - yellow" (piatto, raggruppa
-# in tutti i client). Dal JSON: "PLAYLIST_PREFIXES".
-PLAYLIST_PREFIXES = []
-
 # Parole che stanno al posto di un'emoji nel titolo Spotify ("FLAME EMOJI!" -> "🔥").
 # Valgono per artisti E titoli, su entrambi i lati del matching. Estendibile via JSON.
 EMOJI_WORDS = {
@@ -2479,6 +2799,16 @@ EMOJI_WORDS = {
 # Ogni gruppo viene trattato come un artista solo, in ENTRAMBE le direzioni e su
 # ENTRAMBI i lati (libreria e Spotify). Scrivi tutto minuscolo, senza punteggiatura.
 ARTIST_GROUPS = []
+
+# Collaborazioni note che alcuni tag salvano senza spazi dopo la virgola.
+# Le chiavi sono normalizzate durante il caricamento della config.
+ARTIST_SPLIT_OVERRIDES = {
+    'afro medusa,west way': ['Afro Medusa', 'West Way'],
+    'chiello,powv_fsk': ['Chiello', 'Powv_FSK'],
+}
+
+# Etichetta stabile per alias che differiscono soltanto per punteggiatura.
+ARTIST_CANONICAL_ALIASES = {'m o o n': 'M.O.O.N'}
 
 # Override per-riga dei CSV, applicati DOPO l'unzip (sopravvivono alle
 # ri-esportazioni dello zip Exportify). Struttura:
@@ -2670,12 +3000,43 @@ def load_user_config():
                         raise ValueError(f'AUTO_NAME_TRANSLATION.{field} fuori intervallo')
                     AUTO_NAME_TRANSLATION_CONFIG[field] = val
         PLAYLIST_FOLDERS.update(_cfg.get('PLAYLIST_FOLDERS', {}))
-        SKIP_PLAYLISTS.extend(_cfg.get('SKIP_PLAYLISTS', []))
-        PLAYLIST_PREFIXES.extend(_cfg.get('PLAYLIST_PREFIXES', []))
+        # SKIP_PLAYLISTS e' per-utente. Compatibilita' con i vecchi JSON a lista:
+        # le regole esistenti vengono assegnate all'utente di default, mai globalmente.
+        skip_cfg = _cfg.get('SKIP_PLAYLISTS', {})
+        if isinstance(skip_cfg, list):
+            print('[warn] SKIP_PLAYLISTS in formato lista legacy: assegno le voci a '
+                  f'{DEFAULT_USER!r}; usa un oggetto per utente nel JSON', file=sys.stderr)
+            skip_cfg = {DEFAULT_USER: skip_cfg}
+        if not isinstance(skip_cfg, dict):
+            raise ValueError('SKIP_PLAYLISTS deve essere un oggetto JSON {utente: [playlist, ...]}')
+        for user_name, patterns in skip_cfg.items():
+            user_key = str(user_name or '').strip().casefold()
+            if not user_key:
+                raise ValueError('SKIP_PLAYLISTS contiene un utente vuoto')
+            if not isinstance(patterns, list) or any(not isinstance(p, str) for p in patterns):
+                raise ValueError(f'SKIP_PLAYLISTS.{user_name} deve essere una lista di stringhe')
+            cleaned = [p.strip() for p in patterns if p.strip()]
+            SKIP_PLAYLISTS.setdefault(user_key, []).extend(cleaned)
         for g in _cfg.get('ARTIST_GROUPS', []):
             sg = {norm(x) for x in g}
             if sg and sg not in ARTIST_GROUPS:
                 ARTIST_GROUPS.append(sg)
+        split_cfg = _cfg.get('ARTIST_SPLIT_OVERRIDES', {})
+        if not isinstance(split_cfg, dict):
+            raise ValueError('ARTIST_SPLIT_OVERRIDES deve essere un oggetto {tag_composto: [artisti]}')
+        # Le impostazioni JSON sostituiscono/estendono i default con la stessa chiave normalizzata.
+        normalized_splits = {norm(k): [str(x).strip() for x in parts if str(x).strip()]
+                             for k, parts in ARTIST_SPLIT_OVERRIDES.items()}
+        for key, parts in split_cfg.items():
+            if not isinstance(parts, list) or len(parts) < 2 or any(not isinstance(x, str) for x in parts):
+                raise ValueError(f'ARTIST_SPLIT_OVERRIDES.{key} deve essere una lista di almeno due artisti')
+            nk = norm(key)
+            cleaned = [x.strip() for x in parts if x.strip()]
+            if not nk or len(cleaned) < 2:
+                raise ValueError(f'ARTIST_SPLIT_OVERRIDES.{key} non contiene una chiave/componenti validi')
+            normalized_splits[nk] = cleaned
+        ARTIST_SPLIT_OVERRIDES.clear()
+        ARTIST_SPLIT_OVERRIDES.update(normalized_splits)
         to_romaji.cache_clear()
         _preferred_name_for_key.cache_clear()
         if '_NF_REV' in globals():
@@ -3002,11 +3363,28 @@ def _has_qualifier(nt: str) -> bool:
                for word in _title_qualifier_phrases())
 
 
+def _artist_split_override(value):
+    """Restituisce un override esplicito di collaborazione, indipendente dal catalogo."""
+    key = norm(value)
+    if not key:
+        return None
+    parts = ARTIST_SPLIT_OVERRIDES.get(key)
+    if parts and len(parts) >= 2:
+        return list(parts)
+    for raw_key, raw_parts in ARTIST_SPLIT_OVERRIDES.items():
+        if norm(raw_key) == key and isinstance(raw_parts, (list, tuple)) and len(raw_parts) >= 2:
+            return list(raw_parts)
+    return None
+
+
 def split_artists(s, by_artist):
     """Spezza 'Artista1, Artista2' in componenti, RICOMPOSTI usando la libreria
     come riferimento: 'Tyler, The Creator' e' UN artista (la virgola e' nel nome),
     'Tyler, The Creator, Kali Uchis' sono DUE. Se nessuna ricomposizione
     corrisponde a un artista noto, fallback allo split semplice."""
+    override = _artist_split_override(s)
+    if override:
+        return [norm(x) for x in override if norm(x)]
     ns = norm(s)
     if ns in by_artist:
         return [ns]
@@ -3145,7 +3523,9 @@ def scan_library(root, rels=None):
     root_s = str(Path(root))
     if rels is None:
         rels = _walk_audio(root)
-    for rel in rels:
+    progress = _ProgressBar('indicizzazione libreria', len(rels), 'brani')
+    for checked, rel in enumerate(rels, 1):
+        progress.update(checked)
         # struttura profonda: indicizza la radice (rel[0], il vero artista).
         # Album multi-disco (Artista/Album/CD1/Traccia): l'album e' la cartella
         # SOPRA il disco (prima rel[-3] finiva indicizzato come "artista" e
@@ -3201,8 +3581,7 @@ def scan_library(root, rels=None):
                     pool.append((vnt, nal, p))
         by_full.setdefault((norm(artists[-1]), norm(full_alb), cands[-1]), []).append(p)
         n += 1
-        if n % 5000 == 0:
-            print(f"[i]   ...{n} brani scansionati", file=sys.stderr, flush=True)
+    progress.close(complete=True)
     cjk = sorted({k for k in by_artist if _CJK.search(k)})
     if cjk:
         print(f"[i] {len(cjk)} nomi in kanji rilevati nella libreria (gruppati automaticamente col romaji):",
@@ -3308,7 +3687,6 @@ def load_library(rebuild=False):
             print(f"[i] libreria caricata dalla cache: {n} brani", file=sys.stderr)
             globals()['_LIB_TRACK_COUNT'] = n
             return by_full, by_artist, by_strict, path_qual
-    print(f"[i] scansione di {LIBRARY_ROOT} in corso ({len(rels)} file)...", file=sys.stderr)
     by_full, by_artist, by_strict, path_qual, n = scan_library(LIBRARY_ROOT, rels)
     _write_index_cache(sig, n, by_full, by_artist, by_strict, path_qual)
     print(f"[i] indicizzati {n} brani da {LIBRARY_ROOT} (cache in {CACHE})", file=sys.stderr)
@@ -3913,28 +4291,37 @@ def _name_key(s):
     return re.sub(r'[\W_]+', ' ', unicodedata.normalize('NFKC', s).casefold()).strip()
 
 
-def _skip_patterns(extra=''):
-    """[(voce originale, pattern)] da SKIP_PLAYLISTS (JSON) e --skip. '*' = jolly."""
-    raws = [x.strip() for x in extra.split(',') if x.strip()] + [x for x in SKIP_PLAYLISTS if x.strip()]
+def _skip_patterns(extra='', user=None):
+    """[(voce originale, pattern)] per l'utente; --skip resta globale alla run. '*' = jolly."""
+    user_key = str(user or DEFAULT_USER).strip().casefold()
+    configured = SKIP_PLAYLISTS.get(user_key, [])
+    raws = [x.strip() for x in extra.split(',') if x.strip()] + [x for x in configured if x.strip()]
     return [(r, '*'.join(_name_key(part) for part in r.split('*'))) for r in raws]
 
 
-_SKIP_HITS = set()       # voci di SKIP_PLAYLISTS che hanno ignorato almeno un CSV
-_SKIPPED_NAMES = []      # playlist ignorate in questa run
-_SKIP_FILES_SEEN = [0]    # CSV esaminati da select_playlists in questa run
+_SKIP_HITS = set()       # (utente casefold, voce) che ha ignorato almeno un CSV
+_SKIPPED_NAMES = []      # (utente, nome playlist) ignorati in questa run
+_SKIP_FILES_SEEN = [0]   # CSV esaminati da select_playlists in questa run
 
 
-def report_skips(args):
-    """Riepilogo: quante playlist ignorate e quali voci di SKIP_PLAYLISTS non combaciano con nulla."""
+def report_skips(args, users=None):
+    """Riepilogo per utente: le voci JSON sono verificate solo sui CSV del loro utente."""
+    user_names = list(dict.fromkeys(str(u or DEFAULT_USER).strip() for u in (users or [DEFAULT_USER])))
     if _SKIPPED_NAMES:
-        shown = ', '.join(_SKIPPED_NAMES[:8]) + (' ...' if len(_SKIPPED_NAMES) > 8 else '')
+        shown_items = [f'{u}: {name}' for u, name in _SKIPPED_NAMES]
+        shown = ', '.join(shown_items[:8]) + (' ...' if len(shown_items) > 8 else '')
         print(f"[i] playlist ignorate (SKIP_PLAYLISTS/--skip): {len(_SKIPPED_NAMES)}: {shown}",
               file=sys.stderr)
-    unmatched = [r for r, _ in _skip_patterns(args.skip or '') if r not in _SKIP_HITS]
+    unmatched = []
+    for user_name in user_names:
+        user_key = user_name.casefold()
+        for raw, _pattern in _skip_patterns(args.skip or '', user=user_name):
+            if (user_key, raw) not in _SKIP_HITS:
+                unmatched.append((user_name, raw))
     if unmatched and not args.only and _SKIP_FILES_SEEN[0]:
-        print(f"[i] voci di SKIP_PLAYLISTS/--skip senza nessun CSV corrispondente in questa run: "
-              f"{', '.join(unmatched)} (se il nome e' giusto, puo' riguardare un altro utente)",
-              file=sys.stderr)
+        details = ', '.join(f'{user}: {raw}' for user, raw in unmatched)
+        print(f"[i] voci di SKIP_PLAYLISTS/--skip senza CSV corrispondente per l'utente in questa run: "
+              f"{details}", file=sys.stderr)
 
 
 def interactive_pick(files):
@@ -3960,11 +4347,12 @@ def interactive_pick(files):
     return chosen
 
 
-def select_playlists(files, args):
+def select_playlists(files, args, user=None):
     if args.only:
         keep = {_name_key(x) for x in args.only.split(',') if x.strip()}
         files = [f for f in files if _name_key(f.stem) in keep]
-    pats = _skip_patterns(args.skip or '')
+    user_key = str(user or DEFAULT_USER).strip().casefold()
+    pats = _skip_patterns(args.skip or '', user=user)
     _SKIP_FILES_SEEN[0] += len(files)
     if pats:
         kept = []
@@ -3974,8 +4362,8 @@ def select_playlists(files, args):
             if not hits:
                 kept.append(f)
             else:
-                _SKIP_HITS.update(hits)          # tutte, non solo la prima: "entra?" e "entra" combaciano insieme
-                _SKIPPED_NAMES.append(f.stem.replace('_', ' ').strip())
+                _SKIP_HITS.update((user_key, raw) for raw in hits)  # tutte le voci corrispondenti
+                _SKIPPED_NAMES.append((user or DEFAULT_USER, f.stem.replace('_', ' ').strip()))
         files = kept
     if args.pick and sys.stdin.isatty():
         files = interactive_pick(files)
@@ -4214,7 +4602,10 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
 
         matched, missing, seen, skipped, local_rows = [], [], 0, 0, 0
         seen_paths = set()
-        for row in reader:
+        rows = list(reader)
+        progress = _ProgressBar('matching playlist', len(rows), 'brani', stream=sys.stdout)
+        for row_index, row in enumerate(rows, 1):
+            progress.update(row_index)
             local_meta = _spotify_local_uri_metadata(row.get(cu)) if cu else None
             if local_meta:
                 local_rows += 1
@@ -4245,6 +4636,7 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
             else:
                 missing.append(f"{artist} - {album} - {title}")
                 MISSING_ALL.setdefault((artist, album, title), set()).add((user, pl_name))
+        progress.close(complete=True)
 
     # IL FIX CHIAVE: niente piu' playlist vuote senza spiegazione
     if seen == 0:
@@ -4273,13 +4665,6 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
         if m_sep:
             auto_folder, base = m_sep.group(1).strip(), m_sep.group(2).strip()
 
-    # Prefissi configurati restano una trasformazione esplicita dell'utente.
-    if auto_folder is None:
-        prefix_source = original_title if original_title else base
-        for pf in PLAYLIST_PREFIXES:
-            if prefix_source.casefold().startswith(pf.casefold() + ' '):
-                base = _playlist_filename(f'{pf} - {prefix_source[len(pf):].strip()}')
-                break
     if not spotify_name:
         base = base.replace('/', ' - ')  # legacy fallback: '/' non e' ammesso nei basename
     folder = (PLAYLIST_FOLDERS.get(original_title) if original_title else None) or \
@@ -4436,12 +4821,22 @@ class Tee(io.TextIOBase):
         self.streams = streams
 
     def write(self, s):
-        for st in self.streams:
+        # Progress redraws contain carriage returns but no newline. Send those only to
+        # the interactive console: the e2m log should remain readable, not contain CR bars.
+        is_redraw = ('\r' in s and '\n' not in s) or s in {'\x1b[?7l', '\x1b[?7h'}
+        targets = self.streams[:1] if is_redraw else self.streams
+        for st in targets:
             try:
                 st.write(s)
             except Exception:
                 pass
         return len(s)
+
+    def isatty(self):
+        try:
+            return bool(self.streams and self.streams[0].isatty())
+        except Exception:
+            return False
 
     def flush(self):
         for st in self.streams:
@@ -4483,6 +4878,31 @@ def open_run_log(tag='playlists'):
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     RUN_LOG_PATH = LOG_DIR / f'e2m_{tag}_{stamp}.log'
     return open(RUN_LOG_PATH, 'a', encoding='utf-8')
+
+
+def _embed_report_in_main_log(title, lines):
+    """Incorpora report lunghi nel log e2m senza riversarli tutti sulla console."""
+    body = '\n'.join(str(line) for line in lines).rstrip() + '\n'
+    if RUN_LOG_PATH:
+        # Flush dei Tee prima di aprire lo stesso file per append evita che output bufferizzato
+        # dalle fasi precedenti finisca dopo il report.
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except Exception:
+                pass
+        with Path(RUN_LOG_PATH).open('a', encoding='utf-8') as fh:
+            fh.write(f"\n\n===== INIZIO REPORT INCORPORATO: {title} =====\n")
+            fh.write(body)
+            fh.write(f"===== FINE REPORT INCORPORATO: {title} =====\n")
+            fh.flush()
+        print(f'[i] report completo {title} incorporato nel log principale: {RUN_LOG_PATH}',
+              file=sys.stderr, flush=True)
+    else:
+        # Utile per chiamate di test/import fuori dal normale entrypoint CLI.
+        print(f"\n===== INIZIO REPORT: {title} =====")
+        print(body, end='')
+        print(f"===== FINE REPORT: {title} =====")
 
 
 # tracce dell'esecuzione: (artista, album, titolo) -> {(utente, playlist)}
@@ -4613,7 +5033,25 @@ def write_missing_report(partial=False):
     for a, al, t in rows:
         pls = '; '.join(sorted(label(u, p) for u, p in MISSING_ALL[(a, al, t)]))
         L.append(f"{a} - {al} - {t}  [{pls}]")
-    out.write_text('\n'.join(L) + '\n', encoding='utf-8')
+    report_text = '\n'.join(L).rstrip() + '\n'
+    # The playlist portion is recalculated on every run, but the full MusicBrainz
+    # completeness block should survive a later sync on the same day. check-albums
+    # replaces this block when it refreshes the report.
+    marker_start = '===== INIZIO REPORT COMPLETO MUSICBRAINZ ====='
+    marker_end = '===== FINE REPORT COMPLETO MUSICBRAINZ ====='
+    try:
+        previous = out.read_text(encoding='utf-8', errors='replace') if out.exists() else ''
+    except OSError:
+        previous = ''
+    start = previous.find(marker_start)
+    saved_mb = ''
+    if start >= 0:
+        end = previous.find(marker_end, start)
+        if end >= 0:
+            saved_mb = previous[start:end + len(marker_end)].strip()
+    if saved_mb:
+        report_text = report_text.rstrip() + '\n\n' + saved_mb + '\n'
+    out.write_text(report_text, encoding='utf-8')
     print(f'[i] mancanti: {_found_ratio(len(MISSING_ALL), len(SEEN_ALL))} -> {out}', file=sys.stderr)
 
 
@@ -4701,9 +5139,17 @@ def _romanize_tag_value(v, _check=True):
                 _romkey(existing_gloss) == _romkey(phonetic) and
                 _romkey(existing_gloss) != _romkey(preferred)):
             return f'{source} ({preferred})'
-    # gia' bilingue: c'e' una parentesi latina (traduzione/alias presente)
-    # -> non toccare. E ripara le doppie traduzioni scritte dalle versioni
-    # precedenti ('X (English) (romaji)' -> 'X (English)').
+    # Se e' gia' bilingue, uniforma parentesi e gloss: varianti come
+    # '漢字(nome)' e '漢字 (nome)' non devono diventare artisti distinti in Navidrome.
+    # Un NAME_TRANSLATIONS/NAME_FIXES esplicito prevale sul gloss storico.
+    existing = re.match(r'^(.*?)\s*[（(]([^()（）]+)[)）]\s*$', v)
+    if existing and _CJK.search(existing.group(1)) and re.search(r'[A-Za-z]', existing.group(2)):
+        source, gloss = existing.group(1).strip(), existing.group(2).strip()
+        preferred = _preferred_name(source)
+        if preferred:
+            return f'{source} ({preferred})'
+        return f'{source} ({gloss})'
+    # Ripara le doppie traduzioni scritte dalle versioni precedenti ('X (English) (romaji)').
     m = re.match(r'^(.*\([A-Za-z][^()]*\))\s*\([^()]+\)\s*$', v)
     if m:
         return m.group(1)
@@ -4731,7 +5177,7 @@ def _romanize_tag_value(v, _check=True):
     return out
 
 
-def run_romaji_tags(dry_run=False, base=None):
+def run_romaji_tags(dry_run=False, base=None, files_only=None):
     import shutil as _sh
     if not dry_run and not _sh.which('metaflac'):
         print('[ERRORE] metaflac non trovato: salto romaji_tags')
@@ -4742,12 +5188,14 @@ def run_romaji_tags(dry_run=False, base=None):
     changed = scanned = errors = 0
     files = [base.joinpath(*r) for r in _walk_audio(base, AUDIO_EXT)
              if not r[-1].endswith('.backup')]
+    if files_only is not None:
+        wanted_files = {Path(f).resolve() for f in files_only}
+        files = [f for f in files if f.resolve() in wanted_files]
     prefetch_probe(files, 'romaji')      # ffprobe in parallelo / dalla cache
+    progress = _ProgressBar('romaji_tags', len(files), 'file')
     for f in files:
         scanned += 1
-        if scanned % 500 == 0:
-            print(f'  ...{scanned} file scansiti, {changed} da romanizzare',
-                  flush=True)
+        progress.update(scanned)
         try:
             tags = probe(f)   # probe di unify (con alias album_artist)
             newvals = {}
@@ -4759,6 +5207,7 @@ def run_romaji_tags(dry_run=False, base=None):
             if not newvals:
                 continue
             desc = ', '.join(f'{k}="{v[:40]}"' for k, v in newvals.items())
+            progress.clear()
             print(f'{"[dry] " if dry_run else ""}ROMAJI '
                   f'{f.parent.parent.name} / {f.parent.name}: {desc}')
             if dry_run:
@@ -4783,8 +5232,13 @@ def run_romaji_tags(dry_run=False, base=None):
             changed += 1
         except Exception as e:
             errors += 1
+            progress.clear()
             print(f'ERRORE: {f}: {e}', file=sys.stderr)
-    for b in base.rglob('*.meta-backup'):
+    progress.close(complete=True)
+    backup_candidates = (base.rglob('*.meta-backup') if files_only is None else
+                         (b for folder in {Path(f).parent for f in files_only}
+                          for b in folder.glob('*.meta-backup')))
+    for b in backup_candidates:
         if b.with_name(b.name[:-len('.meta-backup')]).exists():
             b.unlink(missing_ok=True)
     print(f'romaji_tags: {scanned} file scansiti, {changed} modificati, {errors} errori')
@@ -4797,8 +5251,8 @@ def run_romaji_tags(dry_run=False, base=None):
 # (path + mtime + dimensione): un file modificato (anche dallo script stesso)
 # viene riletto, gli altri no. Le letture a freddo sono parallele.
 
-PROBE_CACHE = CACHE_DIR / 'probe_cache_v3.json'   # tag flussi + track + stato cover embedded opzionale
-for _old in ('probe_cache.json', 'probe_cache_v2.json'):      # formati precedenti
+PROBE_CACHE = CACHE_DIR / 'probe_cache_v4.json'   # tag flussi + track + stato cover embedded opzionale
+for _old in ('probe_cache.json', 'probe_cache_v2.json', 'probe_cache_v3.json'):      # formati precedenti
     try:
         (CACHE_DIR / _old).unlink()
     except OSError:
@@ -4806,7 +5260,7 @@ for _old in ('probe_cache.json', 'probe_cache_v2.json'):      # formati preceden
 # thread di ffprobe in parallelo (EXPORTIFY_PROBE_WORKERS=2 se la musica sta su un NAS lento)
 PROBE_WORKERS = max(1, int(os.environ.get('EXPORTIFY_PROBE_WORKERS') or min(8, (os.cpu_count() or 2) * 2)))
 # solo i tag che lo script usa davvero (niente testi/commenti da KB per file)
-_PROBE_KEEP = {'title', 'artist', 'album', 'albumartist', 'album_artist', 'date',
+_PROBE_KEEP = {'title', 'artist', 'artists', 'album', 'albumartist', 'albumartists', 'album_artist', 'date',
                'originaldate', 'albumversion', 'album_version', 'musicbrainz_albumid',
                'musicbrainz_releasegroupid', 'track', 'tracknumber'}
 _PROBE_MEM = None        # {path: [mtime_ns, size, tags, durata, embedded_art_opzionale]}
@@ -4961,13 +5415,14 @@ def prefetch_probe(paths, label='probe'):
         print(f'  [{label}] {len(todo)} file da leggere con ffprobe ({PROBE_WORKERS} thread; '
               f'gli altri vengono dalla cache)...', file=sys.stderr, flush=True)
         done = 0
+        progress = _ProgressBar(f'ffprobe/{label}', len(todo), 'file')
         with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as ex:
             for _ in ex.map(_probe_entry, todo):
                 done += 1
-                if done % 2000 == 0:
-                    print(f'  [{label}] ...{done}/{len(todo)}', file=sys.stderr, flush=True)
+                progress.update(done)
                 if done % 10000 == 0:
                     flush_probe_cache()
+        progress.close(complete=True)
     flush_probe_cache()
 
 
@@ -5008,7 +5463,7 @@ def write_flac(path: Path, targets: dict):
 
 CODEC_FOR = {'.flac': 'flac', '.mp3': 'libmp3lame', '.m4a': 'aac',
              '.ogg': 'libvorbis', '.opus': 'libopus'}
-UNIFY_FIELDS = ['album', 'albumartist', 'date', 'originaldate', 'musicbrainz_albumid']
+UNIFY_FIELDS = ['album', 'albumartist', 'date', 'originaldate', 'musicbrainz_albumid', 'musicbrainz_releasegroupid']
 
 
 def write_ffmpeg(path: Path, targets: dict, tmp: Path, codec: str = None):
@@ -5122,35 +5577,73 @@ def _unify_applies(f, t, k, targets):
     che non convergono mai:
       - .m4a: ffmpeg non salva originaldate/musicbrainz_albumid (restano 'persi'
         e l'album veniva riscritto OGNI notte: Pink Floyd / Animals ecc.);
-      - FLAC con ORIGINALDATE: fix_date_tags toglie comunque DATE, quindi unify
-        non deve rimetterlo (si annullavano a vicenda nella stessa notte)."""
+      - FLAC che hanno già ORIGINALDATE: non forzare DATE, che viene gestito da fix_date_tags;
+        i file senza ORIGINALDATE devono invece ricevere DATE, altrimenti Navidrome li separa."""
     ext = f.suffix.lower()
-    if ext in ('.m4a', '.mp4') and k in ('originaldate', 'musicbrainz_albumid'):
+    if ext in ('.m4a', '.mp4') and k == 'originaldate':
         return False
-    if k == 'date' and ext == '.flac' and (t.get('originaldate') or targets.get('originaldate')):
+    # I file M4A/MP4 non propagano in modo affidabile questi ID; la rimozione esplicita
+    # (target None) è però consentita, altrimenti un vecchio ID resterebbe e manterrebbe
+    # l'album separato in Navidrome anche dopo aver ripulito i file FLAC.
+    if (ext in ('.m4a', '.mp4') and
+            k in ('musicbrainz_albumid', 'musicbrainz_releasegroupid') and
+            targets.get(k) is not None):
+        return False
+    if k == 'date' and ext == '.flac' and t.get('originaldate'):
         return False
     return True
 
 
-def run_unify(dry_run=False, base=None):
+def _unify_target_matches(actual, target):
+    if target is None:
+        return not str(actual or '').strip()
+    return actual == target
+
+
+def _dominant_original_date(tags):
+    """Pick a reliable album-wide original date from mixed DATE/ORIGINALDATE tags.
+
+    Only returns a date if one year has at least two tracks and >=60% of dated tracks;
+    ambiguous release-year conflicts are left untouched for manual review.
+    """
+    dated = []
+    for tag in tags:
+        value = str(tag.get('originaldate') or tag.get('date') or '').strip()
+        match = re.match(r'^(\d{4})(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?', value)
+        if match:
+            dated.append((match.group(1), value))
+    if not dated:
+        return None
+    counts = Counter(year for year, _value in dated)
+    year, count = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0]
+    if count < 2 or count / len(dated) < 0.60:
+        return None
+    exact_counts = Counter(value for dated_year, value in dated if dated_year == year)
+    # Prefer the most frequent full date; on a tie prefer the most precise representation.
+    return sorted(exact_counts, key=lambda value: (-exact_counts[value], -len(value), value))[0]
+
+
+def run_unify(dry_run=False, base=None, album_dirs_only=None):
     base = Path(base) if base else LIBRARY_ROOT
+    known_artist_names = _navidrome_artist_name_map()
     dirs = list(unify_album_dirs(base))   # materializzato: serve il totale per %/rimanenti
+    if album_dirs_only is not None:
+        wanted_dirs = {Path(d).resolve() for d in album_dirs_only}
+        dirs = [(album, files) for album, files in dirs if album.resolve() in wanted_dirs]
     total = len(dirs)
     prefetch_probe((f for _, fl in dirs for f in fl), 'unify')
     changed_albums = changed_files = errors = scanned = 0
+    progress = _ProgressBar('album_unify', total, 'album')
     for album, files in dirs:
         scanned += 1
-        if scanned % 50 == 0 or scanned == total:
-            pct = scanned * 100 // total
-            print(f'  ...{scanned}/{total} album esaminati '
-                  f'({pct}% - ancora {total - scanned} da scansionare)',
-                  file=sys.stderr, flush=True)
+        progress.update(scanned)
         tags = [probe(f) for f in files]
         # repair spotyFLAC: artist/title dai nomi file quando il tag e' rotto
         for f, t in zip(files, tags):
             rep = _filename_repair(f, t, (t.get('album'), album.name))
             if not rep:
                 continue
+            progress.clear()
             print(f'    [repair] {f.name}: {rep}')
             if not dry_run:
                 try:
@@ -5164,6 +5657,7 @@ def run_unify(dry_run=False, base=None):
                         invalidate_probe_cache([f])
                     t.update(rep)
                 except Exception as e:
+                    progress.clear()
                     print(f'    ERRORE repair {f.name}: {e}', file=sys.stderr)
                     f.with_name(f.stem + '.tmp' + f.suffix).unlink(missing_ok=True)
         targets = {}
@@ -5184,6 +5678,10 @@ def run_unify(dry_run=False, base=None):
                     continue
             else:
                 top = majority(tags, k)
+                if k == 'originaldate':
+                    reliable_date = _dominant_original_date(tags)
+                    if reliable_date:
+                        top = reliable_date
             if k == 'albumartist':
                 pref = _folder_artist_preference(tags, album.parent.name)
                 if pref:
@@ -5192,26 +5690,50 @@ def run_unify(dry_run=False, base=None):
                 continue
             targets[k] = top
         # UNIFY_FORCE: pin per-album dalla configurazione (vincono sul voto)
-        forced = UNIFY_FORCE.get(norm(f"{album.parent.name} / {album.name}"))
+        forced = UNIFY_FORCE.get(norm(f"{album.parent.name} / {album.name}"), {}) or {}
         if forced:
             for k, v in forced.items():
                 if k in UNIFY_FIELDS:
+                    progress.clear()
                     print(f'    [force] {k}="{str(v)[:40]}" (pin dalla config)')
                     targets[k] = str(v)
+        # If at least one M4A/MP4 lacks MusicBrainz IDs, those IDs cannot be made
+        # consistent in every format; clear them from writable files instead of leaving
+        # an album split between tagged FLACs and an untagged lossy copy. Conflicting IDs
+        # are also unsafe to propagate. Explicit UNIFY_FORCE pins remain authoritative.
+        unwritable_missing_album_id = any(
+            f.suffix.lower() in ('.m4a', '.mp4') and
+            not str(t.get('musicbrainz_albumid') or '').strip()
+            for f, t in zip(files, tags))
+        album_ids = {str(t.get('musicbrainz_albumid') or '').strip().casefold()
+                     for t in tags if str(t.get('musicbrainz_albumid') or '').strip()}
+        if 'musicbrainz_albumid' not in forced and (
+                len(album_ids) > 1 or (len(album_ids) == 1 and unwritable_missing_album_id)):
+            targets['musicbrainz_albumid'] = None
+        unwritable_missing_rgid = any(
+            f.suffix.lower() in ('.m4a', '.mp4') and
+            not str(t.get('musicbrainz_releasegroupid') or '').strip()
+            for f, t in zip(files, tags))
+        releasegroup_ids = {str(t.get('musicbrainz_releasegroupid') or '').strip().casefold()
+                            for t in tags if str(t.get('musicbrainz_releasegroupid') or '').strip()}
+        if 'musicbrainz_releasegroupid' not in forced and (
+                len(releasegroup_ids) > 1 or (len(releasegroup_ids) == 1 and unwritable_missing_rgid)):
+            targets['musicbrainz_releasegroupid'] = None
         for k in list(targets):
-            if all(t.get(k, '') == targets[k] for f, t in zip(files, tags)
+            if all(_unify_target_matches(t.get(k, ''), targets[k]) for f, t in zip(files, tags)
                    if _unify_applies(f, t, k, targets)):
                 del targets[k]
         if not targets:
             continue
         changed_albums += 1
-        desc = ', '.join(f'{k}="{v[:40]}"' for k, v in targets.items())
+        desc = ', '.join(f'{k}="{'<rimuovi>' if v is None else str(v)[:40]}"' for k, v in targets.items())
+        progress.clear()
         print(f'{"[dry] " if dry_run else ""}UNIFY {album.parent.name} / {album.name}: {desc}')
         if dry_run:
             continue
         for f, t in zip(files, tags):
             diff = {k: v for k, v in targets.items()
-                    if t.get(k, '') != v and _unify_applies(f, t, k, targets)}
+                    if not _unify_target_matches(t.get(k, ''), v) and _unify_applies(f, t, k, targets)}
             if not diff:
                 continue
             backup = f.with_name(f.name + '.meta-backup')
@@ -5248,10 +5770,12 @@ def run_unify(dry_run=False, base=None):
             except Exception as e:
                 errors += 1
                 err = getattr(e, 'stderr', '') or ''
+                progress.clear()
                 print(f'ERRORE: {f}: {e} {str(err).strip()[:300]}', file=sys.stderr)
                 if backup.exists() and not f.exists():
                     os.replace(backup, f)
                 f.with_name(f.stem + '.tmp' + f.suffix).unlink(missing_ok=True)
+    progress.close(complete=True)
 
     # Passaggio cross-folder: i tag coerenti dentro una cartella non bastano se lo stesso
     # album e' stato importato in due cartelle/edizioni parziali diverse.
@@ -5261,7 +5785,11 @@ def run_unify(dry_run=False, base=None):
     changed_albums += cross_groups
     removed = 0
     if not dry_run:
-        for b in base.rglob('*.meta-backup'):
+        if album_dirs_only is None:
+            backup_candidates = base.rglob('*.meta-backup')
+        else:
+            backup_candidates = (b for album_dir in wanted_dirs for b in album_dir.rglob('*.meta-backup'))
+        for b in backup_candidates:
             if b.with_name(b.name[:-len('.meta-backup')]).exists():
                 try:
                     b.unlink()
@@ -5321,6 +5849,9 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
     viene registrata per revisione e MAI unita automaticamente. Evita falsi positivi fra sequel,
     volumi, remaster e album dal nome simile.
     """
+    # Usata quando si sceglie un ALBUMARTIST canonico: era una variabile non inizializzata,
+    # che provocava NameError appena il cross-folder trovava gruppi da consolidare.
+    known_artist_names = _navidrome_artist_name_map()
     records = []
     for album, files in dirs:
         if not files:
@@ -5389,17 +5920,26 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
             elif version_conflict:
                 review_reason = ('ALBUMVERSION differs: '
                                  f"{sorted(a['albumversions'])} vs {sorted(b['albumversions'])}")
-            # Explicit edition/version conflicts override stripped title suffixes; keep them visible
-            # for review even if album_base() makes the normalized title keys identical.
-            if review_reason:
+            # A tag ALBUMVERSION discordante, da solo, non basta a tenere separati
+            # frammenti dal medesimo titolo/artista: in quel caso verrà rimosso dal
+            # gruppo unificato. Un marcatore esplicito nel TITOLO (deluxe/remaster/live…)
+            # resta invece una barriera, anche quando la normalizzazione rende i titoli uguali.
+            if edition_conflict or (version_conflict and not exact_title):
+                if not review_reason:
+                    review_reason = ('ALBUMVERSION differs: '
+                                     f"{sorted(a['albumversions'])} vs {sorted(b['albumversions'])}")
                 fuzzy_pairs.append((a, b, sim, review_reason, evidence_label, rg_conflict))
                 continue
-            # Exact/known aliases may be unified, even if inconsistent MusicBrainz IDs must be cleared.
+            # Exact/known aliases may be unified, even if inconsistent MusicBrainz IDs
+            # or ALBUMVERSION tags must be cleared to prevent Navidrome re-splitting them.
             if exact_title:
                 union(i, j)
                 if rg_conflict:
                     print(f"[i] titolo esatto/alias con RGID discordanti: "
                           f"{a['album'].name} <-> {b['album'].name}; gli ID conflittuali saranno rimossi")
+                if version_conflict:
+                    print(f"[i] titolo esatto/alias con ALBUMVERSION discordanti: "
+                          f"{a['album'].name} <-> {b['album'].name}; il campo conflittuale sarà rimosso")
                 continue
             if sim >= 0.88:
                 # REVIEW only. Never union fuzzy title pairs.
@@ -5453,11 +5993,16 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
         if not target_albumartist:
             values = [t.get('albumartist', '') for t in all_tags if t.get('albumartist', '').strip()]
             if values:
-                target_albumartist = _canonicalize_artist_value(Counter(values).most_common(1)[0][0])
+                target_albumartist = _canonicalize_artist_value(Counter(values).most_common(1)[0][0],
+                                                              known_names=known_artist_names)
             else:
                 # Se un frammento ha perso ALBUMARTIST, usa il nome della cartella artista
                 # condivisa dal gruppo; altrimenti Navidrome può separare proprio quel frammento.
-                target_albumartist = _canonicalize_artist_value(group[0]['album'].parent.name)
+                target_albumartist = _canonicalize_artist_value(group[0]['album'].parent.name,
+                                                              known_names=known_artist_names)
+        elif target_albumartist:
+            target_albumartist = _canonicalize_artist_value(target_albumartist,
+                                                            known_names=known_artist_names)
 
         ids = {str(t.get('musicbrainz_albumid') or '').strip().lower()
                for t in all_tags if str(t.get('musicbrainz_albumid') or '').strip()}
@@ -5473,10 +6018,15 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
             not str(t.get('musicbrainz_albumid') or '').strip()
             for f, t in zip(all_files, all_tags))
         drop_album_ids = len(ids) > 1 or (len(ids) == 1 and unwritable_missing_album_id)
-        drop_rgids = len(rgids_all) > 1
+        unwritable_missing_rgid = any(
+            f.suffix.lower() in ('.m4a', '.mp4') and
+            not str(t.get('musicbrainz_releasegroupid') or '').strip()
+            for f, t in zip(all_files, all_tags))
+        drop_rgids = len(rgids_all) > 1 or (len(rgids_all) == 1 and unwritable_missing_rgid)
         common_mbid = next(iter(ids)) if len(ids) == 1 and not drop_album_ids else ''
         common_rgid = next(iter(rgids_all)) if len(rgids_all) == 1 and not drop_rgids else ''
         common_albumversion = next(iter(albumversion_values)) if len(albumversion_values) == 1 else ''
+        drop_albumversion = len(albumversion_values) > 1
         date_counts = Counter(str(t.get('date') or '').strip() for t in all_tags if str(t.get('date') or '').strip())
         originaldate_counts = Counter(str(t.get('originaldate') or '').strip() for t in all_tags if str(t.get('originaldate') or '').strip())
         common_date = date_counts.most_common(1)[0][0] if date_counts else ''
@@ -5493,7 +6043,9 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
             if common_originaldate and t.get('originaldate', '') != common_originaldate and _unify_applies(f, t, 'originaldate', {'originaldate': common_originaldate}):
                 diff['originaldate'] = common_originaldate
             current_version = str(t.get('albumversion') or t.get('album_version') or '').strip()
-            if common_albumversion and current_version != common_albumversion:
+            if drop_albumversion and current_version:
+                diff['albumversion'] = None
+            elif common_albumversion and current_version != common_albumversion:
                 diff['albumversion'] = common_albumversion
             current_mbid = str(t.get('musicbrainz_albumid') or '').strip().lower()
             current_rgid = str(t.get('musicbrainz_releasegroupid') or '').strip().lower()
@@ -5520,12 +6072,15 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
             reason = f'{len(ids)} valori' if len(ids) > 1 else 'MBID non propagabile a M4A/MP4'
             fields.append(f'rimuovi MBID album ({reason})')
         if drop_rgids:
-            fields.append(f'rimuovi release-group ID conflittuali ({len(rgids_all)} valori)')
+            reason = f'{len(rgids_all)} valori' if len(rgids_all) > 1 else 'RGID non propagabile a M4A/MP4'
+            fields.append(f'rimuovi release-group ID ({reason})')
         if common_mbid and any(not str(t.get('musicbrainz_albumid') or '').strip() for t in all_tags):
             fields.append('propaga MBID univoco ai tag mancanti')
         if common_rgid and any(not str(t.get('musicbrainz_releasegroupid') or '').strip() for t in all_tags):
             fields.append('propaga release-group ID univoco ai tag mancanti')
-        if common_albumversion and any(not str(t.get('albumversion') or t.get('album_version') or '').strip() for t in all_tags):
+        if drop_albumversion:
+            fields.append('rimuovi ALBUMVERSION discordante')
+        elif common_albumversion and any(not str(t.get('albumversion') or t.get('album_version') or '').strip() for t in all_tags):
             fields.append('propaga ALBUMVERSION univoco')
         if common_date and len(date_counts) > 1:
             fields.append(f'allinea DATE a {common_date}')
@@ -5548,8 +6103,6 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
                 errors += 1
                 print(f'[ERRORE] CROSS-ALBUM {f}: {e}', file=sys.stderr)
     if fuzzy_pairs:
-        report_path = SCRIPT_DIR / 'logs' / f"album_cross_folder_review_{time.strftime('%Y%m%d_%H%M%S')}.txt"
-        report_path.parent.mkdir(parents=True, exist_ok=True)
         report = [f"Cross-folder fuzzy album candidates — {time.strftime('%Y-%m-%d %H:%M:%S')}",
                   'These pairs are REVIEW ONLY. No fuzzy pair was merged automatically.', '']
         for a, b, sim, label, evidence_label, rg_conflict in sorted(fuzzy_pairs, key=lambda x: -x[2]):
@@ -5560,8 +6113,9 @@ def _unify_cross_album_dirs(dirs, dry_run=False):
                           f"release-group conflict={'yes' if rg_conflict else 'no'}]")
             report.extend(f'  A: {f}' for f in a['files'][:3])
             report.extend(f'  B: {f}' for f in b['files'][:3])
-        report_path.write_text('\n'.join(report) + '\n', encoding='utf-8')
-        print(f'[review] {len(fuzzy_pairs)} coppie album fuzzy NON unite; report: {report_path}')
+        _embed_report_in_main_log('album_cross_folder_review', report)
+        _cleanup_standalone_album_reports()
+        print(f'[review] {len(fuzzy_pairs)} coppie album fuzzy NON unite; report completo solo nel log e2m (nessun file separato)')
     print(f'cross-folder albums: {fixed_groups} gruppi esatti/alias | '
           f'{changed_files} file aggiornati | {len(fuzzy_pairs)} candidati fuzzy solo report | {errors} errori')
     return fixed_groups, changed_files, errors
@@ -5630,6 +6184,29 @@ def _cluster_by_waveform(files, meta, corr, max_dur, trust_format=False):
     return list(clusters.values()), fps
 
 
+def _metadata_duplicate_reason(group, meta):
+    """Conservative metadata-only fallback for duplicate files with low waveform correlation."""
+    if len(group) < 2:
+        return None
+    strict_titles = {norm_bare(best_title(f, meta[f][0])) for f in group}
+    track_numbers = {_track_number_for_tags(meta[f][0]) for f in group}
+    durations = [meta[f][1] for f in group]
+    qualified = any(_has_qualifier(norm_bare(best_title(f, meta[f][0]))) for f in group)
+    durations_close = (all(d for d in durations) and
+                       max(durations) - min(durations) <= max(1.0, max(durations) * 0.015))
+    lossless_exts = {'.flac', '.wav'}
+    lossless_files = [f for f in group if f.suffix.lower() in lossless_exts]
+    lossy_files = [f for f in group if f.suffix.lower() not in lossless_exts]
+    cross_format_missing_numbers = (
+        len(group) == 2 and len(lossless_files) == 1 and len(lossy_files) == 1
+        and None in track_numbers and len(track_numbers) <= 2)
+    matching_numbers = len(track_numbers) == 1 and None not in track_numbers
+    if (len(strict_titles) == 1 and not qualified and durations_close
+            and (matching_numbers or cross_format_missing_numbers)):
+        return 'crossformat' if cross_format_missing_numbers and not matching_numbers else 'metadata'
+    return None
+
+
 def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
                       corr=0.95, max_dur=10.0, trust_format=False):
     """Duplicati di tracce DENTRO la stessa cartella album (es. originale +
@@ -5671,14 +6248,39 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
     if all_candidate_files:
         prefetch_probe(all_candidate_files, 'dedupe')
 
-    for art, album, files in album_batches:
+    progress = _ProgressBar('dedupe_tracks', len(album_batches), 'album')
+    for batch_index, (art, album, files) in enumerate(album_batches, 1):
+        progress.update(batch_index)
         def handle_group(label, group):
             """Verifica waveform + eventuale cestinamento di un gruppo
             di file che condividono il titolo (strict o fuzzy)."""
             nonlocal n_groups, n_dup, n_distinct, unverifiable, errors
             n_groups += 1
             if not _HAS_NP:
+                # The conservative metadata check does not need waveform/numpy; retain this
+                # safe fallback even on installations without the optional numerical library.
+                reason = _metadata_duplicate_reason(group, meta)
+                if reason:
+                    ordered = sorted(group, key=lambda f: _keeper_score(f, meta[f][0]))
+                    keeper, rest = ordered[0], ordered[1:]
+                    for f in rest:
+                        n_dup += 1
+                        progress.clear()
+                        tag = 'DUPE-METADATA-CROSSFORMAT' if reason == 'crossformat' else 'DUPE-METADATA'
+                        why = ('titolo esatto + durata e formato lossless/lossy (numero traccia assente)'
+                               if reason == 'crossformat' else 'titolo, numero traccia e durata coincidono')
+                        print(f"    {'[dry] ' if not apply else ''}{tag} {album.name}/{f.name} == {keeper.name} "
+                              f"({why}; numpy non disponibile)")
+                        if apply:
+                            try:
+                                _move_to_trash(f, stamp, hard_delete, base)
+                            except Exception as e:
+                                errors += 1
+                                progress.clear()
+                                print(f"    ERRORE spostamento {f}: {e}", file=sys.stderr)
+                    return
                 unverifiable += 1
+                progress.clear()
                 print(f"    [info] {album.name}: titolo '{label}' x{len(group)} "
                       f"— numpy assente, niente verifica: lascio tutto")
                 return
@@ -5686,12 +6288,37 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
                                                  trust_format=trust_format)
             multi = [c for c in clusters if len(c) > 1]
             if not multi:
+                # Different mastering can lower waveform correlation even for duplicated
+                # album tracks. Use the same conservative metadata fallback without requiring
+                # track numbers for the special two-file lossless/lossy case.
+                reason = _metadata_duplicate_reason(group, meta)
+                if reason:
+                    ordered = sorted(group, key=lambda f: _keeper_score(f, meta[f][0]))
+                    keeper, rest = ordered[0], ordered[1:]
+                    why = ('titolo esatto + durata e formato lossless/lossy (numero traccia assente)'
+                           if reason == 'crossformat' else 'titolo, numero traccia e durata coincidono')
+                    tag = 'DUPE-METADATA-CROSSFORMAT' if reason == 'crossformat' else 'DUPE-METADATA'
+                    for f in rest:
+                        n_dup += 1
+                        progress.clear()
+                        print(f"    {'[dry] ' if not apply else ''}{tag} {album.name}/{f.name} == {keeper.name} "
+                              f"({why}; correlazione audio bassa)")
+                        if apply:
+                            try:
+                                _move_to_trash(f, stamp, hard_delete, base)
+                            except Exception as e:
+                                errors += 1
+                                progress.clear()
+                                print(f"    ERRORE spostamento {f}: {e}", file=sys.stderr)
+                    return
                 n_distinct += 1
                 if all(fps[f] is None for f in group):
                     unverifiable += 1
+                    progress.clear()
                     print(f"    [info] {album.name}: titolo '{label}' x{len(group)} "
                           f"non verificabile (file <5s o non decodificabili)")
                 else:
+                    progress.clear()
                     print(f"    [info] {album.name}: titolo '{label}' con "
                           f"{len(group)} file ma versioni distinte (nessuna copia)")
                 return
@@ -5700,6 +6327,7 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
                 keeper, rest = cluster[0], cluster[1:]
                 for f in rest:
                     n_dup += 1
+                    progress.clear()
                     print(f"    {'[dry] ' if not apply else ''}DUPE  {album.name}/"
                           f"{f.name} (tengo {keeper.name})")
                     if apply:
@@ -5707,6 +6335,7 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
                             _move_to_trash(f, stamp, hard_delete, base)
                         except Exception as e:
                             errors += 1
+                            progress.clear()
                             print(f"    ERRORE spostamento {f}: {e}",
                                   file=sys.stderr)
 
@@ -5744,11 +6373,14 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
             qual = {_has_qualifier(strict_key[f]) for f in group}
             if True in qual and False in qual:
                 n_review += 1
+                progress.clear()
                 print(f"    [review] {album.name}: titolo '{label}' con {len(group)} "
                       f"file e versioni qualificate (mix/live/karaoke/...): "
                       f"lascio tutto, verifica a orecchio")
                 continue
             handle_group(label, group)
+
+    progress.close(complete=True)
 
     print(f"\ngruppi titolo esaminati: {n_groups} | duplicati nel cestino: {n_dup} "
           f"| versioni distinte: {n_distinct} | da verificare a orecchio: {n_review} "
@@ -5759,11 +6391,115 @@ def run_dedupe_tracks(apply=False, hard_delete=False, artist=None, base=None,
         print("[i] dopo verifica: scan rapido su Navidrome, poi svuota il cestino.")
 
 
+def run_dedupe_cross_album_tracks(apply=False, hard_delete=False, base=None):
+    """Trova duplicati dello stesso brano tra cartelle album che saranno unite da Navidrome.
+
+    Opera solo fra cartelle con album/album-artist canonici uguali e titolo traccia esatto.
+    Richiede numeri traccia uguali oppure la regola stretta FLAC+lossy con numerazione assente,
+    durata quasi identica e nessun qualificatore (Live/Demo/Mix ecc.). Le cartelle marcate come
+    edizioni diverse restano separate. Senza --apply produce solo un report; con --apply sposta
+    i duplicati nel cestino già usato da dedupe_tracks, non li cancella definitivamente.
+    """
+    base = Path(base) if base else LIBRARY_ROOT
+    dirs = list(unify_album_dirs(base))
+    all_files = [f for _album, files in dirs for f in files]
+    if not all_files:
+        print('dedupe_cross_album_tracks: nessun file audio')
+        return {'groups': 0, 'duplicates': 0, 'errors': 0}
+    prefetch_probe(all_files, 'dedupe_cross_album_tracks')
+    known_names = _navidrome_artist_name_map()
+    by_title = {}
+    for album_dir, files in dirs:
+        file_tags = [probe(f) for f in files]
+        album_title = majority(file_tags, 'album') or album_dir.name
+        artist_values = [str(t.get('albumartist') or t.get('album_artist') or '').strip()
+                         for t in file_tags]
+        artist_values = [v for v in artist_values if v]
+        album_artist = majority(file_tags, 'albumartist') or (
+            artist_values[0] if artist_values else album_dir.parent.name)
+        album_artist = _canonicalize_artist_value(album_artist, known_names=known_names)
+        album_key = norm(album_title)
+        artist_key = norm(album_artist)
+        if not album_key or not artist_key:
+            continue
+        markers = frozenset(_album_explicit_edition_markers([album_dir.name, album_title]))
+        for f in files:
+            tags, duration = probe_dur(f)
+            title = best_title(f, tags)
+            strict_key = norm_bare(title)
+            if not strict_key or not title:
+                continue
+            by_title.setdefault((artist_key, album_key, strict_key), []).append(
+                {'file': f, 'tags': tags, 'duration': duration,
+                 'album_dir': album_dir.resolve(), 'markers': markers,
+                 'album_artist': album_artist, 'album_title': album_title})
+
+    n_groups = n_duplicates = errors = skipped_editions = 0
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    for (_artist_key, _album_key, label), records in by_title.items():
+        if len(records) < 2:
+            continue
+        parent = list(range(len(records)))
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        def union(i, j):
+            a, b = find(i), find(j)
+            if a != b:
+                parent[b] = a
+        meta = {r['file']: (r['tags'], r['duration']) for r in records}
+        for i in range(len(records)):
+            for j in range(i + 1, len(records)):
+                a, b = records[i], records[j]
+                if a['album_dir'] == b['album_dir']:
+                    continue  # intra-folder duplicati sono gestiti da dedupe_tracks
+                if a['markers'] != b['markers']:
+                    skipped_editions += 1
+                    continue
+                reason = _metadata_duplicate_reason([a['file'], b['file']], meta)
+                if reason:
+                    union(i, j)
+        clusters = {}
+        for i, record in enumerate(records):
+            clusters.setdefault(find(i), []).append(record)
+        for cluster in clusters.values():
+            if len(cluster) < 2 or len({r['album_dir'] for r in cluster}) < 2:
+                continue
+            n_groups += 1
+            ordered = sorted(cluster, key=lambda r: _keeper_score(r['file'], r['tags']))
+            keeper = ordered[0]
+            for duplicate in ordered[1:]:
+                n_duplicates += 1
+                reason = _metadata_duplicate_reason([keeper['file'], duplicate['file']], {
+                    keeper['file']: (keeper['tags'], keeper['duration']),
+                    duplicate['file']: (duplicate['tags'], duplicate['duration'])}) or 'metadata'
+                label_reason = ('titolo esatto + durata + formato lossless/lossy, track number assente'
+                                if reason == 'crossformat' else 'titolo esatto + track number/durata')
+                print(f"    {'[dry] ' if not apply else ''}DUPE-CROSS-ALBUM {duplicate['file']} == "
+                      f"{keeper['file']} ({label_reason}; {keeper['album_artist']} / {keeper['album_title']})")
+                if apply:
+                    try:
+                        _move_to_trash(duplicate['file'], stamp, hard_delete, base)
+                    except Exception as e:
+                        errors += 1
+                        print(f'[ERRORE] spostamento duplicato cross-album {duplicate["file"]}: {e}',
+                              file=sys.stderr)
+    print(f'dedupe cross-album: {n_groups} gruppi, {n_duplicates} duplicati '
+          f'{"eliminati in modo definitivo" if apply and hard_delete else ("spostati nel cestino" if apply else "da revisionare/applicare con --apply")}; '
+          f'{skipped_editions} confronti saltati per marcatori d’edizione discordanti; errori={errors}')
+    return {'groups': n_groups, 'duplicates': n_duplicates, 'errors': errors}
+
+
 # ===================== infrastruttura fasi (log UNICO + timer) =====================
 
 _PHASE_TIMINGS = []       # [(nome fase, secondi), ...] nell'ordine di esecuzione
 _RUN_STARTED_AT = None
 _RUN_INTERRUPTED = False
+_RUN_FAILED_PHASES = []   # errori visibili anche nel codice di uscita della pipeline
+_PHASE_PROGRESS_INDEX = 0
+_PHASE_PROGRESS_TOTAL = 1
 
 def _elapsed_text(seconds):
     seconds = max(0.0, float(seconds))
@@ -5793,10 +6529,129 @@ def _print_timing_summary():
     print(f"  {'TOTALE':<{width}}  {_elapsed_text(total):>12s}", file=sys.stderr, flush=True)
     print("=== fine riepilogo tempi ===", file=sys.stderr, flush=True)
 
+def _estimate_phase_total(args):
+    """Stima il numero di fasi previste per l'esecuzione selezionata.
+
+    Le due fasi opzionali legate a risultati esterni (pulizia playlist dopo fetch e scan dopo
+    download cover) vengono contate solo quando sono richieste/prevedibili; se un provider
+    attiva un ramo imprevisto run_phase allarga il totale senza bloccare la run.
+    """
+    names = ['load_user_config']
+    if args.all:
+        names.append('diagnose_album_splits')
+    # Utility che chiudono la run dopo una sola azione.
+    utility = [
+        (args.fix_all_playlist_owners is not None, 'fix_all_playlist_owners'),
+        (args.fix_flac_safe, 'fix_flac_safe'), (args.lidarr_folder_fix, 'lidarr_folder_fix'),
+        (args.lidarr_import_slskd, 'lidarr_import_slskd'),
+        (args.lb_dedup is not None, 'listenbrainz_dedup'),
+        (args.sync_spotify_proxy_config, 'sync_spotify_proxy_config'),
+        (args.build_spotify_proxies, 'build_spotify_local_proxies'),
+        (args.sync_proxy_favorites, 'sync_proxy_favorites'),
+    ]
+    selected_utility = next((n for yes, n in utility if yes), None)
+    if selected_utility:
+        names.append(selected_utility)
+        return len(names)
+    if args.diagnose_album_splits and not args.all:
+        names.append('diagnose_album_splits')
+        if args.repair_album_groups:
+            names.append('repair_album_groups')
+            if args.apply and not args.dry_run and not args.no_scan:
+                names.append('navidrome_scan')
+        return len(names)
+    if args.repair_album_groups and not args.all:
+        names.append('repair_album_groups')
+        if args.apply and not args.dry_run and not args.no_scan:
+            names.append('navidrome_scan')
+        return len(names)
+    if args.fetch_login:
+        names.append('fetch_login')
+        return len(names)
+    if args.fetch_list:
+        names.append('list_exportify_sessions')
+        return len(names)
+    if args.fetch_check:
+        names.append('check_exportify_sessions')
+        return len(names)
+    if args.check_albums and not args.all:
+        names.append('check_albums')
+        return len(names)
+    if args.fetch_only:
+        names.append('fetch_exportify')
+        return len(names)
+    if args.missing:
+        names.extend(['index_library', 'report_missing_tracks'])
+        return len(names)
+    if args.explain:
+        names.extend(['index_library', 'explain_track_match'])
+        return len(names)
+    if args.rebuild_album:
+        names.append('rebuild_album')
+        return len(names)
+    maintenance = any([args.fix_owners is not None, args.dedupe_playlists, args.dedupe_releases,
+                       args.dedupe_tracks, args.mp3_vs_flac, args.clean_empty,
+                       args.fix_collab_artists, args.star_liked])
+    if args.unify_only:
+        names.append('album_unify')
+        if not args.dry_run and not args.no_scan:
+            names.append('navidrome_scan')
+        return len(names)
+    if args.fix_owners is not None: names.append('fix_playlist_owners')
+    if args.dedupe_playlists: names.append('dedupe_playlists')
+    if args.dedupe_releases: names.append('dedupe_releases')
+    if args.dedupe_tracks: names.append('dedupe_tracks')
+    if args.mp3_vs_flac: names.append('mp3_vs_flac')
+    if args.fix_collab_artists: names.append('fix_collab_artists')
+    if args.flac_16bit: names.append('flac_16bit')
+    if args.clean_empty: names.append('clean_empty')
+    if args.playlists or not maintenance:
+        if args.fetch and not args.dry_run and not args.csv and not args.no_unzip:
+            names.append('fetch_exportify')
+        if not args.csv and not args.no_unzip:
+            names.append('unzip_and_prune_csv')
+        names.extend(['index_library', 'generate_m3u_playlists'])
+        if args.fetch and not args.dry_run and not args.csv and not args.no_unzip:
+            names.extend(['prune_stale_m3u', 'prune_stale_m3u_db'])
+        if not args.skip_date_heal: names.append('date_heal')
+        if not args.skip_romaji: names.append('romaji_tags')
+        if not args.skip_artist_names: names.append('artist_names')
+        if not args.skip_unify: names.append('album_unify')
+        if args.all: names.extend(['repair_album_groups', 'dedupe_cross_album_tracks', 'check_album_completeness'])
+        if not args.skip_fix_dates: names.append('fix_date_tags')
+        if not args.dry_run and not args.sync_only: names.append('report_library_gaps')
+    has_scan_creds = bool(SUBSONIC_PASS or any(k.startswith('ND_PASS_') and v for k, v in os.environ.items()))
+    will_scan_before_stars = bool(args.star_liked and not args.dry_run and not args.no_scan and has_scan_creds)
+    if will_scan_before_stars:
+        names.append('navidrome_scan_before_stars')
+        if args.all and not args.sync_only:
+            names.extend(['targeted_date_heal', 'targeted_romaji_tags', 'targeted_artist_names',
+                          'targeted_album_unify', 'targeted_repair_album_groups',
+                          'targeted_fix_date_tags', 'navidrome_scan_after_album_repair',
+                          'diagnose_album_splits_after_scan'])
+    elif not args.dry_run and not args.no_scan:
+        # Senza pre-scan (run normale senza star-liked o credenziali assenti), il percorso
+        # principale effettua lo scan finale. In --all segue la stessa riconciliazione mirata.
+        names.append('navidrome_scan_final')
+        if args.all and not args.sync_only:
+            names.extend(['targeted_date_heal', 'targeted_romaji_tags', 'targeted_artist_names',
+                          'targeted_album_unify', 'targeted_repair_album_groups',
+                          'targeted_fix_date_tags', 'navidrome_scan_after_album_repair',
+                          'diagnose_album_splits_after_scan'])
+    if args.star_liked and not args.dry_run:
+        names.append('star_liked')
+    if not args.no_artwork_download and MISSING_ARTWORK_CONFIG.get('enabled', True):
+        names.append('download_missing_album_artwork')
+    return len(names)
+
+
 def run_phase(logname, fn, *args, **kwargs):
     """Esegue e misura una fase; distingue completamento, errore e interruzione."""
-    global _RUN_INTERRUPTED
-    print(f'=== fase {logname} ===', flush=True)
+    global _RUN_INTERRUPTED, _RUN_FAILED_PHASES, _PHASE_PROGRESS_INDEX, _PHASE_PROGRESS_TOTAL
+    _PHASE_PROGRESS_INDEX += 1
+    if _PHASE_PROGRESS_INDEX > _PHASE_PROGRESS_TOTAL:
+        _PHASE_PROGRESS_TOTAL = _PHASE_PROGRESS_INDEX
+    print(f'=== fase {logname} === ({_PHASE_PROGRESS_INDEX}/{_PHASE_PROGRESS_TOTAL})', flush=True)
     started = time.perf_counter()
     result = None
     status = 'completata'
@@ -5804,6 +6659,10 @@ def run_phase(logname, fn, *args, **kwargs):
         result = fn(*args, **kwargs)
         if result is False:
             status = 'fallita (ritorno False)'
+        elif isinstance(result, dict):
+            error_count = result.get('errors', 0)
+            if isinstance(error_count, (int, float)) and error_count > 0:
+                status = f'fallita ({int(error_count)} errori nel risultato)'
     except KeyboardInterrupt:
         status = 'interrotta'
         _RUN_INTERRUPTED = True
@@ -5820,6 +6679,8 @@ def run_phase(logname, fn, *args, **kwargs):
         flush_probe_cache()
         elapsed = time.perf_counter() - started
         _PHASE_TIMINGS.append((logname, elapsed))
+        if status != 'completata':
+            _RUN_FAILED_PHASES.append((logname, status))
         if status == 'completata':
             label = f'fine fase {logname}'
         else:
@@ -5945,44 +6806,101 @@ def _titlecase_artist_gloss(value):
     return value
 
 
-def _canonicalize_artist_value(value):
-    """Converte nomi CJK/Hangul in forma bilingue preferita e collassa gli alias ripetuti.
+def _known_artist_display(value, known_names):
+    """Resolve punctuation/translation/romaji variants to one existing catalog display name."""
+    if not value or not known_names:
+        return None
+    key = norm(value)
+    direct = known_names.get(key)
+    if direct:
+        return direct
+    try:
+        variant_keys = _artist_variants(value)
+    except Exception:
+        variant_keys = {key}
+    candidates = [known_names[k] for k in variant_keys if k in known_names]
+    if not candidates:
+        return None
+    # The existing catalog's bilingual CJK form wins; otherwise prefer a stable spelling
+    # with dots over underscores and avoid arbitrary punctuation variants where possible.
+    return max(candidates, key=_artist_display_score)
 
-    Non divide su virgole/&/feat: sono componenti che possono appartenere al nome o a una
-    collaborazione. Il separatore sicuro dei tag multi-valore è ';'.
+
+def _canonicalize_artist_value(value, known_names=None):
+    """Canonicalizza artisti CJK/Hangul e deduplica alias/nomi bilingui equivalenti.
+
+    known_names e' la mappa dal DB Navidrome (normalizzato -> display name preferito).
+    Il separatore ';' e' esplicito; la virgola divide soltanto se il catalogo conferma
+    almeno due artisti, per non spezzare nomi propri come "Tyler, The Creator".
     """
     if not value:
         return value
-    parts = [p.strip() for p in str(value).split(';') if p.strip()]
+    known_names = known_names or {}
+    chunks = [p.strip() for p in str(value).split(';') if p.strip()]
+    parts = []
+    for chunk in chunks:
+        split = (_split_artist_tag_if_known(chunk, known_names)
+                 if ',' in chunk and (known_names or _artist_split_override(chunk)) else None)
+        parts.extend(split or [chunk])
     if not parts:
         return value
     out = []
     for part in parts:
-        canonical = _romanize_tag_value(part) if _has_asian(part) else part
-        canonical = _titlecase_artist_gloss(canonical)
+        part = part.strip()
+        # Se Navidrome conosce gia' la forma bilingue migliore per questo stesso
+        # stem CJK, applicala anche alle tracce che hanno ancora solo il kanji puro.
+        preferred = _known_artist_display(part, known_names) if known_names else None
+        punctuation_alias = ARTIST_CANONICAL_ALIASES.get(norm(part))
+        preserve_catalog_spelling = False
+        if punctuation_alias:
+            # Explicit canonical aliases override the catalog label. Otherwise a stale
+            # Navidrome entity called 'M.O.O.N.' wins and recreates the punctuation split
+            # despite the configured canonical spelling 'M.O.O.N'.
+            canonical = punctuation_alias
+        elif preferred and _has_asian(preferred):
+            # Reuse the best catalog spelling for CJK + translated/phonetic gloss forms.
+            # _romanize_tag_value may replace an outdated gloss using an explicit mapping,
+            # but if the catalog gloss is already authoritative keep its exact casing.
+            # Title-casing here changed 'kanji (lowercase translation)' into a second
+            # artist entity 'kanji (Titlecase Translation)' on every run.
+            canonical = _romanize_tag_value(preferred)
+            preserve_catalog_spelling = True
+        elif preferred:
+            # Also canonicalize Latin-only punctuation variants (M_O_O_N / M.O.O.N).
+            canonical = preferred
+        else:
+            canonical = _romanize_tag_value(part) if _has_asian(part) else part
+        if not preserve_catalog_spelling:
+            canonical = _titlecase_artist_gloss(canonical)
         hit = next((i for i, old in enumerate(out)
                     if _artist_values_equivalent(old, canonical)), None)
         if hit is None:
             out.append(canonical)
         else:
             out[hit] = _prefer_bilingual_artist(out[hit], canonical)
+    concrete = [name for name in out if not _is_unknown_artist(name)]
+    if concrete:
+        out = concrete
     return '; '.join(out)
 
 
-def _canonicalize_artist_tag_values(values):
-    """Normalizza e deduplica tag ripetuti, anche quando un valore contiene 'A; B'."""
+def _canonicalize_artist_tag_values(values, known_names=None):
+    """Normalizza tag ripetuti e deduplica alias, anche tra valori plurimi equivalenti."""
     out = []
     for value in values:
-        parts = [p.strip() for p in str(value or '').split(';') if p.strip()]
-        for part in parts:
-            canonical = _romanize_tag_value(part) if _has_asian(part) else part
-            canonical = _titlecase_artist_gloss(canonical)
+        canonical_value = _canonicalize_artist_value(value, known_names=known_names)
+        parts = [p.strip() for p in str(canonical_value or '').split(';') if p.strip()]
+        for canonical in parts:
             hit = next((i for i, old in enumerate(out)
                         if _artist_values_equivalent(old, canonical)), None)
             if hit is None:
                 out.append(canonical)
             else:
                 out[hit] = _prefer_bilingual_artist(out[hit], canonical)
+    # Drop generic placeholders if at least one reliable artist remains among repeated/multi tags.
+    concrete = [name for name in out if not _is_unknown_artist(name)]
+    if concrete:
+        out = concrete
     return out
 
 
@@ -6046,7 +6964,33 @@ def _rewrite_nonflac(f, targets):
     invalidate_probe_cache([f])
 
 
-def run_unify_artists(dry_run=False, base=None):
+
+def _rewrite_mp3_albumartist_id3(path, canonical):
+    """Scrive il solo album artist ID3 preservando l'audio e gli altri frame.
+
+    FFmpeg non rimuove sempre il TXXX:albumartist legacy anche se gli si passa un valore
+    vuoto: la pipeline lo riscopriva in ffprobe e ripeteva la riscrittura a ogni run.
+    Mutagen elimina solo i frame TPE2/TXXX relativi ad albumartist e scrive un unico TPE2.
+    """
+    try:
+        from mutagen.id3 import ID3, TPE2, ID3NoHeaderError
+    except ImportError as e:
+        raise RuntimeError('serve mutagen per riparare i frame ID3 MP3: .venv/bin/pip install mutagen') from e
+    try:
+        tags = ID3(str(path))
+    except ID3NoHeaderError:
+        tags = ID3()
+    tags.delall('TPE2')
+    for frame in list(tags.getall('TXXX')):
+        desc = str(getattr(frame, 'desc', '') or '').strip().casefold().replace('_', ' ')
+        if desc in {'albumartist', 'album artist'}:
+            tags.delall(frame.HashKey)
+    tags.add(TPE2(encoding=3, text=[str(canonical)]))
+    tags.save(str(path), v2_version=4)
+    invalidate_probe_cache([path])
+
+
+def run_unify_artists(dry_run=False, base=None, files_only=None):
     """Scrive le forme bilingui CJK/Hangul ovunque nei tag, non solo nelle cartelle CJK.
 
     La vecchia versione saltava immediatamente le cartelle con nome latino: perciò la stessa
@@ -6057,44 +7001,72 @@ def run_unify_artists(dry_run=False, base=None):
     global _NF_REV
     _NF_REV = None
     base = Path(base) if base else LIBRARY_ROOT
+    wanted_files = {Path(f).resolve() for f in files_only} if files_only is not None else None
     have_mf = shutil.which('metaflac') is not None
+    # Se nel DB convivono CJK puro e CJK(gloss), la mappa sceglie una sola grafia
+    # (prima i nomi bilingui). La riutilizziamo anche per i file precedenti allo scan.
+    known_artist_names = _navidrome_artist_name_map()
     tg = '[dry] ' if dry_run else ''
-    n_art = n_files = n_stray = errors = 0
+    n_art = n_files = n_stray = errors = skipped_unreadable = 0
 
     # A. Corregge il doppio album artist MP3 (TPE2 + TXXX) prima della normalizzazione globale.
     mp3s = [base.joinpath(*r) for r in _walk_audio(base, {'.mp3'})]
+    if wanted_files is not None:
+        mp3s = [f for f in mp3s if f.resolve() in wanted_files]
     prefetch_probe(mp3s, 'artist_names/mp3')
-    for f in mp3s:
+    progress = _ProgressBar('artist_names MP3 tag', len(mp3s), 'brani')
+    for mp3_index, f in enumerate(mp3s, 1):
+        progress.update(mp3_index)
         t = probe(f)
         duplicate_albumartist = bool(t.get('album_artist') and t.get('albumartist') and
                                      t['album_artist'] != t['albumartist'])
         cjk_albumartist_needs_repair = bool(
             (_has_asian(t.get('album_artist', '')) or _has_asian(t.get('albumartist', '')))
             and (t.get('album_artist') or t.get('albumartist'))
-            and (_canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''))
+            and (_canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''),
+                                          known_names=known_artist_names)
                  != (t.get('albumartist') or t.get('album_artist', ''))))
         if duplicate_albumartist or cjk_albumartist_needs_repair:
-            new = _canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''))
+            new = _canonicalize_artist_value(t.get('albumartist') or t.get('album_artist', ''),
+                                                known_names=known_artist_names)
+            progress.clear()
             print(f'{tg}MP3-ALBUMARTIST {f.parent.parent.name} / {f.parent.name}: '
                   f'TPE2="{t.get("album_artist", "")[:30]}" + TXXX="{t.get("albumartist", "")[:30]}" -> "{new[:40]}"')
             if dry_run:
                 n_stray += 1
                 continue
             try:
-                _rewrite_nonflac(f, {'album_artist': new, 'albumartist': ''})
+                if f.suffix.lower() == '.mp3':
+                    _rewrite_mp3_albumartist_id3(f, new)
+                else:
+                    _rewrite_nonflac(f, {'album_artist': new, 'albumartist': ''})
                 n_stray += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
+    progress.close(complete=True)
 
-    artists = sorted(d for d in base.iterdir()
-                     if d.is_dir() and d.name.lower() not in SKIP_TOP
-                     and not d.name.startswith('.'))
-    for art in artists:
+    if wanted_files is None:
+        artists = sorted(d for d in base.iterdir()
+                         if d.is_dir() and d.name.lower() not in SKIP_TOP
+                         and not d.name.startswith('.'))
+    else:
+        artists = sorted({base / f.relative_to(base).parts[0] for f in map(Path, files_only)
+                          if f.is_absolute() and f.is_relative_to(base) and len(f.relative_to(base).parts) >= 2
+                          and (base / f.relative_to(base).parts[0]).is_dir()
+                          and (base / f.relative_to(base).parts[0]).name.lower() not in SKIP_TOP
+                          and not (base / f.relative_to(base).parts[0]).name.startswith('.')})
+    progress = _ProgressBar('artist_names', len(artists), 'artisti')
+    for artist_index, art in enumerate(artists, 1):
+        progress.update(artist_index)
         files = _audio_files(art)
+        if wanted_files is not None:
+            files = [f for f in files if f.resolve() in wanted_files]
         if not files:
             continue
         folder_is_asian = _has_asian(art.name)
+        progress.clear()
         prefetch_probe(files, 'artist_names')
         probes = {f: probe(f) for f in files}
         candidate = {}
@@ -6103,14 +7075,22 @@ def run_unify_artists(dry_run=False, base=None):
             relevant = [t.get(k, '') for k in ('artist', 'albumartist', 'album_artist', 'artists', 'albumartists')]
             if folder_is_asian or any(_has_asian(v) for v in relevant):
                 candidate[f] = True
+            elif any(value and _canonicalize_artist_value(value, known_names=known_artist_names) != value
+                     for value in relevant):
+                # Still prefilter with ffprobe, but include Latin tags that need alias,
+                # punctuation or comma-collaboration repair (M_O_O_N, Afro Medusa,West Way).
+                candidate[f] = True
             for value in relevant:
-                values.extend(p.strip() for p in value.split(';') if p.strip())
+                values.extend(_artist_parts_for_inference(value, known_artist_names))
 
         # I valori raw FLAC conservano tag ARTISTS/ALBUMARTISTS ripetuti che ffprobe unisce.
+        # Se metaflac non riesce a leggere un FLAC, non deve finire nel fallback non-FLAC.
         raw = {}
+        raw_failed = set()
         flacs = [f for f in files if f.suffix.lower() == '.flac'
                  and (folder_is_asian or f in candidate)]
         if flacs and not have_mf:
+            progress.clear()
             print(f'[ERRORE] metaflac non trovato: salto i tag FLAC di {art.name}',
                   file=sys.stderr)
             flacs = []
@@ -6119,10 +7099,15 @@ def run_unify_artists(dry_run=False, base=None):
                 raw[f] = _flac_raw_tags(f)
                 for k, v in raw[f]:
                     if k in _FLAC_ARTIST_TAGS:
-                        values.extend(p.strip() for p in v.split(';') if p.strip())
+                        values.extend(_artist_parts_for_inference(v, known_artist_names))
             except Exception as e:
-                errors += 1
-                print(f'ERRORE: {f}: {e}', file=sys.stderr)
+                # An unreadable file is excluded from all subsequent rewrites. Keep the
+                # problem visible but do not fail every album repair because one FLAC
+                # cannot export tags; actual write failures below remain hard errors.
+                raw_failed.add(f.resolve())
+                skipped_unreadable += 1
+                progress.clear()
+                print(f'[warn] tag FLAC non leggibili, file saltato: {f}: {e}', file=sys.stderr)
 
         variants = _artist_variants(art.name)
         canon = _folder_canon(art.name, values)
@@ -6140,15 +7125,16 @@ def run_unify_artists(dry_run=False, base=None):
                 news = []
                 for old in olds:
                     new_value = _remap_artist_value(old, variants, canon) if canon else old
-                    new_value = _canonicalize_artist_value(new_value)
+                    new_value = _canonicalize_artist_value(new_value, known_names=known_artist_names)
                     news.append(new_value)
-                news = _canonicalize_artist_tag_values(news)
+                news = _canonicalize_artist_tag_values(news, known_names=known_artist_names)
                 if news != olds:
                     changes[tag] = news
             if not changes:
                 continue
             if dry_run:
                 changed_this_folder += 1
+                progress.clear()
                 print(f'[dry] ARTIST-TAG {f}: ' + ', '.join(
                     f'{tag}={news}' for tag, news in changes.items()))
                 continue
@@ -6166,18 +7152,20 @@ def run_unify_artists(dry_run=False, base=None):
                 changed_this_folder += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
 
         # Non-FLAC e FLAC non grezzi: corregge globalmente i campi esposti da ffprobe.
         for f, t in probes.items():
-            if f in raw:
+            if f in raw or f.resolve() in raw_failed:
+                # FLAC illeggibili da metaflac non devono finire nel fallback ffmpeg per MP3/M4A.
                 continue
             aa_key = 'albumartist' if f.suffix.lower() in ('.ogg', '.opus') else 'album_artist'
             changes = {}
             artist_old = t.get('artist', '')
             if artist_old:
                 artist_new = _remap_artist_value(artist_old, variants, canon) if canon else artist_old
-                artist_new = _canonicalize_artist_value(artist_new)
+                artist_new = _canonicalize_artist_value(artist_new, known_names=known_artist_names)
                 if artist_new != artist_old:
                     changes['artist'] = artist_new
             # ffprobe exposes MP3/M4A album artist inconsistently as album_artist or
@@ -6185,7 +7173,7 @@ def run_unify_artists(dry_run=False, base=None):
             albumartist_old = t.get('albumartist') or t.get('album_artist') or ''
             if albumartist_old:
                 albumartist_new = _remap_artist_value(albumartist_old, variants, canon) if canon else albumartist_old
-                albumartist_new = _canonicalize_artist_value(albumartist_new)
+                albumartist_new = _canonicalize_artist_value(albumartist_new, known_names=known_artist_names)
                 if albumartist_new != albumartist_old:
                     changes[aa_key] = albumartist_new
                 if f.suffix.lower() == '.mp3' and t.get('albumartist'):
@@ -6194,6 +7182,7 @@ def run_unify_artists(dry_run=False, base=None):
                 continue
             if dry_run:
                 changed_this_folder += 1
+                progress.clear()
                 print(f'[dry] ARTIST-TAG {f}: ' + ', '.join(
                     f'{key}={value}' for key, value in changes.items()))
                 continue
@@ -6202,18 +7191,31 @@ def run_unify_artists(dry_run=False, base=None):
                 changed_this_folder += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f'ERRORE: {f}: {e}', file=sys.stderr)
 
         if changed_this_folder:
             n_art += 1
             n_files += changed_this_folder
+            progress.clear()
             print(f'{tg}ARTIST-NAMES {art.name}: {changed_this_folder} file modificati'
                   + (f' -> "{canon}"' if canon else ' (normalizzazione CJK globale)'))
+
+    progress.close(complete=True)
 
     # I backup sono cleanup distruttivo: in dry-run non rimuoviamo nulla.
     removed = 0
     if not dry_run:
-        for b in base.rglob('*.meta-backup'):
+        if wanted_files is None:
+            backup_candidates = base.rglob('*.meta-backup')
+        else:
+            backup_candidates = (b for folder in {f.parent for f in wanted_files}
+                                 for b in folder.glob('*.meta-backup'))
+        seen_backups = set()
+        for b in backup_candidates:
+            if b in seen_backups:
+                continue
+            seen_backups.add(b)
             if b.with_name(b.name[:-len('.meta-backup')]).exists():
                 try:
                     b.unlink()
@@ -6222,8 +7224,9 @@ def run_unify_artists(dry_run=False, base=None):
                     pass
     print(f'artist_names: {n_art} cartelle con tag corretti ({n_files} file) | '
           f'mp3 con doppio album artist riparati: {n_stray} | errori: {errors} | '
-          f'backup rimossi: {removed}')
-    return {'folders': n_art, 'files': n_files, 'stray_albumartist': n_stray, 'errors': errors}
+          f'FLAC saltati per tag non leggibili: {skipped_unreadable} | backup rimossi: {removed}')
+    return {'folders': n_art, 'files': n_files, 'stray_albumartist': n_stray,
+            'errors': errors, 'skipped_unreadable': skipped_unreadable}
     if n_art or n_stray:
         print('[i] Navidrome deve completare un full scan per rimuovere le vecchie voci artista dal DB '
               '(lo scan parte a fine pipeline, salvo --no-scan)')
@@ -6271,12 +7274,21 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
             print(f"[ERRORE] artista '{artist}' non trovato in {base}")
             return
 
-    for art in artists:
-        files = _audio_files(art)
+    artist_files = [(art, _audio_files(art)) for art in artists]
+    total_mp3s = sum(1 for _art, files in artist_files
+                     for f in files if f.suffix.lower() == '.mp3')
+    progress = _ProgressBar('mp3_vs_flac', total_mp3s, 'brani')
+    checked_mp3s = 0
+    for art, files in artist_files:
         mp3s = [f for f in files if f.suffix.lower() == '.mp3']
         flacs = [f for f in files if f.suffix.lower() == '.flac']
-        if not mp3s or not flacs:
+        if not mp3s:
             continue
+        if not flacs:
+            checked_mp3s += len(mp3s)
+            progress.update(checked_mp3s)
+            continue
+        progress.clear()
         prefetch_probe(mp3s + flacs, 'mp3_vs_flac')
         meta = {f: probe_dur(f) for f in mp3s + flacs}
         skey = {f: norm_bare(best_title(f, meta[f][0])) for f in mp3s + flacs}
@@ -6287,6 +7299,8 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
             by_f.setdefault(fkey[fl], []).append(fl)
 
         for m in mp3s:
+            checked_mp3s += 1
+            progress.update(checked_mp3s)
             n_mp3 += 1
             if not skey[m]:
                 continue
@@ -6302,6 +7316,7 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
                   if dm and meta[c][1] and _dur_compatible(dm, meta[c][1], max_dur)]
             if not ok:
                 n_review += 1
+                progress.clear()
                 print(f"    [review] {art.name}/{rel}: titolo uguale a un FLAC ma durata "
                       f"ignota o troppo diversa: lascio l'mp3")
                 continue
@@ -6309,6 +7324,7 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
                           key=lambda c: _keeper_score(c, meta[c][0]))
             if not same:
                 n_review += 1
+                progress.clear()
                 print(f"    [review] {art.name}/{rel}: il FLAC sta in un altro album "
                       f"({ok[0].relative_to(art)}): lascio l'mp3")
                 continue
@@ -6317,6 +7333,7 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
                 keeper = same[0]
             elif not _HAS_NP:
                 n_review += 1
+                progress.clear()
                 print(f"    [info] {art.name}/{rel}: numpy assente, niente verifica waveform: "
                       f"lascio l'mp3 (usa --trust-format per fidarti di titolo+durata)")
                 continue
@@ -6329,10 +7346,12 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
                         break
                 if keeper is None:
                     n_review += 1
+                    progress.clear()
                     print(f"    [review] {art.name}/{rel}: waveform diversa dal FLAC "
                           f"(o non confrontabile): lascio l'mp3")
                     continue
             n_del += 1
+            progress.clear()
             print(f"    {'[dry] ' if not apply else ''}MP3-DUPE  {art.name}/{rel} "
                   f"(tengo {keeper.relative_to(art)})")
             if apply:
@@ -6341,8 +7360,10 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
                 except Exception as e:
                     errors += 1
                     n_del -= 1
+                    progress.clear()
                     print(f"    ERRORE spostamento {m}: {e}", file=sys.stderr)
 
+    progress.close(complete=True)
     print(f"\nmp3 esaminati: {n_mp3} | {'rimossi' if apply else 'da rimuovere'}: {n_del} "
           f"| da verificare: {n_review} | senza FLAC gemello: {n_none} | errori: {errors}")
     if apply and not hard_delete and n_del:
@@ -6556,7 +7577,7 @@ def _remove_musicbrainz_ids(paths, dry_run=False, drop_album=True, drop_releaseg
     return changed, errors
 
 
-def _repair_mbid_sanity(base, cache, tcache, dry_run=False):
+def _repair_mbid_sanity(base, cache, tcache, dry_run=False, album_dirs_only=None):
     """Verifica MBID riutilizzati tra release e MBID discordanti dentro un album logico.
 
     La vecchia logica guardava pochi file e ripuliva soltanto FLAC. Qui il gruppo e' l'album intero
@@ -6564,12 +7585,16 @@ def _repair_mbid_sanity(base, cache, tcache, dry_run=False):
     quando una singola cartella contiene piu' album-ID incompatibili.
     """
     base = Path(base)
+    wanted_dirs = {Path(d).resolve() for d in album_dirs_only} if album_dirs_only else None
     roots = {}
     for rel in _walk_audio(base, AUDIO_EXT):
         if rel[-1].endswith(('.backup', '.meta-backup')) or '.tmp.' in rel[-1]:
             continue
         f = base.joinpath(*rel)
-        roots.setdefault(_album_root_for_file(base, f), []).append(f)
+        logical_root = _album_root_for_file(base, f)
+        if wanted_dirs is not None and logical_root.resolve() not in wanted_dirs:
+            continue
+        roots.setdefault(logical_root, []).append(f)
     prefetch_probe((f for fs in roots.values() for f in fs), 'mbid_sanity')
 
     root_tags = {root: [probe_dur(f)[0] for f in files] for root, files in roots.items()}
@@ -6664,7 +7689,7 @@ def _repair_mbid_sanity(base, cache, tcache, dry_run=False):
     return {'roots': removed_roots, 'files': removed_files, 'reviews': reviews, 'errors': errors}
 
 
-def run_date_heal(dry_run=False, base=None):
+def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
     import shutil as _sh
     if not dry_run and not _sh.which('metaflac'):
         print('[ERRORE] metaflac non trovato: salto date_heal')
@@ -6702,7 +7727,10 @@ def run_date_heal(dry_run=False, base=None):
     stripped = mbid_result.get('roots', 0)
     errors += mbid_result.get('errors', 0)
 
-    for album, files in sorted(folders.items()):
+    sorted_folders = sorted(folders.items())
+    progress = _ProgressBar('date_heal', len(sorted_folders), 'album')
+    for album_index, (album, files) in enumerate(sorted_folders, 1):
+        progress.update(album_index)
         if len(album.parent.name) < 1:
             continue
         try:
@@ -6722,6 +7750,7 @@ def run_date_heal(dry_run=False, base=None):
             heal_cache[str(album)] = [maj, year or '', sig]
             if not year or year == maj:
                 continue
+            progress.clear()
             print(f"{'[dry] ' if dry_run else ''}HEAL {album.parent.name} / {album.name}: "
                   f"date {maj} -> {year} ({fonte})")
             if dry_run:
@@ -6743,6 +7772,7 @@ def run_date_heal(dry_run=False, base=None):
                                    capture_output=True, timeout=60)
                 if r.returncode != 0:
                     ok = False
+                    progress.clear()
                     print(f'    [ERRORE] metaflac su {f.name}: '
                           f'{r.stderr.decode()[:150]}', file=sys.stderr)
             if ok:
@@ -6753,7 +7783,9 @@ def run_date_heal(dry_run=False, base=None):
         except Exception as e:
             errors += 1
             heal_cache.pop(str(album), None)
+            progress.clear()
             print(f'ERRORE: {album}: {e}', file=sys.stderr)
+    progress.close(complete=True)
     if not dry_run:
         _write_json_atomic(MBDATE_CACHE, cache)
         _write_json_atomic(MBTITLE_CACHE, tcache)
@@ -6792,35 +7824,76 @@ def _flac_tags(path, *names):
     return out
 
 
-def run_fix_dates(dry_run=False, base=None):
+def run_fix_dates(dry_run=False, base=None, files_only=None):
+    """Uniforma la data originale per album logico e rimuove DATE ridondanti.
+
+    Se >=60% delle tracce con una data (almeno due) concordano su una stessa data/anno,
+    quella data diventa il valore ORIGINALDATE condiviso per le tracce FLAC selezionate,
+    anche quando alcuni file hanno il campo mancante o una data residua diversa. Questo
+    evita che Navidrome divida un singolo album in base a tag discordanti. Se non esiste
+    un consenso affidabile, conserva il precedente fallback basato sull'anno nella cartella.
+    """
     import shutil as _sh
     if not _sh.which('metaflac'):
         print('[ERRORE] metaflac non trovato: salto fix_date_tags')
         return
     base = Path(base) if base else LIBRARY_ROOT
-    fixed = errors = 0
-    # Usa l'elenco veloce condiviso e ffprobe/cache (lettura in parallelo): la vecchia
-    # versione avviava metaflac almeno una volta per OGNI file, anche se gia' corretto.
+    fixed = errors = proposed = 0
     files = [base.joinpath(*rel) for rel in _walk_audio(base, {'.flac'})
              if not rel[-1].lower().endswith('.backup')]
+    if files_only is not None:
+        wanted_files = {Path(f).resolve() for f in files_only}
+        files = [f for f in files if f.resolve() in wanted_files]
     prefetch_probe(files, 'fix_date_tags')
+
+    # Use logical album roots so an album split into CD1/CD2 still shares one date.
+    groups = {}
     for f in files:
+        groups.setdefault(_album_root_for_file(base, f), []).append(f)
+    shared_dates = {}
+    for root, group_files in groups.items():
+        group_tags = [probe(f) for f in group_files]
+        target = _dominant_original_date(group_tags)
+        if target:
+            shared_dates[root] = target
+
+    progress = _ProgressBar('fix_date_tags', len(files), 'file')
+    for file_index, f in enumerate(files, 1):
+        progress.update(file_index)
         try:
             tags = probe(f)
-            date_v = tags.get('date', '')
-            orig_v = tags.get('originaldate', '')
-            # Raro fallback: ffprobe non e' riuscito a leggere alcun tag. Mantiene
-            # il comportamento precedente con una lettura mirata di metaflac.
+            date_v = str(tags.get('date') or '').strip()
+            orig_v = str(tags.get('originaldate') or '').strip()
             if not tags:
                 raw = _flac_tags(f, 'DATE', 'ORIGINALDATE')
-                date_v, orig_v = raw['DATE'], raw['ORIGINALDATE']
-            if orig_v:
-                if date_v and date_v != orig_v:
-                    print(f"{'[dry] ' if dry_run else ''}FIX(rem): {f.name}  "
-                          f"DATE={date_v} ORIGINALDATE={orig_v}")
-                    if not dry_run:
-                        _metaflac_run('--remove-tag=DATE', path=f)
-                        fixed += 1
+                date_v, orig_v = raw['DATE'].strip(), raw['ORIGINALDATE'].strip()
+
+            shared = shared_dates.get(_album_root_for_file(base, f))
+            changes = []
+            if shared:
+                # One agreed release date is more reliable than leaving one-off DATE tags
+                # or missing ORIGINALDATE values to create separate Navidrome album rows.
+                if orig_v != shared:
+                    changes.extend(['--remove-tag=ORIGINALDATE', f'--set-tag=ORIGINALDATE={shared}'])
+                if date_v:
+                    changes.append('--remove-tag=DATE')
+                if not changes:
+                    continue
+                proposed += 1
+                progress.clear()
+                print(f"{'[dry] ' if dry_run else ''}FIX(album-date): {f.name}  "
+                      f"DATE={date_v or '(assente)'} ORIGINALDATE={orig_v or '(assente)'} "
+                      f"-> ORIGINALDATE={shared}")
+            elif orig_v:
+                # The documented invariant is one original-date field only, even if DATE
+                # happens to contain the same value. Navidrome should not have two sources.
+                if not date_v:
+                    continue
+                changes = ['--remove-tag=DATE']
+                proposed += 1
+                progress.clear()
+                print(f"{'[dry] ' if dry_run else ''}FIX(rem): {f.name}  "
+                      f"DATE={date_v} ORIGINALDATE={orig_v}")
             elif date_v:
                 year = ''
                 for d in (f.parent, f.parent.parent):
@@ -6828,17 +7901,28 @@ def run_fix_dates(dry_run=False, base=None):
                     if m:
                         year = m.group(0).strip('()')
                         break
-                if year and date_v != year:
-                    print(f"{'[dry] ' if dry_run else ''}FIX(set): {f.name}  "
-                          f"DATE={date_v} -> ORIGINALDATE={year}")
-                    if not dry_run:
-                        # Scrittura e rimozione in una sola invocazione.
-                        _metaflac_run(f'--set-tag=ORIGINALDATE={year}', '--remove-tag=DATE', path=f)
-                        fixed += 1
+                if not year or date_v == year:
+                    continue
+                changes = [f'--set-tag=ORIGINALDATE={year}', '--remove-tag=DATE']
+                proposed += 1
+                progress.clear()
+                print(f"{'[dry] ' if dry_run else ''}FIX(set): {f.name}  "
+                      f"DATE={date_v} -> ORIGINALDATE={year}")
+            else:
+                continue
+
+            if not dry_run:
+                _metaflac_run(*changes, path=f)
+                fixed += 1
         except Exception as e:
             errors += 1
+            progress.clear()
             print(f'ERRORE: {f}: {e}', file=sys.stderr)
-    print(f'fix_date_tags: {fixed} file sistemati, {errors} errori')
+    progress.close(complete=True)
+    if dry_run:
+        print(f'fix_date_tags: {proposed} file con modifiche proposte (--dry-run), {errors} errori')
+    else:
+        print(f'fix_date_tags: {fixed} file sistemati, {errors} errori')
 
 # ===================== fase: flac 16bit =====================
 # (da flac_16bit.py, ottimizzata: 24bit -> 16bit livello 8; 16bit con ratio
@@ -6897,7 +7981,9 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
     cache_updates = 0
     # _walk_audio usa os.scandir, normalizza estensioni e ignora directory non musicali.
     flac_files = [base.joinpath(*rel) for rel in _walk_audio(base, {'.flac'})]
-    for p in flac_files:
+    progress = _ProgressBar('flac_16bit', len(flac_files), 'file')
+    for file_index, p in enumerate(flac_files, 1):
+        progress.update(file_index)
         if p.name.casefold().endswith('.flac.flac') or p.name.casefold().endswith('.backup'):
             continue
         try:
@@ -6926,6 +8012,7 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
             continue          # gia' ben compresso: non toccare
         tag = f'24->16bit ({bps}bit)' if bps > 16 else f'16bit ricomprimo (ratio {ratio:.2f})'
         if dry_run:
+            progress.clear()
             print(f'[dry] {tag}: {p.name}')
             converted += 1
             continue
@@ -6970,11 +8057,13 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
             backup.unlink(missing_ok=True)
             cache[key] = [p.stat().st_mtime, p.stat().st_size]
             saved += st.st_size - newsize
+            progress.clear()
             print(f'{tag}: {p.name} ({st.st_size // 1024}K -> {newsize // 1024}K)')
             converted += 1
         except Exception as e:
             errors += 1
             msg = str(e)
+            progress.clear()
             print(f'ERRORE: {p}: {msg[:300]}', file=sys.stderr)
             if 'No space left' in msg:
                 stopped = 'disco pieno (No space left on device)'
@@ -6984,6 +8073,7 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
             if attempts and attempts % 100 == 0:
                 _write_json_atomic(cache_path, cache)
 
+    progress.close(complete=(not stopped))
     removed = 0
     # Ricerca backup con una sola visita del filesystem. In dry-run non cancellare e non
     # scrivere la cache: il flag deve essere senza effetti collaterali anche su file ausiliari.
@@ -7130,18 +8220,20 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
         print("[i] scan gia' in corso: attendo che termini senza riavviare Navidrome...",
               flush=True)
         wait_deadline = time.monotonic() + 5400
-        last_print = time.monotonic()
+        existing_total = int(globals().get('_LIB_TRACK_COUNT') or 0)
+        existing_progress = _ProgressBar('scan preesistente in corso', existing_total, 'brani',
+                                         stream=sys.stdout)
         while st.get('scanning') and time.monotonic() < wait_deadline:
             time.sleep(3)
             try:
                 st = _get_scan_status()
             except Exception as e:
+                existing_progress.clear()
                 print(f'  [warn] getScanStatus durante attesa: {e}', flush=True)
                 continue
-            if st.get('scanning') and time.monotonic() - last_print >= 300:
-                print(f"  ...scan preesistente ancora in corso: {st.get('count', '?')} brani indicizzati",
-                      flush=True)
-                last_print = time.monotonic()
+            if st.get('scanning') and existing_total:
+                existing_progress.update(st.get('count', 0))
+        existing_progress.close(complete=not st.get('scanning'))
         if st.get('scanning'):
             print('[ERRORE] lo scan preesistente non e’ terminato entro 90 minuti',
                   file=sys.stderr, flush=True)
@@ -7166,7 +8258,8 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
     timeout = 5400 if full_scan else 1800
     deadline = time.monotonic() + timeout
     last = None
-    last_print = time.monotonic()
+    progress_total = int(globals().get('_LIB_TRACK_COUNT') or 0)
+    scan_progress = _ProgressBar('scan in corso', progress_total, 'brani', stream=sys.stdout)
     while time.monotonic() < deadline:
         time.sleep(3)
         try:
@@ -7175,6 +8268,7 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
             print(f'  [warn] getScanStatus: {e}', flush=True)
             continue
         if not st.get('scanning'):
+            scan_progress.close(complete=True)
             err = st.get('error')
             if err:
                 print(f'[ERRORE] scan Navidrome terminato con errore: {err}',
@@ -7191,20 +8285,161 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
                     return False
             return True
         cnt = st.get('count', 0)
-        total = globals().get('_LIB_TRACK_COUNT')
-        if cnt // 1000 != (last or {}).get('count', 0) // 1000 or \
-                time.monotonic() - last_print > 300:
-            if total:
-                pct = cnt * 100 // total
-                print(f"  ...scan in corso: {cnt}/{total} brani "
-                      f"({pct}% - ancora {total - cnt} da scansionare)", flush=True)
-            else:
-                print(f"  ...scan in corso: {cnt} brani", flush=True)
-            last_print = time.monotonic()
+        if progress_total:
+            scan_progress.update(cnt)
         last = st
+    scan_progress.close(complete=False)
     print(f'[ERRORE] scan Navidrome: timeout dopo {timeout // 60} minuti',
           file=sys.stderr, flush=True)
     return False
+
+
+# ===================== riconciliazione album dopo scan Navidrome =====================
+def _snapshot_navidrome_albums():
+    """Snapshot DB degli album e dei path brano, usato solo per un diff prima/dopo scan."""
+    if not NAVIDROME_DB.exists():
+        return None
+    try:
+        with _nd_db(write=False) as con:
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {'album', 'media_file'} <= tables:
+                return None
+            acols = _nd_table_cols(con, 'album')
+            mcols = _nd_table_cols(con, 'media_file')
+            name_col = 'name' if 'name' in acols else None
+            id_col = 'id' if 'id' in acols else None
+            artist_col = next((c for c in ('album_artist', 'albumartist', 'artist') if c in acols), None)
+            if not name_col or not id_col:
+                return None
+            artist_expr = f'"{artist_col}"' if artist_col else "''"
+            album_rows = con.execute(
+                f'SELECT "{id_col}", "{name_col}", {artist_expr} FROM album').fetchall()
+            if 'album_id' not in mcols:
+                return None
+            path_col = next((c for c in ('path', 'file_path') if c in mcols), None)
+            title_col = 'title' if 'title' in mcols else None
+            if path_col:
+                media_rows = con.execute(f'SELECT album_id, "{path_col}" FROM media_file').fetchall()
+            elif title_col:
+                media_rows = con.execute('SELECT album_id, title FROM media_file').fetchall()
+            else:
+                media_rows = con.execute('SELECT album_id, id FROM media_file').fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        print(f'[warn] snapshot album Navidrome non disponibile: {exc}', file=sys.stderr)
+        return None
+
+    paths_by_album = {}
+    for aid, path_value in media_rows:
+        path_value = str(path_value or '').strip()
+        if path_value:
+            paths_by_album.setdefault(str(aid), set()).add(path_value.replace('\\', '/'))
+    snapshot = {}
+    for aid, name, artist in album_rows:
+        aid = str(aid)
+        name, artist = str(name or '').strip(), str(artist or '').strip()
+        identity_artist = _artist_entity_cjk_stem(artist)
+        paths = paths_by_album.get(aid, set())
+        snapshot[aid] = {
+            'id': aid, 'name': name, 'artist': artist, 'key': (norm(name), norm(identity_artist)),
+            'paths': paths, 'track_count': len(paths),
+        }
+    return snapshot
+
+
+def _diff_navidrome_albums(before, after):
+    """Classifica nuovi album, cambiamenti e fusioni usando indici per key e path (O(n+t))."""
+    old_by_id = {str(k): v for k, v in before.items()}
+    old_by_key = {}
+    old_by_path = {}
+    for rec in old_by_id.values():
+        old_by_key.setdefault(rec['key'], []).append(rec)
+        for path in rec.get('paths', set()):
+            old_by_path.setdefault(path, set()).add(rec['id'])
+    changes = {'new': [], 'changed': [], 'merged': [], 'affected': []}
+    affected_ids = set()
+    for current in after.values():
+        overlapping_ids = set()
+        for path in current.get('paths', set()):
+            overlapping_ids.update(old_by_path.get(path, ()))
+        overlaps = [old_by_id[oid] for oid in overlapping_ids if oid in old_by_id]
+        exact = old_by_key.get(current['key'], [])
+        # Una riga post-scan che contiene file da due o piu' vecchi album e' una fusione.
+        if len(overlaps) >= 2:
+            changes['merged'].append({'old': overlaps, 'new': current})
+            affected_ids.add(current['id'])
+            continue
+        candidates = exact or overlaps
+        old = max(candidates, key=lambda rec: len(rec.get('paths', set()) & current.get('paths', set()))) if candidates else None
+        if old is None:
+            changes['new'].append(current)
+            affected_ids.add(current['id'])
+        elif (old['paths'] != current['paths'] or old['track_count'] != current['track_count']
+              or old['id'] != current['id'] or old.get('name') != current.get('name')
+              or old.get('artist') != current.get('artist') or old.get('key') != current.get('key')):
+            # Tag repair can change album/artist labels without changing track paths or DB IDs.
+            # Treat display-name edits as changes too, so the requested post-scan report doesn't miss them.
+            changes['changed'].append({'old': old, 'new': current})
+            affected_ids.add(current['id'])
+    changes['affected'] = [after[aid] for aid in sorted(affected_ids) if aid in after]
+    return changes
+
+
+def _print_navidrome_album_diff(changes):
+    def label(rec):
+        return f"{rec.get('name') or '(album senza nome)'} — {rec.get('artist') or '(artista sconosciuto)'}"
+    print(f"=== nuovi album trovati ({len(changes['new'])}) ===", flush=True)
+    for rec in sorted(changes['new'], key=lambda x: (x['artist'].casefold(), x['name'].casefold())):
+        print(f"  - {label(rec)}", flush=True)
+    print(f"=== album cambiati ({len(changes['changed'])}) ===", flush=True)
+    for row in sorted(changes['changed'], key=lambda x: (x['new']['artist'].casefold(), x['new']['name'].casefold())):
+        print(f"  - {label(row['old'])} -> {label(row['new'])}", flush=True)
+    print(f"=== album accorpati / merged ({len(changes['merged'])}) ===", flush=True)
+    for row in sorted(changes['merged'], key=lambda x: (x['new']['artist'].casefold(), x['new']['name'].casefold())):
+        old_text = ' + '.join(label(old) for old in sorted(row['old'], key=lambda x: (x['artist'].casefold(), x['name'].casefold())))
+        print(f"  - {old_text} -> {label(row['new'])}", flush=True)
+    if not (changes['new'] or changes['changed'] or changes['merged']):
+        print('  (nessun nuovo album, cambiamento o accorpamento rilevato)', flush=True)
+
+
+def _db_path_to_host(db_path, base):
+    """Converte un path Navidrome in path host, rispettando --library-root se fornito."""
+    raw = str(db_path or '').replace('\\', '/')
+    if not raw:
+        return None
+    p = Path(raw)
+    try:
+        if p.is_absolute() and p.is_file():
+            return p.resolve()
+    except OSError:
+        pass
+    if ND_MUSIC_ROOT and raw.startswith(ND_MUSIC_ROOT.rstrip('/') + '/'):
+        candidate = Path(base) / raw[len(ND_MUSIC_ROOT.rstrip('/')) + 1:]
+        if candidate.is_file():
+            return candidate.resolve()
+    if not p.is_absolute():
+        candidate = Path(base) / p
+        if candidate.is_file():
+            return candidate.resolve()
+    parts = p.parts[1:] if p.is_absolute() else p.parts
+    for i in range(len(parts)):
+        candidate = Path(base).joinpath(*parts[i:])
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _affected_album_paths(changes, base):
+    """Risolvi i path degli album post-scan in sole cartelle/file effettivamente modificati."""
+    dirs = set()
+    for rec in changes.get('affected', []):
+        for db_path in rec.get('paths', set()):
+            path = _db_path_to_host(db_path, base)
+            if path:
+                dirs.add(_album_root_for_file(Path(base), path).resolve())
+    files = set()
+    for folder in dirs:
+        files.update(f.resolve() for f in _audio_files(folder))
+    return sorted(dirs), sorted(files)
 
 
 # ===================== fase: star Spotify-liked music =====================
@@ -7614,15 +8849,24 @@ def run_star_liked(users=None):
     Limite: Exportify esporta playlist, non la raccolta autonoma di artisti seguiti su Spotify;
     gli artisti seguiti che non compaiono in questi brani non sono disponibili in questa fase.
     Serve ND_PASS_<UTENTE> (per ND_USER basta ND_PASS)."""
+    errors = 0
+    skipped = 0
     for u in (users if users is not None else (_db_users() or [SUBSONIC_USER])):
         pw, key = _user_password(u)
         if pw is None:
-            print(f"[{u}] star_liked: nessuna password (imposta {key}), saltato")
+            skipped += 1
+            print(f"[{u}] star_liked: nessuna password (imposta {key}), saltato", file=sys.stderr)
             continue
         try:
             _star_liked_for(u, pw)
         except Exception as e:
+            errors += 1
             print(f"[{u}] [ERRORE] star_liked: {type(e).__name__}: {e}", file=sys.stderr)
+    if errors:
+        print(f'star_liked: {errors} utenti con errore API, {skipped} saltati per password assente',
+              file=sys.stderr)
+        return False
+    return True
 
 
 # ===================== fase: fix playlist owners =====================
@@ -7698,13 +8942,16 @@ def run_fix_owners(default_owner='', dry_run=False, users=None):
         rows = cur.execute("SELECT id, owner_id, path FROM playlist "
                            "WHERE path IS NOT NULL AND path != ''").fetchall()
         changes = []
-        for pid, oid, path in rows:
+        progress = _ProgressBar('fix_playlist_owners', len(rows), 'playlist')
+        for row_index, (pid, oid, path) in enumerate(rows, 1):
+            progress.update(row_index)
             tgt = _owner_for_playlist_path(path, users_lower, default_name)
             if tgt is None or (wanted is not None and tgt.lower() not in wanted):
                 continue
             tid = ids[tgt.lower()][0]
             if oid != tid:
                 changes.append((tid, pid, tgt))
+        progress.close(complete=True)
         by = Counter(t for _, _, t in changes)
         detail = ', '.join(f'{n} -> {u}' for u, n in sorted(by.items())) or 'nessuna'
         if dry_run:
@@ -7969,8 +9216,11 @@ def run_dedupe_playlists(apply=False, users=None):
             if r[1] is not None:
                 groups.setdefault((r[2], r[1]), []).append(r)
         doomed, ngroups = [], 0
-        for (_, name), grp in sorted(groups.items(),
-                                     key=lambda kv: (str(kv[1][0][3]).lower(), kv[0][1].lower())):
+        ordered_groups = sorted(groups.items(),
+                                key=lambda kv: (str(kv[1][0][3]).lower(), kv[0][1].lower()))
+        progress = _ProgressBar('dedupe_playlists', len(ordered_groups), 'gruppi')
+        for group_index, ((_, name), grp) in enumerate(ordered_groups, 1):
+            progress.update(group_index)
             if len(grp) < 2:
                 continue
             uname = grp[0][3]
@@ -7983,13 +9233,17 @@ def run_dedupe_playlists(apply=False, users=None):
 
             def desc(r):
                 return f"id={r[0]} agg. {r[4] or '?'}, {r[7] if r[7] is not None else '?'} brani"
+            progress.clear()
             print(f"  [{uname}] {name!r}: {len(grp)} copie -> tengo {desc(keep)}")
             for r in drop:
+                progress.clear()
                 print(f"      elimino {desc(r)}")
             diff = [r for r in drop if r[6] and r[6] != keep[6]]
             if diff:
+                progress.clear()
                 print(f"      nota: percorsi m3u diversi (tenuto: {keep[6] or '-'}; eliminato: "
                       f"{diff[0][6]}) - se quell'm3u e' ancora su disco, Navidrome lo reimportera'")
+        progress.close(complete=True)
         if not doomed:
             print('  [i] nessuna playlist duplicata')
             return
@@ -8158,7 +9412,9 @@ def run_fix_collab_artists(apply=False, album=None, artist=None):
             cand.append((aid, name, aa, paths))
     print(f"{tg}album con album_artist sospetto (un valore ripete un componente di un altro): {len(cand)}")
     fixed_albums = fixed_files = skipped_fmt = errors = 0
-    for aid, name, aa, paths in cand:
+    progress = _ProgressBar('fix_collab_artists', len(cand), 'album')
+    for album_index, (aid, name, aa, paths) in enumerate(cand, 1):
+        progress.update(album_index)
         files = [(p, _db_to_host(p)) for p in paths]
         missing_on_disk = [p for p, h in files if h is None]
         flacs = [h for p, h in files if h is not None and h.suffix.lower() == '.flac']
@@ -8170,21 +9426,27 @@ def run_fix_collab_artists(apply=False, album=None, artist=None):
                 per_file[f] = _flac_tag_values(f, ['ALBUMARTIST', 'ALBUMARTISTS'])
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f"  [ERRORE] {f.name}: {type(e).__name__}: {e}", file=sys.stderr)
         values = _collab_values([v for t in per_file.values() for v in t['ALBUMARTIST']])
         target = _collab_target(values)
+        progress.clear()
         print(f"  '{name}'  (Navidrome: {aa})")
         if missing_on_disk:
+            progress.clear()
             print(f"      [!] {len(missing_on_disk)} file del DB non trovati sul disco "
                   f"(imposta ND_MUSIC_ROOT se il prefisso del container non viene riconosciuto), "
                   f"es. {missing_on_disk[0]}")
         if others:
+            progress.clear()
             print(f"      [!] {len(others)} file non FLAC (non modificati): "
                   f"{', '.join(sorted({h.suffix.lower() for h in others}))}")
         if not per_file:
+            progress.clear()
             print("      nessun FLAC leggibile: niente da fare")
             continue
         if target is None:
+            progress.clear()
             print(f"      i tag dei FLAC sono gia' a posto (ALBUMARTIST: {values}): il DB e' "
                   f"indietro, basta uno scan di Navidrome")
             continue
@@ -8194,7 +9456,9 @@ def run_fix_collab_artists(apply=False, album=None, artist=None):
                 todo.append(f)
         now = Counter(tuple(t['ALBUMARTIST']) for t in per_file.values())
         for combo, n in now.most_common():
+            progress.clear()
             print(f"      ALBUMARTIST ora ({n} file): {list(combo)}")
+        progress.clear()
         print(f"      -> {target}  ({len(todo)}/{len(per_file)} file da riscrivere)")
         if not apply:
             continue
@@ -8208,9 +9472,11 @@ def run_fix_collab_artists(apply=False, album=None, artist=None):
                 ok += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f"      [ERRORE] {f.name}: {type(e).__name__}: {e}", file=sys.stderr)
         fixed_files += ok
         fixed_albums += 1 if ok else 0
+    progress.close(complete=True)
     if apply:
         print(f"[i] riscritti {fixed_files} FLAC in {fixed_albums} album"
               + (f"; {skipped_fmt} file non FLAC lasciati com'erano" if skipped_fmt else '')
@@ -8361,11 +9627,16 @@ def _mb_missing(local_titles, mb_tracks):
     return missing
 
 
-def run_check_albums(album=None, artist=None, search=True):
-    """Confronta ogni album del DB con MusicBrainz e scrive logs/album_incompleti_<data>.txt."""
+def run_check_albums(album=None, artist=None, search=True, mbid_only=False,
+                     append_missing_report=True):
+    """Confronta gli album con MusicBrainz e integra il report completo in mancanti_<data>.txt.
+
+    mbid_only limita il controllo alle release che hanno MUSICBRAINZ_ALBUMID nel DB.
+    Il parametro append_missing_report resta per compatibilita' interna; il report e' sempre consolidato.
+    """
     if not NAVIDROME_DB.exists():
-        print(f'[ERRORE] DB non trovato: {NAVIDROME_DB}')
-        return
+        print(f'[ERRORE] DB non trovato: {NAVIDROME_DB}', file=sys.stderr)
+        return False
     with _nd_db(write=False) as con:
         acols = _nd_table_cols(con, 'album')
         mcols = _nd_table_cols(con, 'media_file')
@@ -8376,7 +9647,9 @@ def run_check_albums(album=None, artist=None, search=True):
         local = {}
         for aid, title in con.execute(f"SELECT album_id, title FROM media_file{mmiss}"):
             local.setdefault(aid, []).append(title or '')
-    albums = [a for a in albums if _album_filter(a[1], a[2], album, artist) and local.get(a[0])]
+    albums = [a for a in albums
+              if _album_filter(a[1], a[2], album, artist) and local.get(a[0])
+              and (not mbid_only or str(a[3] or '').strip())]
     cache = _mb_load_cache()
     res = []                      # (artista, album, locali, mb_totale, [mancanti], come)
     notfound, errors = [], 0
@@ -8386,8 +9659,10 @@ def run_check_albums(album=None, artist=None, search=True):
     last_save = _MB_CALLS[0]
     print(f"[i] check-albums: {len(albums)} album da controllare (1 richiesta/s a MusicBrainz, cache: "
           f"{len(cache['release'])} release)", file=sys.stderr)
+    progress = _ProgressBar('check-albums MusicBrainz', len(albums), 'album')
     try:
         for i, (aid, name, aa, mbid) in enumerate(albums, 1):
+            progress.update(i)
             titles = local[aid]
             how = 'MBID'
             try:
@@ -8401,6 +9676,7 @@ def run_check_albums(album=None, artist=None, search=True):
             except Exception as e:
                 errors += 1
                 consec_err += 1
+                progress.clear()
                 print(f"  [warn] {aa} - {name}: {type(e).__name__}: {e}", file=sys.stderr)
                 if consec_err >= 3:
                     print("[ERRORE] MusicBrainz non risponde: interrompo il controllo (la cache e' "
@@ -8419,17 +9695,15 @@ def run_check_albums(album=None, artist=None, search=True):
             if _MB_CALLS[0] - last_save >= 25:
                 _mb_save_cache(cache)
                 last_save = _MB_CALLS[0]
-                print(f"[i] check-albums {i}/{len(albums)} (richieste MusicBrainz: {_MB_CALLS[0] - calls0})",
-                      file=sys.stderr)
     finally:
+        progress.close(complete=(i >= len(albums) if albums else True))
         _mb_save_cache(cache)
     inc = sorted([r for r in res if r[4]], key=lambda r: (-len(r[4]), -len(r[4]) / max(r[3], 1), r[0].lower(), r[1].lower()))
     tot_missing = sum(len(r[4]) for r in inc)
     tot_mb = sum(r[3] for r in res)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
-    out = LOG_DIR / f'album_incompleti_{now:%Y-%m-%d}.txt'
-    L = [f'# album incompleti secondo MusicBrainz - esecuzione {now:%Y-%m-%d %H:%M}',
+    L = [f'# report MusicBrainz - esecuzione {now:%Y-%m-%d %H:%M}',
          f"# ALBUM: {len(albums)} controllati | confrontati {len(res)} (release esatta da MBID: {n_mbid}, "
          f"trovata per nome: {n_name}) | non trovati su MusicBrainz: {len(notfound)}"
          + (f" | errori di rete: {errors}" if errors else ''),
@@ -8455,11 +9729,40 @@ def run_check_albums(album=None, artist=None, search=True):
     if notfound:
         L.append(f"=== NON TROVATI SU MUSICBRAINZ ({len(notfound)}) ===")
         L += [f"{a} - {b}" for a, b in sorted(notfound, key=lambda x: (x[0].lower(), x[1].lower()))]
-    out.write_text('\n'.join(L) + '\n', encoding='utf-8')
-    print(f"[i] album incompleti: {_ratio(len(inc), len(res))} | tracce mancanti "
-          f"{_ratio(tot_missing, tot_mb)} | non trovati: {len(notfound)} -> {out}")
+
+    # Un solo report canonico: sostituisce l'eventuale precedente se rieseguito lo stesso giorno,
+    # e non crea album_incompleti_<data>.txt separati. La parte playlist in cima resta intatta.
+    missing_path = LOG_DIR / f'mancanti_{now:%Y-%m-%d}.txt'
+    marker_start = '===== INIZIO REPORT COMPLETO MUSICBRAINZ ====='
+    marker_end = '===== FINE REPORT COMPLETO MUSICBRAINZ ====='
+    try:
+        existing = missing_path.read_text(encoding='utf-8', errors='replace') if missing_path.exists() else ''
+    except OSError:
+        existing = ''
+    old_start = existing.find(marker_start)
+    if old_start >= 0:
+        old_end = existing.find(marker_end, old_start)
+        if old_end >= 0:
+            existing = (existing[:old_start] + existing[old_end + len(marker_end):]).rstrip()
+        else:
+            # Blocco vecchio incompleto: elimina il suffisso troncato prima di aggiungere
+            # il report nuovo, invece di concatenare due versioni parziali.
+            existing = existing[:old_start].rstrip()
+    else:
+        # Migrazione senza duplicati del vecchio suffisso sintetico prodotto da v0.68-v0.70.
+        legacy_start = existing.find('=== TRACCE MANCANTI SECONDO MUSICBRAINZ ')
+        if legacy_start >= 0:
+            existing = existing[:legacy_start].rstrip()
+    block = '\n'.join([marker_start, *L, marker_end])
+    combined = (existing.rstrip() + '\n\n' if existing.strip() else
+                f'# Report MusicBrainz creato dal controllo album\n\n') + block + '\n'
+    missing_path.write_text(combined, encoding='utf-8')
+    print(f"[i] album MusicBrainz: {_ratio(len(inc), len(res))} incompleti | "
+          f"tracce mancanti {_ratio(tot_missing, tot_mb)} | non trovati: {len(notfound)} "
+          f"-> report completo integrato in {missing_path}")
     for aa, name, nloc, ntot, miss, how in inc[:10]:
         print(f"    {aa} - {name}: mancano {_ratio(len(miss), ntot)} [{how}]")
+    return errors == 0
 
 
 # ===================== fase: clean empty albums =====================
@@ -8477,8 +9780,12 @@ def run_clean_empty(dry_run=False, base=None):
     contains_audio = {}
     # In os.walk bottom-up, ogni cartella eredita il risultato dei soli figli diretti.
     # Evita chiamare d.rglob('*') per OGNI cartella, che moltiplicava il costo su librerie
-    # con tanti livelli artista/album/disco.
-    for root, dirs, files in os.walk(base, topdown=False):
+    # con tanti livelli artista/album/disco. Materializzare le entry permette una % attendibile
+    # senza fare una seconda visita dell'intero filesystem.
+    walk_rows = list(os.walk(base, topdown=False))
+    progress = _ProgressBar('clean_empty', len(walk_rows), 'cartelle')
+    for walk_index, (root, dirs, files) in enumerate(walk_rows, 1):
+        progress.update(walk_index)
         root_key = os.path.normpath(root)
         has_audio = any(
             os.path.splitext(name)[1].lower() in INDEX_EXT and
@@ -8514,15 +9821,21 @@ def run_clean_empty(dry_run=False, base=None):
         else:
             age = now - mk.stat().st_mtime
         if age > CLEAN_MAX_AGE:
+            progress.clear()
             print(f"{'[dry] ' if dry_run else ''}RIMUOVO {rel} (vuota da {int(age // 3600)}h)")
             if not dry_run:
                 shutil.rmtree(d, ignore_errors=True)
             removed += 1
         else:
             waiting += 1
+    progress.close(complete=True)
     conflicts = 0
-    for cf in base.rglob('*.sync-conflict-*'):
+    conflict_files = [cf for cf in base.rglob('*.sync-conflict-*') if cf.is_file()]
+    conflict_progress = _ProgressBar('clean_empty conflitti', len(conflict_files), 'file')
+    for conflict_index, cf in enumerate(conflict_files, 1):
+        conflict_progress.update(conflict_index)
         if cf.is_file():
+            conflict_progress.clear()
             print(f"{'[dry] ' if dry_run else ''}RIMUOVO conflitto syncthing: {cf.name}")
             if not dry_run:
                 try:
@@ -8530,6 +9843,7 @@ def run_clean_empty(dry_run=False, base=None):
                     conflicts += 1
                 except Exception:
                     pass
+    conflict_progress.close(complete=True)
     print(f'marcate: {marked} | in attesa (<24h): {waiting} | rimosse: {removed} '
           f'| sbloccate: {unmarked} | conflitti syncthing: {conflicts}')
 
@@ -8923,7 +10237,9 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
             print(f"[ERRORE] artista '{artist}' non trovato in {base}")
             return
 
-    for art in artists:
+    progress = _ProgressBar('dedupe_releases', len(artists), 'artisti')
+    for artist_index, art in enumerate(artists, 1):
+        progress.update(artist_index)
         groups = {}
         for album in sorted(art.iterdir()):
             if not album.is_dir():
@@ -8942,10 +10258,13 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
             releases.sort(key=lambda r: (folder_year(r[0], r[1]), r[0].name))
             canonical = releases[0]
             others = releases[1:]
+            progress.clear()
             print(f"\n=== {art.name} / [{b}] ===")
+            progress.clear()
             print(f"    CANONICA : {canonical[0].name} "
                   f"({len(canonical[1])} tracce, anno {folder_year(canonical[0], canonical[1])})")
             for al, fl in others:
+                progress.clear()
                 print(f"    duplicata: {al.name} ({len(fl)} tracce, anno {folder_year(al, fl)})")
 
             c_strict, c_norm, c_meta = {}, {}, {}
@@ -8958,6 +10277,7 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
             canon_files = list(canonical[1])
             next_num = _max_tracknum(canon_files)
             fp_cache = {}
+            progress.clear()
             prefetch_probe([f for _, fl in releases for f in fl], 'dedupe')
 
             for al, fl in others:
@@ -8981,6 +10301,7 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
                                 break
                     if match:
                         n_dup += 1
+                        progress.clear()
                         print(f"    {'[dry] ' if not apply else ''}DUPE  {al.name}/"
                               f"{f.name} == {match.parent.name}/{match.name} ({why})")
                         if apply:
@@ -8988,12 +10309,14 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
                                 _move_to_trash(f, stamp, hard_delete, base)
                             except Exception as e:
                                 errors += 1
+                                progress.clear()
                                 print(f"    ERRORE spostamento {f}: {e}", file=sys.stderr)
                     else:
                         n_bonus += 1
                         next_num += 1
                         clean_name = re.sub(r'^\d{1,3}\s*[-._ ]\s*', '', f.name)
                         newname = f"{next_num:02d} - {clean_name}"
+                        progress.clear()
                         print(f"    {'[dry] ' if not apply else ''}BONUS {al.name}/"
                               f"{f.name} -> {canonical[0].name}/{newname}")
                         if apply:
@@ -9006,14 +10329,18 @@ def run_dedupe_releases(apply=False, hard_delete=False, artist=None, base=None,
                                 try:
                                     _set_tracknumber(dest, next_num)
                                 except Exception as e:
+                                    progress.clear()
                                     print(f"    [warn] tracknumber non scritto "
                                           f"su {dest}: {e}", file=sys.stderr)
                                 canon_files.append(dest)
                                 c_meta[dest] = probe_dur(dest)
                             except Exception as e:
                                 errors += 1
+                                progress.clear()
                                 print(f"    ERRORE spostamento bonus {f}: {e}",
                                       file=sys.stderr)
+
+    progress.close(complete=True)
 
     print(f"\ngruppi release: {n_groups} | duplicati: {n_dup} | "
           f"bonus spostate: {n_bonus} | errori: {errors}")
@@ -9044,19 +10371,32 @@ def _album_candidate_pairs(albums):
     return sorted(candidate_pairs)
 
 
-def run_diagnose_album_splits(album_filter=None, artist_filter=None):
-    """Legge soltanto il DB Navidrome e segnala duplicati/split album e artisti CJK.
+def _cleanup_standalone_album_reports():
+    """Rimuove i sidecar diagnostici delle vecchie versioni dopo aver consolidato i report in e2m."""
+    removed = 0
+    for pattern in ('album_db_diagnostics_*.txt', 'album_cross_folder_review_*.txt'):
+        for report_path in LOG_DIR.glob(pattern):
+            try:
+                report_path.unlink(missing_ok=True)
+                removed += 1
+            except OSError as e:
+                print(f'[warn] impossibile eliminare il vecchio report autonomo {report_path}: {e}',
+                      file=sys.stderr)
+    if removed:
+        print(f'[i] rimossi {removed} vecchi report album autonomi; conservarli solo nei log e2m')
+    return removed
 
-    Scrive un report con id DB, titoli, artisti, MBID, conteggio tracce e percorsi d'esempio.
+
+def run_diagnose_album_splits(album_filter=None, artist_filter=None):
+    """Legge soltanto il DB Navidrome e incorpora in e2m un rapporto su album/artisti divisi.
+
+    Il rapporto include ID, titoli, artisti, MBID, conteggi tracce e percorsi di esempio.
     Serve a verificare sul server i casi reali prima di applicare una riparazione dei tag.
     """
     if not NAVIDROME_DB.exists():
         print(f'[ERRORE] DB Navidrome non trovato: {NAVIDROME_DB}. '
               'Esegui questa diagnostica sul server che ospita Navidrome.')
         return False
-    stamp = time.strftime('%Y%m%d_%H%M%S')
-    report_path = SCRIPT_DIR / 'logs' / f'album_db_diagnostics_{stamp}.txt'
-    report_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f'Navidrome album/artist diagnostic — {time.strftime("%Y-%m-%d %H:%M:%S")}',
              f'Database: {NAVIDROME_DB}', '']
     with _nd_db(write=False) as con:
@@ -9123,7 +10463,10 @@ def run_diagnose_album_splits(album_filter=None, artist_filter=None):
         # Only compare albums sharing at least one artist identity. Fuzzy candidates are
         # still review-only, and the helper returns deterministic pair order for stable reports.
         fuzzy = []
-        for i, j in _album_candidate_pairs(albums):
+        candidate_pairs = _album_candidate_pairs(albums)
+        progress = _ProgressBar('diagnosi split album', len(candidate_pairs), 'coppie')
+        for pair_index, (i, j) in enumerate(candidate_pairs, 1):
+            progress.update(pair_index)
             a, b = albums[i], albums[j]
             sim, label = _album_title_similarity(a['keys'], b['keys'])
             edition_a = _album_explicit_edition_markers([a['name']])
@@ -9141,6 +10484,7 @@ def run_diagnose_album_splits(album_filter=None, artist_filter=None):
                 pair_reason[(i,j)] = ('SAME IDENTITY KEY', sim, label)
             elif sim >= 0.88:
                 fuzzy.append((i,j,sim,label))
+        progress.close(complete=True)
         groups = {}
         for i,a in enumerate(albums): groups.setdefault(find(i), []).append(i)
         duplicate_groups = [g for g in groups.values() if len(g) > 1]
@@ -9229,16 +10573,13 @@ def run_diagnose_album_splits(album_filter=None, artist_filter=None):
             lines.append(f'  {raw_name!r} -> {parts!r}; DB matches: {matches!r}')
         lines.append('\nNOTE: this report is read-only. Exact groups are strong candidates; fuzzy pairs are never auto-merged by diagnosis.')
 
-    report_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    print('\n'.join(lines[:40]))
-    if len(lines) > 40:
-        print(f'... report completo: {report_path}')
-    else:
-        print(f'\nReport: {report_path}')
+    _embed_report_in_main_log('album_db_diagnostics', lines)
+    _cleanup_standalone_album_reports()
+    print('[i] diagnostica album incorporata direttamente nel log principale e2m (nessun file separato)')
     return True
 
 
-def run_repair_albumversion_pids(dry_run=False, base=None):
+def run_repair_albumversion_pids(dry_run=False, base=None, files_only=None):
     """Make ALBUMVERSION consistent per logical album root for Navidrome Album PIDs.
 
     If all tagged tracks agree, propagate the single value to untagged tracks. If multiple
@@ -9247,16 +10588,21 @@ def run_repair_albumversion_pids(dry_run=False, base=None):
     folders are stopped by the cross-folder review gate above.
     """
     base = Path(base) if base else LIBRARY_ROOT
+    wanted_files = {Path(f).resolve() for f in files_only} if files_only is not None else None
     roots = {}
     for rel in _walk_audio(base, AUDIO_EXT):
         if rel[-1].endswith(('.backup', '.meta-backup')) or '.tmp.' in rel[-1]:
             continue
         f = base.joinpath(*rel)
+        if wanted_files is not None and f.resolve() not in wanted_files:
+            continue
         roots.setdefault(_album_root_for_file(base, f), []).append(f)
     prefetch_probe((f for fs in roots.values() for f in fs), 'albumversion_pid_repair')
     candidates = changed_files = errors = reviewed = 0
     tg = '[dry] ' if dry_run else ''
-    for root, files in roots.items():
+    progress = _ProgressBar('albumversion_pid_repair', len(roots), 'album')
+    for root_index, (root, files) in enumerate(roots.items(), 1):
+        progress.update(root_index)
         tags = [probe(f) for f in files]
         values = {str(t.get('albumversion') or t.get('album_version') or '').strip()
                   for t in tags if str(t.get('albumversion') or t.get('album_version') or '').strip()}
@@ -9279,6 +10625,7 @@ def run_repair_albumversion_pids(dry_run=False, base=None):
             action = f'ALBUMVERSION discordanti {sorted(values)!r}; rimuovo il campo dall’intero album logico'
         else:
             action = f'ALBUMVERSION unico {target!r}; propago ai tag mancanti'
+        progress.clear()
         print(f'{tg}ALBUM-PID {root}: {action}; {len(changes)} file')
         if dry_run:
             changed_files += len(changes)
@@ -9292,7 +10639,9 @@ def run_repair_albumversion_pids(dry_run=False, base=None):
                 changed_files += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f'[ERRORE] ALBUM-PID {f}: {type(e).__name__}: {e}', file=sys.stderr)
+    progress.close(complete=True)
     print(f'album PID version: {candidates} album logici, {changed_files} file '
           f'{"da correggere" if dry_run else "corretti"}, {reviewed} conflitti risolti, {errors} errori')
     return {'albums': candidates, 'files': changed_files, 'reviewed': reviewed, 'errors': errors}
@@ -9306,21 +10655,38 @@ def _is_unknown_artist(value):
                    'n/a', 'na', 'none', 'null', 'unknown performer'}
 
 
+def _has_unknown_artist_component(value):
+    raw = str(value or '').strip()
+    if _is_unknown_artist(raw):
+        return True
+    return any(_is_unknown_artist(part.strip())
+               for part in re.split(r'\s*[;,]\s*', raw) if part.strip())
+
+
 _GENERIC_ARTIST_NAMES = {
     'various artists', 'various', 'va', 'soundtrack', 'unknown', 'unknown artist',
     'unknownartist', 'n a', 'na', 'none', 'null',
 }
 
 
-def _artist_parts_for_inference(value):
-    """Componenti di un tag artista semplice; non interpreta '&' o virgole."""
+def _artist_parts_for_inference(value, known_names=None):
+    """Componenti artista: ';' e' esplicito, ',' solo se confermata dal catalogo."""
     raw = str(value or '').strip()
     if not raw:
         return []
-    return [x.strip() for x in re.split(r'\s*;\s*', raw) if x.strip()]
+    known_names = known_names or {}
+    out = []
+    for chunk in re.split(r'\s*;\s*', raw):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        split = (_split_artist_tag_if_known(chunk, known_names)
+                 if ',' in chunk and (known_names or _artist_split_override(chunk)) else None)
+        out.extend(split or [chunk])
+    return out
 
 
-def _infer_album_artist_for_unknown_tracks(tags):
+def _infer_album_artist_for_unknown_tracks(tags, known_names=None):
     """Infer an artist conservatively, without guessing on compilations.
 
     A concrete, consistent ALBUMARTIST takes priority. If ALBUMARTIST is present
@@ -9334,20 +10700,31 @@ def _infer_album_artist_for_unknown_tracks(tags):
     aa_fields = ('albumartist', 'album_artist', 'albumartists')
     for tag in tags:
         values = [str(tag.get(key) or '').strip() for key in aa_fields]
-        values = [value for value in values if value and not _is_unknown_artist(value)]
+        # Remove placeholder components, not the entire mixed string: e.g. 'The Cure; Unknown Artist'
+        # still provides a reliable album-artist identity of The Cure.
+        cleaned_values = []
+        for value in values:
+            if not value:
+                continue
+            parts = [part for part in _artist_parts_for_inference(value, known_names)
+                     if part and not _is_unknown_artist(part)]
+            if parts:
+                cleaned_values.append('; '.join(parts))
+        values = list(dict.fromkeys(cleaned_values))
         if not values:
             continue
         aa_total += 1
         # Multiple aliases on one file should describe the same artist list. If they
         # disagree, don't hide the conflict by accepting whichever field comes first.
         identities = {
-            tuple(sorted(norm(part) for part in _artist_parts_for_inference(value) if norm(part)))
+            tuple(sorted(norm(part) for part in _artist_parts_for_inference(value, known_names)
+                         if norm(part) and not _is_unknown_artist(part)))
             for value in values
         }
         if len(identities) > 1:
             aa_alias_conflict = True
             continue
-        parts = [p for p in _artist_parts_for_inference(values[0])
+        parts = [p for p in _artist_parts_for_inference(values[0], known_names)
                  if norm(p) not in _GENERIC_ARTIST_NAMES]
         if parts:
             aa_counts['; '.join(parts)] += 1
@@ -9369,7 +10746,7 @@ def _infer_album_artist_for_unknown_tracks(tags):
         for raw in values:
             if not raw or _is_unknown_artist(raw):
                 continue
-            for part in _artist_parts_for_inference(raw):
+            for part in _artist_parts_for_inference(raw, known_names):
                 key = norm(part)
                 if key and key not in _GENERIC_ARTIST_NAMES:
                     track_artists.setdefault(key, part)
@@ -9378,28 +10755,144 @@ def _infer_album_artist_for_unknown_tracks(tags):
     return []
 
 
-def run_fix_unknown_artists(dry_run=False, base=None):
-    """Rimpiazza solo le tracce Unknown Artist quando l'album indica chiaramente gli artisti."""
+def _infer_track_artist_from_filename(path, known_names=None):
+    """Inferenza forte per file nominati 'Titolo - Artista': accetta solo artisti noti al DB."""
+    known_names = known_names or {}
+    path = Path(path)
+    chunks = [chunk.strip() for chunk in path.stem.split(' - ') if chunk.strip()]
+    # Il suffisso e' piu' affidabile del prefisso (che e' normalmente il titolo del brano).
+    for candidate in reversed(chunks[1:]):
+        key = norm(candidate)
+        if key in known_names and key not in _GENERIC_ARTIST_NAMES:
+            return [known_names[key]]
+        parts = _artist_parts_for_inference(candidate, known_names)
+        resolved = []
+        for part in parts:
+            pkey = norm(part)
+            if pkey in known_names and pkey not in _GENERIC_ARTIST_NAMES:
+                value = known_names[pkey]
+                if value not in resolved:
+                    resolved.append(value)
+        if resolved:
+            return resolved
+    # Ultimo fallback: artista della cartella SOLO se il filename lo conferma nel suffisso.
+    folder_key = norm(path.parent.parent.name)
+    if folder_key in known_names and any(norm(chunk) == folder_key for chunk in chunks[1:]):
+        return [known_names[folder_key]]
+    return []
+
+
+def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
+    """Ripara tracce Unknown Artist usando tag album, cartella e artisti noti delle altre tracce."""
     base = Path(base) if base else LIBRARY_ROOT
     dirs = list(unify_album_dirs(base))
+    if album_dirs_only is not None:
+        wanted_dirs = {Path(d).resolve() for d in album_dirs_only}
+        dirs = [(album, files) for album, files in dirs if album.resolve() in wanted_dirs]
+    known_names = _navidrome_artist_name_map()
     prefetch_probe((f for _album, files in dirs for f in files), 'fix_unknown_artists')
     seen = fixed_files = errors = ambiguous = 0
     tg = '[dry] ' if dry_run else ''
-    for album, files in dirs:
+    progress = _ProgressBar('fix_unknown_artists', len(dirs), 'album')
+    for album_index, (album, files) in enumerate(dirs, 1):
+        progress.update(album_index)
         tags = [probe(f) for f in files]
-        unknown_idxs = [i for i, tag in enumerate(tags) if _is_unknown_artist(tag.get('artist', ''))]
-        if not unknown_idxs:
+        unknown_idxs = [i for i, tag in enumerate(tags) if _has_unknown_artist_component(tag.get('artist', ''))]
+        # Navidrome può creare un artista/album separato anche quando ARTIST è valido ma
+        # ALBUMARTIST/ALBUM_ARTIST contiene esplicitamente [Unknown Artist]. Ripara entrambi.
+        unknown_albumartist_idxs = []
+        for i, tag in enumerate(tags):
+            albumartist_values = [str(tag.get(k) or '').strip()
+                                  for k in ('albumartist', 'album_artist', 'albumartists')]
+            if any(v and _has_unknown_artist_component(v)
+                   for v in albumartist_values):
+                unknown_albumartist_idxs.append(i)
+        if not unknown_idxs and not unknown_albumartist_idxs:
             continue
-        seen += len(unknown_idxs)
-        target = _infer_album_artist_for_unknown_tracks(tags)
-        if not target:
-            ambiguous += len(unknown_idxs)
+        seen += len(unknown_idxs) + len(unknown_albumartist_idxs)
+        target = _infer_album_artist_for_unknown_tracks(tags, known_names)
+        # Un campo plural ARTISTS attendibile e' una sorgente specifica della traccia, anche se
+        # un'altra traccia dello stesso album appartiene a un compositore diverso.
+        per_track_targets = {}
+        for idx in unknown_idxs:
+            plural = str(tags[idx].get('artists') or '').strip()
+            if plural and not _is_unknown_artist(plural):
+                parts = _artist_parts_for_inference(plural, known_names)
+                known_parts = [known_names.get(norm(part), part) for part in parts
+                               if norm(part) not in _GENERIC_ARTIST_NAMES and not _is_unknown_artist(part)]
+                if known_parts:
+                    per_track_targets[idx] = list(dict.fromkeys(known_parts))
+
+        aa_values = [str(t.get(k) or '').strip() for t in tags
+                     for k in ('albumartist', 'album_artist', 'albumartists') if str(t.get(k) or '').strip()]
+        aa_parts = [part for value in aa_values for part in _artist_parts_for_inference(value, known_names)]
+        # "Unknown Artist" non significa compilation e non deve bloccare il fallback alla
+        # cartella; solo i marcatori espliciti di raccolta sono una barriera.
+        explicit_compilation = any(norm(part) in {'various artists', 'various', 'va', 'soundtrack'}
+                                   for part in aa_parts)
+        # Alias field incoerenti sono un segnale per non inferire dalla cartella o da una maggioranza.
+        aa_alias_conflict = False
+        for tag in tags:
+            alias_values = [str(tag.get(k) or '').strip() for k in ('albumartist', 'album_artist', 'albumartists')]
+            alias_values = [v for v in alias_values if v]
+            identities = set()
+            for value in alias_values:
+                parts = [part for part in _artist_parts_for_inference(value, known_names)
+                         if part and not _is_unknown_artist(part)]
+                if parts:
+                    identities.add(tuple(sorted(norm(part) for part in parts if norm(part))))
+            if len(identities) > 1:
+                aa_alias_conflict = True
+                break
+
+        if not target and not explicit_compilation and not aa_alias_conflict:
+            # La cartella artista e' una fonte forte se il metadato non dichiara una compilation.
+            folder_artist = str(album.parent.name or '').strip()
+            if (folder_artist and norm(folder_artist) not in _GENERIC_ARTIST_NAMES
+                    and not _is_unknown_artist(folder_artist)):
+                target = [folder_artist]
+
+        if not target and not explicit_compilation and not aa_alias_conflict:
+            # Fallback sulle tracce note dello stesso album. Basta una maggioranza chiara;
+            # per esempio una traccia senza ARTIST eredita l'artista che hanno le altre.
+            track_counts, track_labels = Counter(), {}
+            for tag in tags:
+                for key in ('artist', 'artists'):
+                    value = str(tag.get(key) or '').strip()
+                    if not value or _is_unknown_artist(value):
+                        continue
+                    for part in _artist_parts_for_inference(value, known_names):
+                        k = norm(part)
+                        if k and k not in _GENERIC_ARTIST_NAMES:
+                            track_counts[k] += 1
+                            track_labels.setdefault(k, part)
+            total_known = sum(track_counts.values())
+            if track_counts and max(track_counts.values()) / max(total_known, 1) >= 0.60:
+                winner = sorted(track_counts, key=lambda k: (-track_counts[k], k))[0]
+                target = [track_labels[winner]]
+
+        if target:
+            display = _canonicalize_artist_value('; '.join(target), known_names=known_names)
+            target_parts = [p.strip() for p in display.split(';') if p.strip()]
+            for idx in unknown_idxs:
+                per_track_targets.setdefault(idx, target_parts)
+        else:
+            for idx in unknown_idxs:
+                if idx not in per_track_targets:
+                    per_track_targets[idx] = _infer_track_artist_from_filename(files[idx], known_names)
+
+        repairable = {idx: parts for idx, parts in per_track_targets.items() if parts}
+        unresolved = [idx for idx in unknown_idxs if idx not in repairable]
+        if unresolved:
+            ambiguous += len(unresolved)
+            progress.clear()
             print(f'[review] UNKNOWN-ARTIST {album.parent.name}/{album.name}: '
-                  f'{len(unknown_idxs)} tracce senza artista ma album multi-artista/ambiguo; lasciate intatte')
-            continue
-        display = '; '.join(target)
-        for i in unknown_idxs:
+                  f'{len(unresolved)} tracce senza artista e senza sorgente affidabile per traccia; lasciate intatte')
+        for i, target_parts in repairable.items():
             f = files[i]
+            display = _canonicalize_artist_value('; '.join(target_parts), known_names=known_names)
+            target_parts = [p.strip() for p in display.split(';') if p.strip()]
+            progress.clear()
             print(f'{tg}UNKNOWN-ARTIST {album.parent.name}/{album.name}/{f.name}: '
                   f'{tags[i].get("artist", "")!r} -> {display!r}')
             if dry_run:
@@ -9407,15 +10900,53 @@ def run_fix_unknown_artists(dry_run=False, base=None):
                 continue
             try:
                 if f.suffix.lower() == '.flac':
-                    # ARTIST singolo per il display, ARTISTS multivalore per i link DB.
-                    _flac_set_multi(f, {'ARTIST': [display], 'ARTISTS': target})
+                    _flac_set_multi(f, {'ARTIST': [display], 'ARTISTS': target_parts})
                     invalidate_probe_cache([f])
                 else:
                     _rewrite_nonflac(f, {'artist': display})
                 fixed_files += 1
             except Exception as e:
                 errors += 1
+                progress.clear()
                 print(f'[ERRORE] UNKNOWN-ARTIST {f}: {type(e).__name__}: {e}', file=sys.stderr)
+
+        if unknown_albumartist_idxs:
+            albumartist_target = target
+            if not albumartist_target and not explicit_compilation and not aa_alias_conflict:
+                folder_name = str(album.parent.name or '').strip()
+                if folder_name and norm(folder_name) not in _GENERIC_ARTIST_NAMES and not _is_unknown_artist(folder_name):
+                    albumartist_target = [folder_name]
+            if albumartist_target:
+                display_albumartist = _canonicalize_artist_value(
+                    '; '.join(albumartist_target), known_names=known_names)
+                albumartist_parts = [p.strip() for p in display_albumartist.split(';') if p.strip()]
+                for idx in unknown_albumartist_idxs:
+                    f = files[idx]
+                    progress.clear()
+                    print(f'{tg}UNKNOWN-ALBUMARTIST {album.parent.name}/{album.name}/{f.name}: '
+                          f'-> {display_albumartist!r}')
+                    if dry_run:
+                        fixed_files += 1
+                        continue
+                    try:
+                        if f.suffix.lower() == '.flac':
+                            _flac_set_multi(f, {'ALBUMARTIST': [display_albumartist],
+                                                'ALBUMARTISTS': albumartist_parts})
+                            invalidate_probe_cache([f])
+                        else:
+                            aa_key = 'albumartist' if f.suffix.lower() in ('.ogg', '.opus') else 'album_artist'
+                            _rewrite_nonflac(f, {aa_key: display_albumartist})
+                        fixed_files += 1
+                    except Exception as e:
+                        errors += 1
+                        progress.clear()
+                        print(f'[ERRORE] UNKNOWN-ALBUMARTIST {f}: {type(e).__name__}: {e}', file=sys.stderr)
+            else:
+                ambiguous += len(unknown_albumartist_idxs)
+                progress.clear()
+                print(f'[review] UNKNOWN-ALBUMARTIST {album.parent.name}/{album.name}: '
+                      'nessuna sorgente affidabile per ALBUMARTIST; lasciato invariato')
+    progress.close(complete=True)
     print(f'unknown artist: {seen} tracce candidate, {fixed_files} '
           f'{"da correggere" if dry_run else "corrette"}, {ambiguous} da rivedere, {errors} errori')
     return {'candidates': seen, 'fixed': fixed_files, 'ambiguous': ambiguous, 'errors': errors}
@@ -9458,42 +10989,162 @@ def _artist_display_score(name):
     has_asian = _has_asian(name)
     gloss = re.search(r'[\(（]([^\)）]*[A-Za-z][^\)）]*)[\)）]', str(name or ''))
     titlecase = sum(c.isupper() for c in gloss.group(1)) if gloss else 0
-    return (int(bool(has_asian and gloss)), int(has_asian), titlecase, len(str(name or '')))
+    raw = str(name or '').strip()
+    return (int(bool(has_asian and gloss)), int(has_asian), titlecase,
+            int('_' not in raw), int('.' in raw and '_' not in raw), len(raw), raw.casefold())
 
 
-def _split_semicolon_if_known(value, known_names):
-    """Split solo se almeno un componente e' gia' presente nel catalogo artisti Navidrome."""
+def _split_artist_tag_if_known(value, known_names):
+    """Split artist collaborations even when Navidrome already indexed the joined tag.
+
+    Component-by-component known names take precedence over a previously-created joined
+    artist entity (e.g. ``Afro Medusa,West Way``). A genuine comma-containing artist name
+    (e.g. ``Tyler, The Creator``) remains whole unless the catalog confirms both components.
+    """
     raw = str(value or '').strip()
-    parts = [p.strip() for p in re.split(r'\s*;\s*', raw) if p.strip()]
-    if len(parts) < 2 or not any(norm(part) in known_names for part in parts):
+    if not raw:
         return None
+    known_names = known_names or {}
+    explicit = ';' in raw
+    # Known split overrides win even if the combined form already exists as a Navidrome artist.
+    override = _artist_split_override(raw) if not explicit else None
+    if override:
+        canonical = []
+        seen_override = set()
+        for part in override:
+            key = norm(part)
+            display = known_names.get(key, part.strip())
+            if key and key not in seen_override:
+                seen_override.add(key)
+                canonical.append(display)
+        return canonical if len(canonical) >= 2 else None
+    chunks = [x.strip() for x in raw.split(';')] if explicit else [raw]
+    out, recognized = [], 0
+
+    for chunk in chunks:
+        if not chunk:
+            continue
+        comma_parts = [x.strip() for x in re.split(r'\s*,\s*', chunk) if x.strip()]
+        if len(comma_parts) == 1:
+            key = norm(chunk)
+            if key in known_names:
+                out.append(known_names[key])
+                recognized += 1
+            else:
+                out.append(chunk)
+            continue
+
+        atom_keys = [norm(part) for part in comma_parts]
+        # The key difference from the previous implementation: even if the joined form is
+        # already in Navidrome, split when every comma-separated component is independently
+        # known. This repairs old joined entities without splitting comma-style artist names.
+        component_is_safe = all(
+            (key and key in known_names) or _is_unknown_artist(part)
+            for key, part in zip(atom_keys, comma_parts))
+        has_real_catalog_component = any(key in known_names for key in atom_keys)
+        if len(comma_parts) >= 2 and component_is_safe and has_real_catalog_component:
+            out.extend(known_names.get(key, part) for key, part in zip(atom_keys, comma_parts))
+            recognized += sum(1 for key, part in zip(atom_keys, comma_parts)
+                              if key in known_names or _is_unknown_artist(part))
+            continue
+
+        # If the whole string is a known artist but its components are not all known, retain
+        # it as one performer (protects "Tyler, The Creator" and similar names).
+        whole_key = norm(chunk)
+        if whole_key in known_names:
+            out.append(known_names[whole_key])
+            recognized += 1
+            continue
+
+        # Otherwise greedily reconstruct the longest known names, which allows multi-part
+        # names containing commas while still separating collaborations around them.
+        i = 0
+        while i < len(comma_parts):
+            hit = None
+            for j in range(len(comma_parts), i, -1):
+                candidate = ', '.join(comma_parts[i:j])
+                key = norm(candidate)
+                if key and key in known_names:
+                    hit = (known_names[key], j)
+                    break
+            if hit:
+                out.append(hit[0])
+                recognized += 1
+                i = hit[1]
+            else:
+                out.append(comma_parts[i])
+                i += 1
+
+    out = [part.strip() for part in out if part and part.strip()]
+    if len(out) < 2:
+        return None
+    if explicit:
+        if recognized < 1:
+            return None
+    elif recognized < 2:
+        return None
+
     result, seen = [], set()
-    for part in parts:
+    for part in out:
         key = norm(part)
-        canonical = known_names.get(key, part)
+        canonical = known_names.get(key, part.strip())
         if key and key not in seen:
             seen.add(key)
             result.append(canonical)
     return result if len(result) >= 2 else None
 
 
-def run_split_known_artist_tags(dry_run=False, base=None):
-    """Normalizza i separatori ';' solo se il DB conferma almeno un componente artista."""
+# Compatibilita' interna con il nome precedente.
+def _split_semicolon_if_known(value, known_names):
+    return _split_artist_tag_if_known(value, known_names)
+
+
+def run_split_known_artist_tags(dry_run=False, base=None, files_only=None):
+    """Normalizza ';' / ',' quando il catalogo conferma i componenti senza spezzare nomi propri."""
     base = Path(base) if base else LIBRARY_ROOT
     known = _navidrome_artist_name_map()
-    if not known:
-        print('[warn] split artisti con punto e virgola saltato: catalogo artisti Navidrome non leggibile',
+    if not known and not ARTIST_SPLIT_OVERRIDES:
+        print('[warn] split artisti saltato: catalogo Navidrome non leggibile e nessun override esplicito configurato',
               file=sys.stderr)
         return {'files': 0, 'errors': 0}
+    if not known and ARTIST_SPLIT_OVERRIDES:
+        print('[i] catalogo artisti non leggibile: applico solo ARTIST_SPLIT_OVERRIDES espliciti',
+              file=sys.stderr)
     files = [base.joinpath(*r) for r in _walk_audio(base, AUDIO_EXT)]
+    if files_only is not None:
+        wanted_files = {Path(f).resolve() for f in files_only}
+        files = [f for f in files if f.resolve() in wanted_files]
+    # ffprobe is cached and can reject almost every file before we spawn metaflac.
+    # In v0.68 the function launched metaflac once for virtually every track; on this
+    # library that dominated repair_album_groups (41m45s) despite only 193 files changing.
     prefetch_probe(files, 'split_known_artist_tags')
     candidates = changed = errors = skipped = 0
+    candidate_files = []
+    scan_progress = _ProgressBar('preselezione split artisti', len(files), 'brani')
+    for scan_index, f in enumerate(files, 1):
+        scan_progress.update(scan_index)
+        tags = probe(f)
+        values_to_check = (tags.get('artist'), tags.get('artists'), tags.get('albumartist'),
+                           tags.get('album_artist'), tags.get('albumartists'))
+        if any(_split_artist_tag_if_known(value, known) for value in values_to_check if value):
+            candidate_files.append(f)
+    scan_progress.close(complete=True)
+    print(f'[i] split artisti: {len(candidate_files)}/{len(files)} file hanno tag candidati', flush=True)
     tg = '[dry] ' if dry_run else ''
-    for f in files:
+    progress = _ProgressBar('split_known_artist_tags', len(candidate_files), 'candidati')
+    for file_index, f in enumerate(candidate_files, 1):
+        progress.update(file_index)
         ext = f.suffix.lower()
         try:
             if ext == '.flac':
-                raw_tags = _flac_raw_tags(f)
+                try:
+                    raw_tags = _flac_raw_tags(f)
+                except Exception as e:
+                    skipped += 1
+                    progress.clear()
+                    print(f'[warn] split artisti: tag FLAC non leggibili, file saltato: {f}: {e}',
+                          file=sys.stderr)
+                    continue
                 values = {}
                 for key in ('ARTIST', 'ARTISTS', 'ALBUMARTIST', 'ALBUMARTISTS'):
                     values[key] = [v for k, v in raw_tags if k == key]
@@ -9504,7 +11155,7 @@ def run_split_known_artist_tags(dry_run=False, base=None):
                     expanded_singular = []
                     did_split = False
                     for value in singular_values:
-                        parts = _split_semicolon_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known)
                         if parts:
                             did_split = True
                             expanded_singular.extend(parts)
@@ -9512,7 +11163,7 @@ def run_split_known_artist_tags(dry_run=False, base=None):
                             expanded_singular.append(value.strip())
                     expanded_plural = []
                     for value in plural_values:
-                        parts = _split_semicolon_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known)
                         if parts:
                             did_split = True
                             expanded_plural.extend(parts)
@@ -9536,6 +11187,7 @@ def run_split_known_artist_tags(dry_run=False, base=None):
                 if not updates:
                     continue
                 candidates += 1
+                progress.clear()
                 print(f'{tg}SPLIT-ARTIST {f}: ' + ', '.join(f'{k}={v}' for k, v in updates.items()))
                 if not dry_run:
                     _flac_set_multi(f, updates)
@@ -9552,7 +11204,7 @@ def run_split_known_artist_tags(dry_run=False, base=None):
                     found_split = False
                     for key in source_keys:
                         value = str(tag.get(key) or '').strip()
-                        parts = _split_semicolon_if_known(value, known)
+                        parts = _split_artist_tag_if_known(value, known)
                         if not parts:
                             continue
                         found_split = True
@@ -9567,19 +11219,24 @@ def run_split_known_artist_tags(dry_run=False, base=None):
                 if not updates:
                     continue
                 candidates += 1
+                progress.clear()
                 print(f'{tg}SPLIT-ARTIST {f}: ' + ', '.join(f'{k}={v}' for k, v in updates.items()))
                 if not dry_run:
                     _rewrite_nonflac(f, updates)
                 changed += 1
         except Exception as e:
             errors += 1
+            progress.clear()
             print(f'[ERRORE] split artisti {f}: {type(e).__name__}: {e}', file=sys.stderr)
+    progress.close(complete=True)
     print(f'split artisti da DB: {candidates} file candidati, {changed} '
-          f'{"da correggere" if dry_run else "corretti"}, {errors} errori')
+          f'{"da correggere" if dry_run else "corretti"}, {errors} errori, '
+          f'{skipped} saltati per tag non leggibili')
     return {'files': changed, 'errors': errors, 'skipped': skipped}
 
 
-def run_repair_album_groups(dry_run=True, base=None, include_existing_passes=True):
+def run_repair_album_groups(dry_run=True, base=None, include_existing_passes=True,
+                            album_dirs_only=None, files_only=None):
     """Ripara album e artisti. --all riusa le fasi tag gia' eseguite, senza duplicarle."""
     base = Path(base) if base else LIBRARY_ROOT
     mbid_errors = artist_errors = unify_errors = 0
@@ -9605,12 +11262,17 @@ def run_repair_album_groups(dry_run=True, base=None, include_existing_passes=Tru
         _write_json_atomic(MBTITLE_CACHE, title_cache)
     else:
         stripped = 0
-    version_result = run_repair_albumversion_pids(dry_run=dry_run, base=base)
-    unknown_result = run_fix_unknown_artists(dry_run=dry_run, base=base)
-    split_result = run_split_known_artist_tags(dry_run=dry_run, base=base)
+    version_result = run_repair_albumversion_pids(dry_run=dry_run, base=base, files_only=files_only)
+    unknown_result = run_fix_unknown_artists(dry_run=dry_run, base=base, album_dirs_only=album_dirs_only)
+    split_result = run_split_known_artist_tags(dry_run=dry_run, base=base, files_only=files_only)
     if not dry_run:
-        # Remove backups created by non-FLAC writes, including the extra repairs run under --all.
-        for backup in base.rglob('*.meta-backup'):
+        # In scoped reruns, never clean backups outside the affected album folders.
+        if files_only is None:
+            backup_candidates = base.rglob('*.meta-backup')
+        else:
+            backup_candidates = (b for folder in {Path(f).parent for f in files_only}
+                                 for b in folder.glob('*.meta-backup'))
+        for backup in backup_candidates:
             original = backup.with_name(backup.name[:-len('.meta-backup')])
             if original.exists():
                 try:
@@ -9751,7 +11413,7 @@ def _embedded_art_state(track_path, timeout=10):
         return None
     if len(ent) >= 5 and ent[4] in (True, False):
         return bool(ent[4])
-    # Cache v3 preesistente: fa una sola probe dedicata, poi conserva il risultato nell'entry.
+    # Una voce della cache senza stato artwork fa una sola probe dedicata, poi lo conserva.
     try:
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-select_streams', 'v',
@@ -9914,6 +11576,18 @@ def _load_artwork_album_groups():
     root = Path(LIBRARY_ROOT)
     stack = [root]
     exts = INDEX_EXT
+    # Estimate the audio-file total from the current probe cache. This scan used to run
+    # before the artwork-query bar started, so a slow NAS walk could look frozen for minutes.
+    try:
+        estimated_audio_total = sum(
+            1 for cached_path in _probe_mem()
+            if Path(cached_path).suffix.lower() in exts and
+            Path(cached_path).is_relative_to(root)
+        )
+    except Exception:
+        estimated_audio_total = 0
+    scan_progress = _ProgressBar('scansione file per artwork', estimated_audio_total, 'brani')
+    audio_seen = 0
     while stack:
         base = stack.pop()
         try:
@@ -9933,12 +11607,18 @@ def _load_artwork_album_groups():
                 if suffix in _ARTWORK_EXTS and entry.is_file():
                     art_stems_by_dir.setdefault(base, set()).add(norm_bare(os.path.splitext(name)[0]))
                 if suffix in exts and entry.is_file():
+                    audio_seen += 1
+                    scan_progress.update(audio_seen)
                     track = Path(entry.path)
                     album_dir = _album_art_directory(track)
                     if album_dir is not None:
                         groups.setdefault(album_dir, []).append(track)
             except OSError:
                 continue
+    scan_progress.close(complete=(audio_seen >= estimated_audio_total if estimated_audio_total else True))
+    if estimated_audio_total and audio_seen != estimated_audio_total:
+        print(f'[artwork] file audio rilevati: {audio_seen}; totale cache stimato: '
+              f'{estimated_audio_total}', flush=True)
     return groups, art_stems_by_dir
 
 
@@ -9966,7 +11646,10 @@ def run_missing_album_artwork(dry_run=False):
     candidates, negative_skipped = [], 0
     embedded_unknown = 0
 
-    for album_dir, tracks in sorted(groups.items(), key=lambda item: str(item[0]).casefold()):
+    ordered_groups = sorted(groups.items(), key=lambda item: str(item[0]).casefold())
+    scan_progress = _ProgressBar('scansione album senza artwork', len(ordered_groups), 'album')
+    for album_index, (album_dir, tracks) in enumerate(ordered_groups, 1):
+        scan_progress.update(album_index)
         if not tracks or _has_local_album_art(album_dir, album_dir.name, artwork_stems_by_dir):
             continue
         tags = probe(tracks[0])
@@ -10023,6 +11706,7 @@ def run_missing_album_artwork(dry_run=False):
             'dir': album_dir, 'tracks': tracks, 'artist': artist_name,
             'album': album_name, 'key': key, 'mbid': mbid,
         })
+    scan_progress.close(complete=True)
 
     limit = int(cfg['max_per_run'])
     selected = candidates if limit == 0 else candidates[:limit]
@@ -10041,10 +11725,11 @@ def run_missing_album_artwork(dry_run=False):
     downloaded = attempted = not_found = network_errors = 0
     retry_seconds = int(cfg['retry_days']) * 86400
     basename = cfg['cover_basename']
+    progress = _ProgressBar('download artwork', len(selected), 'album', stream=sys.stdout)
     for index, item in enumerate(selected, 1):
+        progress.update(index)
         artist, album, album_dir, mbid = item['artist'], item['album'], item['dir'], item['mbid']
         attempted += 1
-        print(f'[artwork] {index}/{len(selected)} {artist} — {album}', flush=True)
         image_result = None
         if mbid:
             image_result = _read_artwork_image(
@@ -10092,14 +11777,18 @@ def run_missing_album_artwork(dry_run=False):
             os.replace(tmp, target)
             downloaded += 1
             negative.pop(item['key'], None)
+            progress.clear()
             print(f'[artwork] scaricata: {target} ({len(data) // 1024} KiB)', flush=True)
         except FileExistsError:
+            progress.clear()
             print(f'[artwork] file temporaneo già esistente, salto: {tmp}', file=sys.stderr)
         except OSError as e:
+            progress.clear()
             print(f'[artwork] impossibile salvare {target}: {e}', file=sys.stderr)
         finally:
             tmp.unlink(missing_ok=True)
 
+    progress.close(complete=True)
     # Limita la crescita della cache ed elimina voci ormai scadute.
     negative = {key: int(until) for key, until in negative.items() if int(until or 0) > now}
     cache['version'] = 1
@@ -10243,16 +11932,16 @@ def main():
                          'solo i componenti ["A", "B"] (FLAC). Dry-run salvo --apply; --album/--artist '
                          'restringono')
     ap.add_argument('--check-albums', action='store_true',
-                    help='confronta ogni album del DB con la tracklist di MusicBrainz e scrive '
-                         'logs/album_incompleti_<data>.txt (tracce mancanti). Solo lettura; la prima run '
-                         'e\' lenta (1 richiesta/s), poi c\'e\' la cache')
+                    help='confronta gli album del DB con MusicBrainz e integra il report completo in '
+                         'logs/mancanti_<data>.txt. Solo lettura; '
+                         'la prima run e\' lenta (1 richiesta/s), poi c\'e\' la cache')
     ap.add_argument('--mb-no-search', action='store_true',
                     help='check-albums: controlla solo gli album con MUSICBRAINZ_ALBUMID, senza cercare '
                          'gli altri per artista+album')
     ap.add_argument('--diagnose-album-splits', action='store_true',
-                    help='diagnostica read-only del DB: album duplicati/spezzati, fuzzy candidati (review only), artisti CJK e separatori ;')
+                    help='diagnostica read-only del DB: album duplicati/spezzati, fuzzy candidati (review only), artisti CJK e separatori ; / ,')
     ap.add_argument('--repair-album-groups', action='store_true',
-                    help='ripara tag album/artisti, Unknown Artist e artisti separati da ; se confermati dal DB; preview di default. In --all e integrato')
+                    help='ripara tag album/artisti, Unknown Artist e artisti separati da ; / , se confermati dal DB; preview di default. In --all e integrato')
     ap.add_argument('--clean-empty', action='store_true',
                     help='fase: rimuovi cartelle senza audio vuote da >24h')
     ap.add_argument('--star-liked', action='store_true',
@@ -10319,12 +12008,18 @@ def main():
     logf = open_run_log(_log_command_tag(sys.argv[1:], tuple(getattr(ap, '_option_string_actions', {}))))
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = Tee(old_out, logf), Tee(old_err, logf)
-    global _RUN_STARTED_AT, _PHASE_TIMINGS, _RUN_INTERRUPTED
+    global _RUN_STARTED_AT, _PHASE_TIMINGS, _RUN_INTERRUPTED, _RUN_FAILED_PHASES
     _RUN_STARTED_AT = time.perf_counter()
     _PHASE_TIMINGS.clear()
     _RUN_INTERRUPTED = False
+    _RUN_FAILED_PHASES.clear()
     try:
         _run(args)
+        if _RUN_FAILED_PHASES:
+            failed = ', '.join(dict.fromkeys(name for name, _status in _RUN_FAILED_PHASES))
+            print(f'[ERRORE] pipeline completata con {len(_RUN_FAILED_PHASES)} fase/i non riuscita/e: {failed}',
+                  file=sys.stderr, flush=True)
+            raise SystemExit(1)
     except SystemExit as e:
         if isinstance(e.code, str):          # sys.exit("msg") altrimenti uscirebbe dal log
             print(e.code, file=sys.stderr)
@@ -10452,8 +12147,62 @@ def _generate_m3u_playlists(groups, by_full, by_artist, by_strict, path_qual, ar
     return ok, total
 
 
-def _scan_before_favorites(users, full_scan=True):
-    """Avvia la scan con l'utente API principale, senza riavvii inutili del container."""
+def _reconcile_navidrome_album_changes(before, library_root=None, planned_target_phases=True):
+    """Dopo uno scan riuscito: report album, riparazione mirata e scan incrementale finale."""
+    global _PHASE_PROGRESS_TOTAL
+    after = _snapshot_navidrome_albums()
+    if before is None or after is None:
+        print('[warn] snapshot Navidrome pre/post scan non disponibile; evito di trattare l’intera libreria '
+              'come nuova e salto la riparazione mirata', file=sys.stderr, flush=True)
+        if planned_target_phases:
+            remaining = _PHASE_PROGRESS_TOTAL - _PHASE_PROGRESS_INDEX
+            reducible = min(7, max(0, remaining - 1))
+            _PHASE_PROGRESS_TOTAL = max(_PHASE_PROGRESS_INDEX, _PHASE_PROGRESS_TOTAL - reducible)
+        return True
+    changes = _diff_navidrome_albums(before, after)
+    _print_navidrome_album_diff(changes)
+    base = Path(library_root) if library_root else LIBRARY_ROOT
+    base = base.expanduser().resolve()
+    album_dirs, files_only = _affected_album_paths(changes, base)
+    if not changes.get('affected') or not album_dirs or not files_only:
+        if changes.get('affected'):
+            print('[warn] nuovi/aggiornati album rilevati ma non sono stati risolti file host; '
+                  'riparazione mirata non eseguita', file=sys.stderr, flush=True)
+        # Il piano --all prevede sei fasi mirate + scan rapido. Se non ci sono album
+        # toccati, rimuovi queste sette fasi dal totale previsto prima della fase successiva.
+        if planned_target_phases:
+            remaining = _PHASE_PROGRESS_TOTAL - _PHASE_PROGRESS_INDEX
+            # lascia in piano la diagnostica post-scan se e' quella che segue il helper
+            reducible = min(7, max(0, remaining - 1))
+            _PHASE_PROGRESS_TOTAL = max(_PHASE_PROGRESS_INDEX, _PHASE_PROGRESS_TOTAL - reducible)
+        return True
+
+    print(f'[i] riparazione mirata: {len(album_dirs)} album/cartelle, '
+          f'{len(files_only)} file audio', flush=True)
+    # Tutte le fasi ricevono esclusivamente le cartelle/file coinvolti nel diff post-scan.
+    run_phase('targeted_date_heal', run_date_heal, dry_run=False, base=base,
+              album_dirs_only=album_dirs)
+    run_phase('targeted_romaji_tags', run_romaji_tags, dry_run=False, base=base,
+              files_only=files_only)
+    run_phase('targeted_artist_names', run_unify_artists, dry_run=False, base=base,
+              files_only=files_only)
+    run_phase('targeted_album_unify', run_unify, dry_run=False, base=base,
+              album_dirs_only=album_dirs)
+    run_phase('targeted_repair_album_groups', run_repair_album_groups, dry_run=False,
+              base=base, include_existing_passes=False,
+              album_dirs_only=album_dirs, files_only=files_only)
+    run_phase('targeted_fix_date_tags', run_fix_dates, dry_run=False, base=base,
+              files_only=files_only)
+    quick_ok = bool(run_phase('navidrome_scan_after_album_repair', run_navidrome_scan,
+                              full_scan=False, prune_refs=False))
+    if not quick_ok:
+        print('[ERRORE] scan incrementale dopo la riparazione album non riuscito',
+              file=sys.stderr, flush=True)
+    return quick_ok
+
+
+def _scan_before_favorites(users, full_scan=True, reconcile_changes=False, library_root=None):
+    """Esegue la scan; in --all confronta gli album e riapplica solo i tag degli album toccati."""
     candidates = [SUBSONIC_USER]
     candidates.extend(users if users is not None else (_db_users() or []))
     seen = set()
@@ -10467,8 +12216,16 @@ def _scan_before_favorites(users, full_scan=True):
         old_user, old_password = SUBSONIC_USER, SUBSONIC_PASS
         globals()['SUBSONIC_USER'], globals()['SUBSONIC_PASS'] = username, password
         try:
-            return bool(run_phase('navidrome_scan_before_stars', run_navidrome_scan,
-                                  full_scan=full_scan, prune_refs=full_scan))
+            before = _snapshot_navidrome_albums() if reconcile_changes and full_scan else {}
+            scan_ok = bool(run_phase('navidrome_scan_before_stars', run_navidrome_scan,
+                                     full_scan=full_scan, prune_refs=full_scan))
+            if not scan_ok:
+                return False
+            if reconcile_changes and full_scan:
+                if not _reconcile_navidrome_album_changes(before, library_root=library_root,
+                                                           planned_target_phases=True):
+                    return False
+            return True
         finally:
             globals()['SUBSONIC_USER'], globals()['SUBSONIC_PASS'] = old_user, old_password
     print('[warn] scan pre-favorites saltata: nessuna password ND_PASS/ND_PASS_<utente> disponibile; '
@@ -10857,7 +12614,9 @@ def run_sync_spotify_proxy_config(dry_run=True, apply=False, library_root=None,
     token = None
     records, errors, checked = [], 0, 0
     uncached_checked = 0
+    progress = _ProgressBar('confronto catalogo Spotify', len(albums), 'album', stream=sys.stdout)
     for idx, album_row in enumerate(albums, 1):
+        progress.update(idx)
         artist, album = album_row['artist'], album_row['album']
         key = (_spotify_proxy_norm(artist), _spotify_proxy_norm(album))
         identity = hashlib.sha256((market + '\0' + key[0] + '\0' + key[1]).encode()).hexdigest()
@@ -10919,9 +12678,8 @@ def run_sync_spotify_proxy_config(dry_run=True, apply=False, library_root=None,
                 errors += sum(1 for r in records if r.get('status') == 'error') - errors
                 break
         records.append({**album_row, 'status': status, 'candidates': candidates})
-        if idx % 25 == 0:
-            print(f'  ...{idx}/{len(albums)} album valutati ({checked} nuove query, {errors} errori)', flush=True)
 
+    progress.close(complete=True)
     _spotify_catalog_cache_save(cache)
     not_found = [r for r in records if r['status'] == 'not_found']
     review = [r for r in records if r['status'] == 'review']
@@ -11549,16 +13307,20 @@ def run_fix_flac_safe(base=None, apply=False):
     originals.sort(key=lambda p: str(p).casefold())
     print(f'Trovati {len(originals)} file FLAC originali.')
     fixed = skipped_no_dup = skipped_invalid = errors = 0
-    for original in originals:
+    progress = _ProgressBar('fix_flac_safe', len(originals), 'file')
+    for file_index, original in enumerate(originals, 1):
+        progress.update(file_index)
         duplicate = Path(str(original) + '.flac')
         if not duplicate.exists():
             skipped_no_dup += 1
             continue
         if not _safe_flac_valid(duplicate):
+            progress.clear()
             print(f'  WARN: duplicato non valido, salto: {duplicate.name}')
             skipped_invalid += 1
             continue
         if not apply:
+            progress.clear()
             print(f'  FIX previsto: {original} <- {duplicate.name}')
             fixed += 1
             continue
@@ -11567,11 +13329,11 @@ def run_fix_flac_safe(base=None, apply=False):
             # non eliminiamo prima il vecchio originale (il vecchio helper poteva perdere dati).
             os.replace(duplicate, original)
             fixed += 1
-            if fixed % 200 == 0:
-                print(f'  ...{fixed} file sistemati')
         except OSError as e:
+            progress.clear()
             print(f'  ERRORE: {original}: {e}', file=sys.stderr)
             errors += 1
+    progress.close(complete=True)
     print(f'Fase FLAC: {fixed} sistemati/previsti, {skipped_no_dup} senza duplicato, '
           f'{skipped_invalid} duplicati non validi, {errors} errori.')
 
@@ -11582,11 +13344,15 @@ def run_fix_flac_safe(base=None, apply=False):
             if name.endswith('.backup'):
                 backups.append(Path(root) / name)
     removed = 0
-    for backup in sorted(backups, key=lambda p: str(p).casefold()):
+    sorted_backups = sorted(backups, key=lambda p: str(p).casefold())
+    backup_progress = _ProgressBar('fix_flac_safe backup', len(sorted_backups), 'file')
+    for backup_index, backup in enumerate(sorted_backups, 1):
+        backup_progress.update(backup_index)
         original = Path(str(backup)[:-7])
         if not original.exists():
             continue
         if not apply:
+            backup_progress.clear()
             print(f'  BACKUP da rimuovere: {backup}')
             removed += 1
             continue
@@ -11594,7 +13360,9 @@ def run_fix_flac_safe(base=None, apply=False):
             backup.unlink()
             removed += 1
         except OSError as e:
+            backup_progress.clear()
             print(f'  WARN: non riesco a rimuovere il backup {backup}: {e}', file=sys.stderr)
+    backup_progress.close(complete=True)
     print(f'Backup con originale presente rimossi/previsti: {removed}.')
     if not apply:
         print('[i] anteprima soltanto: usare --fix-flac-safe --apply per applicare le modifiche.')
@@ -12049,7 +13817,19 @@ def _run(args):
     print(f"[i] exportify_to_m3u.py v{VERSION} @ "
           f"{datetime.now():%Y-%m-%d %H:%M}", file=sys.stderr)
     _load_navidrome_env_file()
+    # --all seleziona le fasi prima di calcolare il totale, cosi' il contatore include la pipeline intera.
+    if args.all:
+        _expand_all(args)
+    has_scan_creds_for_plan = bool(SUBSONIC_PASS or any(
+        k.startswith('ND_PASS_') and v for k, v in os.environ.items()))
+    planned_scan_before_stars = bool(args.star_liked and not args.dry_run and not args.no_scan
+                                     and has_scan_creds_for_plan)
+    global _PHASE_PROGRESS_INDEX, _PHASE_PROGRESS_TOTAL
+    _PHASE_PROGRESS_INDEX = 0
+    _PHASE_PROGRESS_TOTAL = _estimate_phase_total(args)
     run_phase('load_user_config', load_user_config)
+    # A questo punto la config JSON e' caricata: ricalcola le fasi opzionali prima della fase 2.
+    _PHASE_PROGRESS_TOTAL = max(_PHASE_PROGRESS_INDEX, _estimate_phase_total(args))
     global SYNC_STATE, ROMAJI_TAGS_ACTIVE
     ROMAJI_TAGS_ACTIVE = not args.skip_romaji
     try:
@@ -12173,9 +13953,9 @@ def _run(args):
     if args.fetch_check:
         rc = run_phase('check_exportify_sessions', run_fetch_check, sel)
         raise SystemExit(1 if rc is None else rc)
-    if args.check_albums:
+    if args.check_albums and not args.all:
         run_phase('check_albums', run_check_albums, album=args.album, artist=args.artist,
-                  search=not args.mb_no_search)
+                  search=not args.mb_no_search, append_missing_report=True)
         return
     if args.fetch_only:
         rc = run_phase('fetch_exportify', run_fetch, sel,
@@ -12184,7 +13964,7 @@ def _run(args):
 
     if args.missing is not None:
         by_full, by_artist, by_strict, path_qual = run_phase('index_library', load_library, rebuild=args.rebuild_cache)
-        groups = [(u, select_playlists(fs, args)) for u, fs in collect_user_csvs(args, sel)]
+        groups = [(u, select_playlists(fs, args, user=u)) for u, fs in collect_user_csvs(args, sel)]
         files = [f for _, fs in groups for f in fs]
         if not files:
             sys.exit(f"[ERRORE] nessun CSV da elaborare in {EXPORTIFY_DIR}")
@@ -12227,7 +14007,6 @@ def _run(args):
         return
 
     if args.all:
-        _expand_all(args)
         # Snapshot the pre-repair DB so duplicate albums and fuzzy REVIEW-only pairs remain
         # visible even if later tag repair makes Navidrome rebuild these rows.
         diag_ok = run_phase('diagnose_album_splits', run_diagnose_album_splits,
@@ -12279,8 +14058,8 @@ def _run(args):
     if args.playlists or not maintenance:
         groups = collect_user_csvs(args, sel)
         by_full, by_artist, by_strict, path_qual = run_phase('index_library', load_library, rebuild=args.rebuild_cache)
-        groups = [(u, select_playlists(fs, args)) for u, fs in groups]
-        report_skips(args)
+        groups = [(u, select_playlists(fs, args, user=u)) for u, fs in groups]
+        report_skips(args, users=[u for u, _files in groups])
         groups = [(u, fs) for u, fs in groups if fs]
         if not groups:
             sys.exit(f"[ERRORE] nessun CSV da elaborare (nessuno zip riconosciuto, vuoto o tutto "
@@ -12319,6 +14098,12 @@ def _run(args):
             run_phase('repair_album_groups', run_repair_album_groups,
                       dry_run=args.dry_run, base=args.library_root or LIBRARY_ROOT,
                       include_existing_passes=False)
+            # dedupe_tracks runs before album_unify. A second, metadata-conservative pass is
+            # needed here because exact album groups can be joined from separate folders only
+            # after tag normalization (e.g. Animals / Dogs in two source directories).
+            run_phase('dedupe_cross_album_tracks', run_dedupe_cross_album_tracks,
+                      args.apply and not args.dry_run, args.hard_delete,
+                      base=args.library_root or LIBRARY_ROOT)
 
         if not args.skip_fix_dates:
             run_phase('fix_date_tags', run_fix_dates, args.dry_run)
@@ -12342,9 +14127,12 @@ def _run(args):
         scan_attempted_before_stars = True
         # In --sync-only basta l'indicizzazione incrementale: evita il full scan di tutta
         # la libreria e, soprattutto, non ferma Navidrome subito prima delle stelle.
-        scan_before_stars_ok = _scan_before_favorites(sel, full_scan=not args.sync_only)
+        scan_before_stars_ok = _scan_before_favorites(
+            sel, full_scan=not args.sync_only,
+            reconcile_changes=bool(args.all and not args.sync_only),
+            library_root=args.library_root or LIBRARY_ROOT)
         # None significa che non e' stato trovato un account con credenziali per la scansione.
-        scanned_before_stars = True if scan_before_stars_ok is None else bool(scan_before_stars_ok)
+        scanned_before_stars = bool(scan_before_stars_ok)
         if args.all and scan_before_stars_ok is True:
             # Secondo report: mostra cosa e' rimasto dopo riparazione tag + full scan Navidrome.
             run_phase('diagnose_album_splits_after_scan', run_diagnose_album_splits,
@@ -12361,7 +14149,33 @@ def _run(args):
             run_phase('star_liked', run_star_liked, sel)
 
     if not args.dry_run and not args.no_scan and not scanned_before_stars:
-        run_phase('navidrome_scan_final', run_navidrome_scan)
+        before_final_scan = _snapshot_navidrome_albums() if args.all else {}
+        final_scan_ok = bool(run_phase('navidrome_scan_final', run_navidrome_scan))
+        if args.all:
+            if planned_scan_before_stars:
+                # Il pre-scan era previsto ma ha saltato/fallito: questo retry e' una fase extra.
+                _PHASE_PROGRESS_TOTAL += 1
+            if final_scan_ok:
+                if _reconcile_navidrome_album_changes(
+                        before_final_scan, library_root=args.library_root or LIBRARY_ROOT,
+                        planned_target_phases=True):
+                    run_phase('diagnose_album_splits_after_scan', run_diagnose_album_splits,
+                              album_filter=args.album, artist_filter=args.artist)
+            elif not planned_scan_before_stars:
+                # Il piano includeva target/diagnostica come follow-up del fallback scan,
+                # ma lo scan e' fallito e tali fasi non verranno eseguite.
+                _PHASE_PROGRESS_TOTAL = max(_PHASE_PROGRESS_INDEX,
+                                            _PHASE_PROGRESS_TOTAL - 8)
+            else:
+                # Anche con retry fallito, non lasciare nel totale le sette fasi mirate e la diagnosi.
+                _PHASE_PROGRESS_TOTAL = max(_PHASE_PROGRESS_INDEX,
+                                            _PHASE_PROGRESS_TOTAL - 8)
+
+    # In --all controlla ogni album con MBID contro la sua release esatta e aggiunge le tracce
+    # mancanti in fondo a mancanti_<data>.txt oltre al report dettagliato.
+    if args.all:
+        run_phase('check_album_completeness', run_check_albums,
+                  search=False, mbid_only=True, append_missing_report=True)
 
     # Come MusicBee 'Update Missing Artwork': fase distinta alla fine della pipeline.
     # Non sovrascrive artwork locale/embedded; dopo download riusciti richiede una scan incrementale.
@@ -12373,6 +14187,8 @@ def _run(args):
         if (not args.dry_run and not args.no_scan and
                 MISSING_ARTWORK_CONFIG.get('scan_after_download', True) and
                 isinstance(art_result, dict) and art_result.get('downloaded', 0) > 0):
+            # La scansione e' condizionale: aggiungila al totale solo quando serve davvero.
+            _PHASE_PROGRESS_TOTAL += 1
             run_phase('navidrome_scan_after_artwork', run_navidrome_scan,
                       full_scan=False, prune_refs=False)
 

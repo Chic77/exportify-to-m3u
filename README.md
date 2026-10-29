@@ -4,7 +4,7 @@
 
 ## Quick start
 
-**Current release: v0.68.** This update makes album-split diagnosis faster on large libraries, makes non-FLAC tag rewrites safer if an I/O error occurs, and makes semicolon-separated artist repair deterministic. v0.67 integrated album diagnosis and repair into `--all`; v0.66 improved album-fragment and CJK artist handling; v0.65 added measured artwork, translation and waveform optimizations.
+**Current release: v0.77.** This release keeps a 50-character terminal progress bar with a stable four-frame 100 ms spinner (`/`, `──`, `\`, `|`); preserves exact capitalization of existing bilingual CJK artist names; splits `Afro Medusa,West Way` and `Chiello,Powv_FSK`; canonizes `M_O_O_N`/`M.O.O.N` and bilingual CJK names; clears conflicting MusicBrainz IDs and `ALBUMVERSION` fields that would keep an exact-title album split; and adds a post-normalization duplicate pass across equivalent album folders (preview by default, trash move only with `--apply`). It also fixes an uninitialized artist map that could stop cross-folder consolidation with `NameError`. The album diagnostic reports remain embedded directly in `e2m`, with no standalone files. It retains the v0.74/v0.73 logging and error-status improvements. v0.72 filters artist-split candidates before calling `metaflac`, improves handling of unreadable FLAC tags, and preserves the full MusicBrainz report in `mancanti` across same-day rewrites. v0.71 introduced per-user `SKIP_PLAYLISTS`, removed active `PLAYLIST_PREFIXES` rewriting, embedded complete `album_db_diagnostics` and `album_cross_folder_review` reports in the main `e2m` log, and merged the full MusicBrainz incompleteness report into `mancanti`. v0.70 added live single-line progress bars for measurable long-running phases; interactive terminals redraw the same row, while cron logs get periodic checkpoints. v0.69 added catalog-aware comma-separated artist repair, CJK name normalization, safer `[Unknown Artist]` repair and MusicBrainz tracklist reporting; v0.68 added diagnosis and file-write optimizations; v0.67 integrated album diagnosis and repair into `--all`; v0.66 improved album-fragment and CJK artist handling.
 
 Use the script's built-in help as the authoritative, current command reference:
 
@@ -34,20 +34,39 @@ For all options, combinations, defaults and warnings, consult `--help` rather th
 - Includes optional maintenance for duplicate playlists/tracks/releases, format cleanup, tags, album metadata, album-split repair and missing artwork.
 - Integrates FLAC filename repair, Lidarr folder alignment/import, ListenBrainz listen deduplication and playlist-owner repair as opt-in utilities.
 - Can create selected MP3 proxy copies for local albums absent from Spotify's catalog, while playlist matching continues to target original lossless files. Navidrome favorites for proxy tracks are tracked in `liked.m3u` and a JSON manifest.
-- Produces execution logs, per-phase durations and summaries of missing tracks.
+- Produces execution logs, a live `=== fase name === (X/Y)` phase counter, one-line in-place progress bars for countable phases, per-phase durations and summaries of missing tracks. A progress bar displays checked/total, a visual bar, estimated percentage and remaining items; interactive terminals redraw the same row, while redirected logs retain periodic snapshots. Under `--all`, the MusicBrainz completeness phase checks albums carrying `MUSICBRAINZ_ALBUMID` and appends the complete album report—including missing tracks and releases not found—to the bottom of `logs/mancanti_YYYY-MM-DD.txt`. It no longer creates a separate `album_incompleti_YYYY-MM-DD.txt` file.
 - Includes caching and profiling-based optimizations for repeated metadata probes, normalization, waveform comparisons, automatic translations and artwork checks.
 
-### Album diagnosis and repair (v0.66–v0.68)
+
+### Live progress bars (v0.70)
+
+Countable phases now show a single updating status line, for example:
+
+```text
+  ...scan in corso: 1004/15455 brani [#-------------] (6% - ancora 14451 da scansionare)
+```
+
+On a TTY, the script uses carriage return to replace the same row instead of adding a new line for every update. The percentage and remaining count are recalculated as items are processed. Detail messages such as an actual file repair or an error temporarily clear the status row and the next progress update redraws it. If stdout/stderr is redirected by cron or into a log file, the script emits occasional progress checkpoints instead of carriage-return control characters on every update. The unit shown depends on the phase (tracks, files, albums, artist folders, playlist groups or candidate pairs); phases without a reliable total do not fabricate a percentage.
+Since v0.77, the interactive layout uses a 50-character bar with a fixed-width four-frame spinner (`/`, `──`, `\`, `|`) refreshed every 100 ms, e.g.:
+
+```text
+dedupe_playlists: 91/121 gruppi                         ── [#####################################-------------] 75%
+```
+
+The cross-folder duplicate pass added to `--all` is preview-only unless `--apply` is supplied. It moves the selected duplicate to the existing trash location; `--hard-delete` is required for permanent deletion.
+
+### Album diagnosis and repair (v0.66–v0.69)
 
 The album diagnosis and repair features are intended to address albums that Navidrome splits into several database entries, reused MusicBrainz IDs, repeated CJK artist names and ambiguous artist tags.
 
-- **`--diagnose-album-splits`** reads the Navidrome database without writing to it and creates `logs/album_db_diagnostics_<timestamp>.txt`. It reports candidate album groups with database IDs, track counts, MusicBrainz IDs, album version/release-date fields and example paths. Fuzzy title pairs and conflicting editions are marked for review; the diagnostic does not merge albums or change audio tags.
-- **`--repair-album-groups`** runs the repair workflow. It previews by default; use `--apply` to write changes when running it by itself. It checks MusicBrainz album IDs, harmonizes album tags, aligns `ALBUMVERSION` within logical album roots, repairs `[Unknown Artist]` only when an album provides a reliable artist, and normalizes semicolon-separated artist tags only when at least one component matches an artist already present in Navidrome.
-- **`--all`** automatically creates a diagnosis report before the main modifications and includes album-group repair in the pipeline. After a successful full Navidrome scan, it can create a second report to compare the rebuilt database. The post-scan report is skipped if the scan cannot be confirmed successful or scanning is disabled.
-- **Fuzzy candidates remain review-only.** Similar titles are not automatically merged just because a fragment has few tracks. Explicit edition or `ALBUMVERSION` conflicts are also held for review rather than being blindly unified.
+- **`--diagnose-album-splits`** reads the Navidrome database without writing to it and embeds its complete contents in the main `logs/e2m_*.log`. It reports candidate album groups with database IDs, track counts, MusicBrainz IDs, album version/release-date fields and example paths. Fuzzy title pairs and conflicting editions are marked for review; the diagnostic does not merge albums or change audio tags.
+- **`--repair-album-groups`** runs the repair workflow. It previews by default; use `--apply` to write changes when running it by itself. It checks MusicBrainz album IDs, harmonizes album tags, aligns `ALBUMVERSION` within logical album roots, repairs `[Unknown Artist]` when album-artist metadata, a non-generic artist folder or a clear consensus from other tracks provides reliable context, and normalizes artist tags only when the Navidrome artist catalog confirms a split.
+- **`--all`** automatically creates a diagnosis report before the main modifications and includes album-group repair in the pipeline. After a successful full Navidrome scan, it reports new albums, changed albums and merges using the track paths before/after the scan. It then reruns date, CJK/artist, album-group and tag repair only for the affected album folders, followed by a quick incremental scan. The post-scan report and targeted repair are skipped if scanning is disabled or the database snapshot cannot be trusted.
+- **Fuzzy candidates remain review-only.** Similar titles are not automatically merged just because a fragment has few tracks. Explicit edition markers in album titles remain a barrier. When artist and normalized album title match exactly, conflicting `ALBUMVERSION` and MusicBrainz IDs are cleared instead of leaving the exact album split.
 - **Tag-write safety:** `--dry-run` previews the tag repairs. In standalone mode, `--repair-album-groups` also requires `--apply` to write. In `--all`, tag/date/album phases are controlled by `--dry-run`; `--apply` primarily enables the destructive duplicate-cleanup phases. Read the operation log before running a live repair.
-- **Artist fixes:** `[Unknown Artist]` is replaced only when `ALBUMARTIST` is reliable, or (when album-artist tags are absent) all known track-artist values agree on one artist. A generic or conflicting `ALBUMARTIST` such as `Various Artists` blocks the track-artist fallback; ambiguous compilations are left untouched and reported for review. Semicolon-separated tags are split only when the Navidrome artist catalog confirms at least one component; FLAC receives multi-valued `ARTISTS`/`ALBUMARTISTS` tags and other formats use the scanner-compatible `; ` separator.
-- **v0.68 performance/safety changes:** diagnosis compares albums sharing an artist identity instead of needlessly comparing every album pair; non-FLAC tag writes restore the original file if committing the rewritten file fails; the semicolon repair combines duplicate alias fields deterministically. MusicBrainz lookup caches populated during a preview are kept as auxiliary caches so repeat previews can reuse them. No new end-to-end timing profile was collected for v0.68, so the pair-index change is a structural optimization rather than a measured whole-run speed claim. Repair summaries now also account for failed MusicBrainz-ID, artist-normalization and album-unification writes instead of reporting success when one of those sub-phases had errors. Artist inference checks all available metadata aliases and refuses to choose a field when aliases conflict.
+- **Artist fixes:** `[Unknown Artist]` can inherit a consistent `ALBUMARTIST`, a non-generic artist-folder name, or a clear consensus from known tracks. Explicit compilations such as `Various Artists`, conflicting aliases and ambiguous cases remain review-only instead of receiving a random performer. Semicolons are explicit separators. Commas are split only when the Navidrome artist catalog confirms at least two component names, protecting names such as `Tyler, The Creator`. CJK-only and `CJK (gloss)` variants are normalized using the preferred existing Navidrome spelling when available, preventing the same kanji artist from remaining as two display entries. FLAC receives multi-valued `ARTISTS`/`ALBUMARTISTS` tags and other formats use the scanner-compatible `; ` separator.
+- **v0.69 additions:** comma parsing is catalog-aware across normalization and inference paths; duplicate CJK/gloss spellings converge on the preferred Navidrome display name; unknown-artist repair uses trusted album/folder/track context but blocks unsafe compilation guesses; phase progress shows the current phase and planned total. `--all` checks only albums with a MusicBrainz album ID and appends missing tracks to `mancanti_*.txt`. The post-scan comparison uses indexes on album keys and track paths, reports new/changed/merged albums and reruns repair only for those album folders before an incremental scan.
+- **v0.68 performance/safety changes:** diagnosis compares albums sharing an artist identity instead of needlessly comparing every album pair; non-FLAC tag writes restore the original file if committing the rewritten file fails; the artist repair combines duplicate alias fields deterministically. MusicBrainz lookup caches populated during a preview are kept as auxiliary caches so repeat previews can reuse them. No new end-to-end timing profile was collected for v0.68, so the pair-index change is a structural optimization rather than a measured whole-run speed claim. Repair summaries also account for failed MusicBrainz-ID, artist-normalization and album-unification writes. Artist inference checks available metadata aliases and refuses to choose a field when aliases conflict.
 
 ### Performance notes (v0.65 — second Tachyon profile)
 
@@ -77,11 +96,20 @@ These are sampling estimates, not exact function timers. The total was around 74
 - `max_new_per_run` limits new translation requests; `cache_days` controls cache lifetime; `timeout` controls the request timeout; and `failure_cooldown_hours` controls how long provider failures pause further requests.
 - **`ARTIST_GROUPS`** groups names that represent the same artist; names within each entry match one another in both directions. Use it for aliases, name-order variants and established alternate romanizations, not merely for different artists who collaborate. Example: `[["eiichi ohtaki", "eiichi otaki", "ohtaki eiichi"]]`.
 - **`ALIASES`** provides additional alternate artist spellings. Prefer the most specific rule that fixes a match and avoid conflicting aliases for different artists.
+- **`ARTIST_SPLIT_OVERRIDES`** lists known joined collaboration tags that must be split even if Navidrome has indexed the whole value as one artist. The included `Afro Medusa,West Way` and `Chiello,Powv_FSK` rules become `ARTIST: "Afro Medusa; West Way"` / `ARTIST: "Chiello; Powv_FSK"` with separate plural artist values. Add new entries as `"combined value": ["Artist One", "Artist Two"]`; use this only when the value really represents multiple artists.
 
 ### Playlist selection and naming
 
-- **`SKIP_PLAYLISTS`** lists playlists that should not be imported. Comparison tolerates capitalization, punctuation and emoji differences. A final `*` acts as a prefix wildcard, for example `"daylist*"`.
-- **`PLAYLIST_PREFIXES`** standardizes names beginning with a configured prefix. For example, `color yellow` can become `color - yellow` so related playlists group consistently in clients.
+- **`SKIP_PLAYLISTS`** is an object keyed by Navidrome username. Each user has a separate list of playlist names/patterns to skip; the current exclusions are under `chic` only. Comparison tolerates capitalization, punctuation and emoji differences. A final `*` acts as a prefix wildcard, for example `"daylist*"`.
+
+  Example: to add exclusions for another user, add a sibling array; do not copy `chic`'s rules unless you want them for that user too:
+  ```json
+  "SKIP_PLAYLISTS": {
+    "chic": ["daylist*", "discover weekly"],
+    "stello": ["another playlist*"]
+  }
+  ```
+  Playlist names are now preserved exactly as exported by Spotify. Rename playlists in Spotify itself; the script no longer applies prefix-based name rewrites.
 - **`PLAYLIST_FOLDERS`** routes named playlists into subfolders under the playlist directory; it affects the output path, not whether a playlist is selected.
 
 ### Spotify-to-Navidrome user mapping
@@ -248,7 +276,71 @@ Some maintenance phases can modify audio tags, media files, playlists or the Nav
 
 ## Changelog
 
-### v0.68 — diagnosis performance and safer tag writes
+### v0.77 — smoother spinner, canonical artist alias and album-date convergence
+
+- The spinner cycles deterministically through `/`, `──`, `\`, `|` at 100 ms per frame. A TTY regression test checks the frame order and timing as well as the exact 50-character bar; the thicker horizontal glyph was replaced with a lighter two-character dash to make the rotation visually consistent.
+- The explicit `M.O.O.N` canonical alias now overrides a stale Navidrome display spelling such as `M.O.O.N.`. That prevents the trailing dot from recreating a separate artist entity after a tag repair. When a bilingual CJK display already exists, the script also preserves its exact catalog gloss casing (for example, `高中正義 (masayoshi takanaka)`) rather than creating a title-cased second artist name.
+- `fix_date_tags` now considers tags across each logical album root (including `CD1`/`CD2`) and, only when a dated-track consensus is supported by at least two tracks and 60% of date-bearing tracks, proposes a shared `ORIGINALDATE` and removal of conflicting `DATE` values. Ambiguous albums remain unchanged rather than being guessed.
+- Fixed the dry-run summary in `fix_date_tags`: it now reports how many files have proposed changes instead of incorrectly saying `0 file sistemati` despite printing many `[dry] FIX(...)` lines. Dry-run still does not write any audio tags.
+- The supplied v0.76 dry-run completed all 22 phases without a Python traceback or phase error; it took 1h40m38s. It proposes a duplicate `Animals/Dogs` removal and artist-tag fixes, while the new v0.77 date normalizer needs a fresh dry-run to show its newly proposed changes. Navidrome scan and post-scan reconciliation are skipped by the supplied dry-run, so it cannot prove that the live database has merged `SAUDADE` or removed the displayed `[Unknown Artist]` label for The Cure.
+
+### v0.76 — targeted artist split and album consolidation
+
+- Progress bar remains exactly 50 characters between `[` and `]`; the spinner uses a fixed two-column footprint and includes a longer horizontal dash. Both redraw and spinner advance every 100 ms in an interactive terminal.
+- Added editable `ARTIST_SPLIT_OVERRIDES` to `exportify_names.json`. The supplied rules split `Afro Medusa,West Way` and `Chiello,Powv_FSK`, including when Navidrome has already indexed the whole combined string. Extend the object with `{ "combined tag": ["Artist One", "Artist Two"] }` for further known cases.
+- Standardizes `M_O_O_N`/`M.O.O.N` to `M.O.O.N` and reuses the existing bilingual CJK catalog spelling where available. The script cannot safely invent a missing catalog identity for arbitrary artist names, so new collaboration patterns should be added to the explicit overrides when the database cannot identify components.
+- `album_unify` now chooses a shared original date only when one year appears on at least two tracks and covers at least 60% of date-bearing tags. It clears conflicting MusicBrainz album/release-group IDs (including stale IDs that can be removed from M4A/MP4) and clears conflicting `ALBUMVERSION` tags when exact-title album folders are consolidated; explicit edition markers remain protected.
+- Duplicate fallback still requires exact matching title, close duration (within 1.5% or one second), and no version qualifier. It additionally accepts a two-file lossless/lossy pair when at least one track number is missing and the other is absent or agrees; conflicting explicit numbers stay protected.
+- Added `dedupe_cross_album_tracks` after album normalization in `--all`: it detects conservative duplicates across different folders now sharing the same album/artist identity. The preview never moves files; `--apply` moves selected duplicates to the existing trash folder, and explicit edition-marker conflicts are skipped. `--hard-delete` is required for permanent deletion. This addresses duplicate `Dogs`-type tracks left after merging `Animals`-like album fragments.
+- Fixed a missing initialization of the artist-name map in cross-folder album unification, which could raise `NameError` as soon as a cross-folder group needed canonical `ALBUMARTIST` handling.
+- `[Unknown Artist]` is removed as a placeholder component in mixed `ALBUMARTIST` fields such as `The Cure; Unknown Artist`, but repair still requires a reliable remaining artist identity.
+
+### beta-v0.75 — artist canonicalization, album repair and 100 ms progress
+
+- The terminal progress bar is exactly 50 characters wide inside `[]`, includes a spinner and redraws every 100 ms on one row; carriage returns and terminal-wrap control sequences do not enter `e2m` logs.
+- Catalog-aware artist normalization now canonicalizes punctuation variants such as `M_O_O_N` / `M.O.O.N`, prefers an existing bilingual CJK artist display name, and splits collaborations when every comma-separated component is known, even if the joined value is already in Navidrome.
+- `[Unknown Artist]` repair also checks explicit `ALBUMARTIST` / `ALBUM_ARTIST` values and uses the folder/track artist only when compilation markers do not block that inference.
+- Fixes the `DATE` gate so an `ORIGINALDATE` target on one track no longer suppresses `DATE` updates on all FLAC tracks that lack `ORIGINALDATE`.
+- A conservative duplicate-track fallback catches exact-title groups with the same track number and nearly identical duration when audio correlation differs because of mastering. Live/demo/mix/version-qualified titles are excluded.
+- `album_db_diagnostics` and `album_cross_folder_review` are appended directly to the main `e2m` log, without writing sidecar report files. The MusicBrainz completeness report remains consolidated at the bottom of `mancanti`.
+
+### beta-v0.74 — terminal progress redraw and single-copy reports
+
+- Previous progress bars redrew the same terminal row every 500 ms and used a 24-character bar. v0.75 extends the bar to 50 characters and refreshes at 100 ms.
+- The Tee keeps carriage-return redraws out of the `e2m` log. Diagnostic report content remains embedded in the main log.
+
+### v0.73 — convergent MP3 ID3 repair and trustworthy exit status
+
+- Removes legacy `TXXX:albumartist` frames directly through Mutagen while writing one canonical `TPE2` frame; audio is not re-encoded and unrelated ID3 frames are preserved. This fixes the repeated 168-file MP3 repair visible in the supplied v0.68 runs.
+- A full pipeline still runs its remaining phases and writes reports after a phase failure, but now exits with status 1 if a phase returns `False`, raises, or returns an error-count result. This makes failures visible to cron/monitoring.
+- MusicBrainz report refresh replaces even a truncated old marker block, and `--check-albums` returns a failed status when MusicBrainz requests fail.
+- Adds `mutagen` to the virtual-environment install command. The complete MusicBrainz completeness report remains merged into `mancanti`; diagnostic reports remain embedded in the main `e2m` log.
+
+### v0.72 — faster artist split and persistent MusicBrainz report
+
+- Filters artist-tag split candidates using cached `ffprobe` metadata before invoking `metaflac`, avoiding one subprocess per track when no supported split is present.
+- Adds plural `artists`/`albumartists` fields to the probe cache and bumps its version so older cache entries cannot hide them.
+- Reports unreadable FLAC tag exports as skipped warnings, without letting one unreadable file fail the entire artist-split phase. Real tag-write failures still count as errors.
+- Preserves the complete MusicBrainz block at the bottom of `mancanti_YYYY-MM-DD.txt` when playlist-missing statistics are regenerated; the next MusicBrainz check replaces the prior block instead of duplicating it.
+
+### v0.71 — per-user playlist skip lists and consolidated reports
+
+- `SKIP_PLAYLISTS` is a JSON object keyed by Navidrome username; existing exclusions belong to `chic` only. Add a sibling array for each future user.
+- Removed active `PLAYLIST_PREFIXES` rewriting. Playlist names are preserved as exported from Spotify; rename them at the source when needed.
+- Full `album_db_diagnostics` and `album_cross_folder_review` reports are embedded in the main `e2m` log with start/end markers; standalone copies are deleted after embedding.
+- The full MusicBrainz completeness report is merged into `mancanti_YYYY-MM-DD.txt` rather than a newly generated separate `album_incompleti` file.
+
+### v0.69 — artist normalization, phase counter and MusicBrainz completeness
+
+- Extends catalog-confirmed artist splitting to comma separators while preserving artist names that contain commas.
+- Normalizes Kanji/CJK-only tags and their bilingual `CJK (gloss)` variants to one preferred existing Navidrome spelling where available.
+- Improves `[Unknown Artist]` inference by using reliable album-artist tags, a non-generic artist folder or a clear track-artist consensus, while blocking unsafe compilation guesses.
+- Prints each measured phase as `=== fase phase_name === (X/Y)` and continues to summarize per-phase and total elapsed time.
+- Adds a MusicBrainz completeness phase in `--all` for albums with `MUSICBRAINZ_ALBUMID`; its complete missing-track report is appended to the end of `logs/mancanti_YYYY-MM-DD.txt`, without creating a separate `album_incompleti` report.
+- After a successful Navidrome scan, reports newly found, changed and merged albums; reruns repair only for their affected paths and finishes with an incremental scan.
+- Uses indexed album keys and paths to avoid comparing every scanned album against every previous album.
+
+### beta-0.68 — diagnosis performance and safer tag writes
 
 - Album diagnosis builds candidate pairs from shared artist-identity keys rather than comparing unrelated albums. Candidate ranking remains deterministic; fuzzy pairs stay review-only.
 - Non-FLAC tag rewrites restore the original file if committing the rewritten file fails.
