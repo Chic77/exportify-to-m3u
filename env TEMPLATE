@@ -1,0 +1,278 @@
+# Configurazione privata di exportify_to_m3u.py. TEMPLATE, RENAME THIS FILE TO "env" or ".env".
+# L’ambiente del processo (export VAR=...) ha priorità sui valori di questo file.
+
+# File env da caricare per primo; vuoto = ricerca automatica di .env/env accanto allo script.
+ND_ENV_FILE=
+
+# URL del servizio Subsonic/Navidrome usato per scan, playlist e preferiti.
+ND_URL=http://192.168.1.7:4533
+# Username Navidrome principale.
+ND_USER=
+# Password dell’utente ND_USER; tienila privata.
+ND_PASS=
+# Password Navidrome per ciascun utente: suffisso = username maiuscolo (spazi/punteggiatura diventano _).
+ND_PASS_USER1=
+# Password dell’utente 2; rimuovi la riga se non serve.
+ND_PASS_USER2=
+# Username usato come proprietario predefinito delle playlist quando non è indicato da --users.
+ND_DEFAULT_USER=
+# Utente Navidrome da cui leggere i preferiti proxy; vuoto = ND_USER.
+ND_FAVORITES_USER=
+# Prefisso del path musica visto dal container Navidrome (es. /music).
+ND_MUSIC_ROOT=/music
+# Separatore usato da Navidrome nei nomi di artisti multipli.
+ND_ARTIST_JOINER=" • "
+
+# URL Lidarr pubblicato sull’host.
+LIDARR_URL=http://127.0.0.1:8686
+# API key Lidarr: tienila privata e ruotala se è stata condivisa fuori dalla macchina.
+LIDARR_API_KEY=
+# Root music host visto da Lidarr (deve coincidere con E2M_LIBRARY_ROOT).
+LIDARR_MUSIC_ROOT=
+# Root della musica nel container Lidarr.
+LIDARR_CONTAINER_ROOT=/music
+# Abilita la ricerca automatica dopo l’aggiunta/monitoraggio degli album Lidarr (true/false).
+LIDARR_SYNC_SEARCH=true
+# Giorni minimi tra nuove ricerche per album incompleti già monitorati.
+LIDARR_SYNC_RESEARCH_DAYS=7
+# Numero massimo di release-group MusicBrainz da considerare per artista (10-5000).
+LIDARR_SYNC_MB_MAX_GROUPS=5000
+# Timeout in secondi per leggere l’elenco artisti Lidarr (60–300).
+LIDARR_ARTIST_LIST_TIMEOUT=180
+# Timeout in secondi per leggere il catalogo album Lidarr (60–300).
+LIDARR_ALBUM_LIST_TIMEOUT=180
+
+# === Percorsi host: tutte le directory sono personalizzabili; mantenere i path persistenti su Red1. ===
+# Mount fisico da controllare prima di leggere/scrivere i dati persistenti.
+E2M_STORAGE_MOUNT=
+# Root dell’installazione homelab.
+E2M_HOMELAB_ROOT=
+# Directory di configurazione dei container.
+E2M_CONFIG_ROOT=
+# Root della libreria musicale locale sull’host.
+E2M_LIBRARY_ROOT=
+# Directory di output delle playlist M3U (default: MUSICA/Playlists).
+E2M_PLAYLIST_DIR=
+# Directory dove leggere i CSV Exportify estratti (utente/playlist.csv).
+E2M_EXPORTIFY_DIR=
+# Directory dove leggere e salvare gli ZIP Exportify.
+E2M_ZIP_DIR=
+# Database SQLite di Navidrome.
+E2M_NAVIDROME_DB=
+# Cestino dei file spostati dai dedupe; non è la libreria attiva.
+E2M_DEDUPE_TRASH=
+# Directory cache persistente (indice filesystem, probe e cataloghi).
+E2M_CACHE_DIR=
+# Directory dei log e dei report e2m.
+E2M_LOG_DIR=
+# File JSONC con le regole utente; path relativo risolto dalla directory corrente.
+E2M_USER_CONFIG_JSON=
+# Directory dove salvare le sessioni Exportify Playwright.
+EXPORTIFY_STATE_DIR=
+# Directory dei cookie Spotify esportati; cancellali dopo l’import.
+EXPORTIFY_COOKIE_DIR=
+# Cache date MusicBrainz; default = .mbdate_cache.json accanto allo script.
+E2M_MBDATE_CACHE=
+# Cache titoli/release MusicBrainz; default = .mbtitle_cache.json accanto allo script.
+E2M_MBTITLE_CACHE=
+# Cache album MusicBrainz; default = .mb_albums_cache.json accanto allo script.
+E2M_MB_ALBUMS_CACHE=
+# Cache della conversione FLAC 16 bit; default = .flac16_cache.json accanto allo script.
+E2M_FLAC16_CACHE=
+# Cache artwork mancante; default = .missing_artwork_cache.json accanto allo script.
+E2M_ARTWORK_CACHE=
+# Cache riparazione album Navidrome; default = file nascosto accanto allo script.
+E2M_NAVIDROME_DUPLICATE_CACHE=
+
+# Root musica nel container Jellyfin, usato nei path delle playlist se configurato.
+JELLYFIN_MUSIC_ROOT=/data/music
+# URL della pagina Exportify usata da Playwright.
+EXPORTIFY_URL=https://exportify.app/
+# Import slskd: percorso visto da Lidarr dentro il container.
+SLKSD_IMPORT_FOLDER=/downloads/slskd
+# Cartella failed_imports vista dal processo che controlla gli import slskd.
+SLKSD_FAILED_FOLDER=/downloads/slskd/failed_imports
+# Base URL MusicBrainz; utile per mirror o endpoint di test.
+MB_BASE=https://musicbrainz.org/ws/2/
+
+# === Prestazioni audio ===
+# Numero di letture ffprobe parallele; 1–32. Riduci per dischi/NAS lenti.
+EXPORTIFY_PROBE_WORKERS=8
+# Numero di confronti waveform paralleli (1–4).
+EXPORTIFY_WAVEFORM_WORKERS=2
+# Timeout ffprobe FLAC in secondi (5–120).
+EXPORTIFY_FLAC_PROBE_TIMEOUT=30
+# Livello compressione FLAC lossless (0–12; più alto = più CPU, file spesso un po’ più piccoli).
+EXPORTIFY_FLAC_COMPRESSION_LEVEL=5
+# Imposta 1 per non usare automaticamente la virtualenv .venv accanto allo script.
+EXPORTIFY_NO_VENV=
+
+# === Terminale: palette ANSI ===
+# Abilita/disabilita tutti i colori. NO_COLOR/CLICOLOR=0 hanno comunque priorità.
+TERMINAL_COLORS_ENABLED=true
+# Colore delle intestazioni di fase e dei completamenti riusciti.
+TERMINAL_COLOR_PHASE={"color":"#77FF94","bold":true}
+# Colore delle conferme [OK]/successo.
+TERMINAL_COLOR_SUCCESS={"alias":"phase"}
+# Stile del risultato fase riuscita; può essere alias di phase/success.
+TERMINAL_COLOR_PHASE_SUCCESS={"alias":"phase"}
+# Stile del nome della barra di avanzamento.
+TERMINAL_COLOR_PROGRESS_LABEL={"alias":"phase"}
+# Stile della percentuale al 100%.
+TERMINAL_COLOR_PERCENT_COMPLETE={"alias":"phase"}
+# Stile dell’etichetta del tempo totale.
+TERMINAL_COLOR_TOTAL_LABEL={"alias":"phase"}
+# Colore dei contatori di fase.
+TERMINAL_COLOR_COUNTER={"color":"#FFB20F","bold":true}
+# Colore del prefisso [review].
+TERMINAL_COLOR_REVIEW={"alias":"counter"}
+# Colore degli avvisi.
+TERMINAL_COLOR_WARN={"alias":"counter"}
+# Colore dello spinner.
+TERMINAL_COLOR_SPINNER={"alias":"counter"}
+# Stile del risultato fase con avvisi; può essere alias di warn.
+TERMINAL_COLOR_PHASE_WARNING={"alias":"counter"}
+# Stile del riepilogo release.
+TERMINAL_COLOR_RELEASE_SUMMARY={"alias":"counter"}
+# Colore del prefisso [i]/[info].
+TERMINAL_COLOR_INFO={"color":"#00A1E4","bold":true}
+# Colore delle etichette dry-run.
+TERMINAL_COLOR_DRY={"alias":"info"}
+# Colore delle parentesi del progress bar.
+TERMINAL_COLOR_BAR_BORDER={"alias":"info"}
+# Colore della percentuale normale.
+TERMINAL_COLOR_PERCENT={"alias":"info"}
+# Stile del conteggio X/Y nella barra.
+TERMINAL_COLOR_PROGRESS_COUNTER={"alias":"info"}
+# Stile dei nomi azione diagnostica (UNIFY ecc.).
+TERMINAL_COLOR_ACTION_LABEL={"alias":"info"}
+# Colore degli errori.
+TERMINAL_COLOR_ERROR={"color":"#E3170A","bold":true}
+# Stile del risultato fase fallita; può essere alias di error.
+TERMINAL_COLOR_PHASE_FAILURE={"alias":"error"}
+# Colore delle durate.
+TERMINAL_COLOR_DURATION={"color":"#FFB20F"}
+# Colore della parte ancora vuota.
+TERMINAL_COLOR_BAR_EMPTY={"alias":"duration"}
+# Stile della durata totale.
+TERMINAL_COLOR_TOTAL_DURATION={"alias":"duration"}
+# Colore della parte completata del progress bar.
+TERMINAL_COLOR_BAR_FILL={"color":"#70D6FF","bold":true}
+# Stile dei percorsi dei log.
+TERMINAL_COLOR_LOG_PATH={"alias":"waveform_compare"}
+# Stile dell’unità della barra.
+TERMINAL_COLOR_PROGRESS_UNIT={"color":"#77FF94"}
+# Stile dei messaggi di confronto waveform.
+TERMINAL_COLOR_WAVEFORM_COMPARE={"color":"#C792EA","bold":true}
+# Stile delle etichette modalità esecuzione.
+TERMINAL_COLOR_RUN_MODE={"alias":"waveform_compare"}
+# Stile delle operazioni Navidrome/servizi e percorsi cestino.
+TERMINAL_COLOR_OPERATION={"alias":"waveform_compare"}
+
+# === Matching titolo: penalità per versioni alternative ===
+# Il valore è sottratto al punteggio; più alto = versione meno preferita quando non richiesta.
+# Penalità per il qualificatore "acoustic"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_ACOUSTIC=9
+# Penalità per il qualificatore "alternate"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_ALTERNATE=15
+# Penalità per il qualificatore "alternative"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_ALTERNATIVE=15
+# Penalità per il qualificatore "anniversary"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_ANNIVERSARY=3
+# Penalità per il qualificatore "bonus"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_BONUS=3
+# Penalità per il qualificatore "cover"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_COVER=16
+# Penalità per il qualificatore "deluxe"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_DELUXE=4
+# Penalità per il qualificatore "demo"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_DEMO=22
+# Penalità per il qualificatore "edit"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_EDIT=4
+# Penalità per il qualificatore "expanded"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_EXPANDED=4
+# Penalità per il qualificatore "extended"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_EXTENDED=12
+# Penalità per il qualificatore "instrumental"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_INSTRUMENTAL=18
+# Penalità per il qualificatore "karaoke"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_KARAOKE=20
+# Penalità per il qualificatore "live"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_LIVE=18
+# Penalità per il qualificatore "mix"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_MIX=9
+# Penalità per il qualificatore "outtake"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_OUTTAKE=15
+# Penalità per il qualificatore "practice"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_PRACTICE=16
+# Penalità per il qualificatore "radio edit"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_RADIO_EDIT=11
+# Penalità per il qualificatore "rehearsal"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REHEARSAL=18
+# Penalità per il qualificatore "rehersal"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REHERSAL=18
+# Penalità per il qualificatore "reissue"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REISSUE=4
+# Penalità per il qualificatore "remaster"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REMASTER=4
+# Penalità per il qualificatore "remastered"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REMASTERED=4
+# Penalità per il qualificatore "remix"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_REMIX=14
+# Penalità per il qualificatore "rough"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_ROUGH=7
+# Penalità per il qualificatore "session"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_SESSION=8
+# Penalità per il qualificatore "take"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_TAKE=5
+# Penalità per il qualificatore "version"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_VERSION=5
+# Penalità per il qualificatore "parentheses"; 0 disattiva questa penalità.
+TITLE_MATCH_PENALTY_PARENTHESES=5.0
+
+# === Download artwork mancante ===
+# Abilita/disabilita l’intera fase di download cover.
+MISSING_ARTWORK_ENABLED=true
+# Numero massimo di album esaminati per run; 0 = nessun limite.
+MISSING_ARTWORK_MAX_PER_RUN=100
+# Timeout HTTP in secondi per ogni richiesta artwork.
+MISSING_ARTWORK_REQUEST_TIMEOUT=15
+# Giorni prima di riprovare un album che non aveva cover valida.
+MISSING_ARTWORK_RETRY_DAYS=30
+# Dimensione minima immagine accettata in byte.
+MISSING_ARTWORK_MIN_IMAGE_BYTES=2048
+# Dimensione massima immagine accettata in byte.
+MISSING_ARTWORK_MAX_IMAGE_BYTES=12582912
+# Controlla cover embedded prima di cercare online.
+MISSING_ARTWORK_CHECK_EMBEDDED_ART=true
+# Richiede uno scan Navidrome dopo il download.
+MISSING_ARTWORK_SCAN_AFTER_DOWNLOAD=true
+# Nome base file per la copertina scaricata (senza estensione).
+MISSING_ARTWORK_COVER_BASENAME=cover
+
+# === Traduzione automatica CJK/Hangul ===
+# Abilita richieste automatiche di traduzione inglese per artisti CJK/Hangul.
+AUTO_NAME_TRANSLATION_ENABLED=true
+# Soglia euristica minima (0–1); più alta = più conservativa.
+AUTO_NAME_TRANSLATION_MIN_CONFIDENCE=0.72
+# Numero massimo di nuove richieste di traduzione per esecuzione; 0 = illimitato.
+AUTO_NAME_TRANSLATION_MAX_NEW_PER_RUN=100
+# Validità in giorni delle traduzioni automatiche in cache.
+AUTO_NAME_TRANSLATION_CACHE_DAYS=365
+# Timeout per singola richiesta HTTP in secondi.
+AUTO_NAME_TRANSLATION_TIMEOUT=8
+# Ore di pausa dopo un errore del provider.
+AUTO_NAME_TRANSLATION_FAILURE_COOLDOWN_HOURS=6
+
+# === Spotify Web API opzionale ===
+# Spotify Developer client ID per proxy catalog search; opzionale.
+SPOTIFY_CLIENT_ID=
+# Spotify Developer client secret; tienilo privato.
+SPOTIFY_CLIENT_SECRET=
+# Mercato Spotify ISO a due lettere (sovrascrive SPOTIFY_LOCAL_PROXY.market).
+SPOTIFY_MARKET=IT
+
+# Token personale ListenBrainz, necessario solo per --lb-dedup.
+LISTENBRAINZ_TOKEN=
+
+# EOF
