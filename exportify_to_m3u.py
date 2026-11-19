@@ -408,6 +408,294 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 
 ==============================================================================
 CHANGELOG
+
+Novita' 0.151 (date originali Radiohead offline-safe + gloss bilingui con iniziali corrette):
+  - La run v0.150 ha mostrato il difetto residuo: dopo il circuit breaker MusicBrainz, 1.084 album
+    restavano irrisolti; album_unify conservava quindi RELEASEDATE=2009 (e Amnesiac=2021) perché
+    mancava ORIGINALDATE. Aggiunti fallback esatti e verificabili per i titoli originali Radiohead:
+    Pablo Honey 1993, The Bends 1995, OK Computer 1997, Hail to the Thief 2003, Amnesiac 2001,
+    In Rainbows e Disk 2 2007. Sono applicati prima della rete in date_heal e anche in album_unify,
+    quindi funzionano con MusicBrainz offline e non possono essere sovrascritti da un reissue tag.
+  - Le altre release continuano a richiedere MusicBrainz o un consenso ORIGINALDATE attendibile:
+    non viene generalizzato l'anno di cartella/DATE/RELEASEDATE come originale, perché può essere
+    una ristampa. La cache date_heal passa a v6 e i fallback esatti sono cacheabili come fonte valida.
+  - Se YEAR esiste già ed è discordante, date_heal lo aggiorna insieme a DATE/ORIGINALDATE/RELEASEDATE.
+  - Il casing del gloss latino bilingue viene ora normalizzato anche quando proviene da una riga
+    Navidrome/Lidarr già esistente o da NAME_TRANSLATIONS/NAME_FIXES: ogni token tutto minuscolo
+    riceve l'iniziale maiuscola. Token mixed-case e acronimi già maiuscoli restano invariati.
+  - Rimosso il bypass che preservava intenzionalmente il gloss di catalogo in minuscolo: era il
+    motivo per cui la precedente capitalizzazione riguardava soltanto alcuni nomi generati.
+
+Novita' 0.150 (dateheal basato su release ufficiali complete + RELEASEDATE Navidrome):
+  - Corretto il motivo per cui le date potevano restare al 2009: date_heal considerava soltanto
+    DATE/ORIGINALDATE, ma Navidrome usa anche RELEASEDATE per l'identita' dell'album. Ora controlla
+    e aggiorna tutti e tre i campi; album_unify, fix_date_tags e la riparazione duplicati preferiscono
+    una data originale coerente a un RELEASEDATE residuo/discordante.
+  - Il lookup MusicBrainz non si limita piu' ai 25 release collegati restituiti da inc=releases:
+    usa il browse endpoint release-group + status=Official, pagina fino a raccogliere l'elenco
+    completo (limite 100 per pagina), filtra artista/titolo e preferisce le edizioni commerciali
+    etichettate/catalogate: un CD-R senza label/catalogo non le anticipa. Se resta l'unica release,
+    lo conserva per gli album realmente autopubblicati. Nessun fallback silenzioso a first-release-date.
+  - La ricerca di release-group esatti ordina prima per score MusicBrainz e soltanto dopo usa la
+    data come tie-breaker; non sceglie piu' automaticamente il gruppo con first-release-date piu'
+    vecchia, che puo' essere una registrazione non ufficiale o una ristampa anomala.
+  - Gli album senza risoluzione MusicBrainz restano irrisolti e ritentabili: NFO, DATE da solo,
+    RELEASEDATE e anno cartella non vengono piu' trattati come prova autorevole di data originale.
+    Il riepilogo date_heal conta e mostra gli irrisolti invece di nasconderli come zero errori.
+  - La cache date_heal passa a v5: memorizza soltanto anni MusicBrainz autorevoli, include mtime+size
+    dei file e verifica DATE/ORIGINALDATE/RELEASEDATE prima di saltare un album gia' corretto.
+  - Ottimizzazione: date_heal riutilizza i tag gia' letti dal probe condiviso invece di riprobarli
+    dentro _authoritative_year; il resolver esamina tutti i tag gia' in memoria (un MBID presente
+    solo dalla traccia 13 in poi non viene piu' ignorato) e usa prima il release-group ID valido.
+  - fix_date_tags riutilizza i tag e la root album gia' calcolati durante il raggruppamento: elimina
+    una seconda lettura/probe per file e ricalcoli ripetuti della stessa directory.
+  - Le annotazioni MusicBrainz riconoscono anche date nel formato 'Originally released in 2007'
+    e 'Originally released on 10 October 2007', non soltanto l'anno immediatamente dopo la frase.
+
+Novita' 0.149 (fallback MusicBrainz non obsoleto):
+  - se la ricerca trova il release-group esatto ma il dettaglio MusicBrainz e' temporaneamente
+    indisponibile, date_heal lascia l'album irrisolto e ritentabile: non ripete la stessa
+    richiesta nello stesso run e non ricade su un anno ID/cache potenzialmente vecchio.
+  - l'override del nome ufficiale "Fred again.." e' una regola esplicita e testabile, separata
+    dalla pulizia conservativa del solo punto accidentale "JPEGMAFIA .".
+
+Novita' 0.148 (nome ufficiale Fred again.. e cache date non obsolete):
+  - il display canonico esatto di MusicBrainz/Lidarr per Fred again.. viene ripristinato anche
+    quando il catalogo Lidarr locale contiene gia' la forma degradata 'Fred again'. La regola
+    JPEGMAFIA resta distinta: elimina soltanto lo spazio seguito da un singolo punto finale.
+  - _mb_year non riusa piu' gli anni grezzi di release-group/release MBID salvati dalle vecchie
+    regole: risolve sempre il release-group e applica la stessa priorita' data originale
+    annotata -> prima release Official. Anche i fallback basati su release MBID evitano l'anno
+    di una ristampa 2009 quando il release-group originale e' identificabile.
+  - la cache album/date_heal passa alla versione 4 e la cache delle date originali usa una
+    nuova chiave; le decisioni 2009 memorizzate dalle vecchie regole vengono ricalcolate.
+
+Novita' 0.147 (matching univoco, date originali e nomi artista punteggiati):
+  - non rimuove piu' la punteggiatura ufficiale da nomi come "Fred again..": quando Lidarr
+    espone duplicati con e senza punti finali, viene preservata la grafia esplicita; la
+    correzione accidentale "JPEGMAFIA ." continua invece a diventare "JPEGMAFIA".
+  - il matching playlist assegna ogni file una sola volta per playlist, valuta prima i titoli
+    esatti e piu' specifici e riprova su un secondo file esatto quando il primo e' gia' usato.
+    Se non esiste un secondo file, la riga finisce davvero in .missing.txt (non viene ignorata).
+    "Pts." / "Pt." e "Parts" sono alias equivalenti, mantenendo distinti Pts. 1-5 e Pts. 6-9.
+  - invalida la cache dell'indice filesystem dopo la nuova normalizzazione titoli e la cache
+    date_heal prodotta dalle vecchie regole. Le date sono risolte per artista+titolo esatti,
+    preferendo la prima pubblicazione del release-group alle ristampe; le annotazioni esplicite
+    di data originale possono correggere anche edizioni bonus/pubblicazioni digitali successive.
+    Controlla DATE e ORIGINALDATE su ogni traccia e scrive entrambi i campi anche nei formati
+    non-FLAC supportati.
+
+Novita' 0.146 (artisti con ellissi, assegnazione univoca tracce e date autorevoli):
+  - la pulizia nomi artista rimuove soltanto il punto isolato preceduto da spazio (es. JPEGMAFIA .);
+    preserva punteggiatura intenzionale finale come l'ellissi di Fred again.. e ripara i vecchi
+    tag gia' ridotti usando il nome Lidarr attendibile quando la corrispondenza e' univoca.
+  - le playlist risolvono prima i brani con match esatti piu' specifici; un file gia' assegnato
+    non viene piu' scartato in silenzio. In caso di conflitto il secondo brano cerca un altro
+    candidato a titolo esatto; se non esiste, viene correttamente segnalato come mancante.
+  - date_heal considera DATE e ORIGINALDATE, risolve album senza MBID tramite ricerca MusicBrainz
+    per titolo + album artist, preferisce l'anno originale esplicitamente annotato quando esiste,
+    non mette in cache gli anni non risolti e scrive i tag su FLAC, MP3, M4A/MP4, OGG e OPUS.
+  - la ricerca MusicBrainz richiede titolo e credito artista esatti, sceglie la prima data fra
+    release-group esatti e usa una cache positiva/negativa a scadenza; errori temporanei restano
+    ritentabili. Il dry-run mostra la fonte e l'eventuale correzione senza scrivere i file.
+
+Novita' 0.145 (correzione spaziatura descrizioni playlist):
+  - la riga dell'URL GitHub segue immediatamente la riga '<playlist>.m3u: M/T match, N mancanti',
+    senza un paragrafo vuoto aggiuntivo; resta una riga vuota tra descrizione Spotify e contatore.
+
+Novita' 0.144 (report album Spotify senza match, descrizioni playlist corrette e artwork multi-catalogo):
+  - star_liked conserva gli album salvati Spotify che non trovano un titolo nel catalogo Navidrome
+    e li scrive album per album in una sezione marcata di e2m_mancanti_<data>.txt, separata
+    dal report Lidarr; il conteggio corrisponde alla riga 'album Spotify senza corrispondenza locale'.
+  - le descrizioni playlist usano il testo Spotify originale, poi '<playlist>.m3u: M/T match,
+    N mancanti' e l'URL GitHub in chiaro; rimuove l'attribuzione Markdown precedente senza
+    cancellare la descrizione impostata dall'utente. La coda persistente conserva i contatori.
+  - aggiunti TheAudioDB e Wikimedia Commons come fonti artwork. Una copertina candidata viene
+    accettata dalla verifica catalogo soltanto quando almeno due provider indipendenti restituiscono
+    immagini visivamente corrispondenti (hash percettivo); un singolo provider non basta.
+  - SPOTIFY_LOCAL_PROXY.auto_sync abilita l'aggiornamento automatico di auto_albums dentro --all.
+    La scansione riguarda album gia' presenti nella libreria ma non reperibili su Spotify; non
+    aggiunge gli album Spotify assenti dalla libreria, per i quali non esiste un file da convertire.
+
+Novita' 0.143 (deduplica nomi artista con punteggiatura terminale):
+  - i nomi artista che differiscono soltanto per punteggiatura finale/spaziatura finale
+    condividono una grafia canonica; es. JPEGMAFIA / JPEGMAFIA .
+  - la riparazione tag Lidarr aggrega l'evidenza dei record duplicati e scrive la grafia senza
+    punteggiatura accidentale in ALBUMARTIST/ARTIST, senza fondere punteggiatura interna.
+  - la lista dei nomi Lidarr attendibili viene deduplicata prima della riparazione bilingue.
+  - nessuna cancellazione di artisti/album Lidarr: la convergenza avviene nei tag locali e
+    quindi nell'indice Navidrome al successivo scan; gli elementi del catalogo restano intatti.
+
+Novita' 0.142 (resilienza MusicBrainz, Lidarr e fasi parziali):
+  - tutte le chiamate MusicBrainz (date, completezza album, Lidarr e artwork) passano da
+    un unico lock/rate limiter: minimo 1.2 s tra richieste, coordinamento anche fra processi
+    tramite flock + stato persistente, User-Agent identificabile e backoff 429/503 con Retry-After;
+  - un 503 MusicBrainz apre subito il circuito Lidarr per questa run, ma non interrompe la
+    sincronizzazione: il catalogo SQLite Lidarr continua a risolvere album gia' presenti e gli
+    altri casi vengono registrati come rinviati, non come falsi NO-MATCH;
+  - il report Lidarr distingue album realmente senza match da album rinviati per indisponibilita'
+    temporanea del provider; non genera piu' un report 0+0 quando la fase e' interrotta;
+  - la fase di allineamento cartelle non interpreta piu' un artista presente nel DB Lidarr ma
+    privo di cartella locale come errore: prova nome e alias, quindi riepiloga le cartelle assenti;
+  - star_liked non fallisce la pipeline per errori per-account: password assenti/errate o API
+    non disponibili sono segnalate, ma non annullano il lavoro degli altri utenti o delle fasi successive;
+  - le traduzioni provano MyMemory come fallback dopo i due endpoint Google, entro un budget
+    anonimo persistente prudenziale di 4.500 caratteri/giorno; le richieste valide consumano il
+    budget anche quando MyMemory non restituisce una traduzione;
+  - le intestazioni fase sono mostrate senza '(totale dinamico)', con fase verde e indice giallo;
+    l'avviso sui soli status Official del Metadata Profile e' informativo, non un falso errore.
+
+Novita' 0.141 (risoluzione diretta URI Spotify per Lidarr):
+  - gli Album Artist URI(s) Spotify vengono risolti tramite le relazioni URL di MusicBrainz;
+    il MBID artista viene memorizzato e riutilizzato per l'intera discografia, riducendo i
+    falsi mancati dovuti a grafie, alias e traslitterazioni differenti;
+  - prima si cerca il titolo esatto nel catalogo release-group dell'artista identificato
+    dall'URI; se il catalogo e' incompleto/vecchio si usa una ricerca mirata per MBID e titolo;
+    il match resta vincolato al titolo album e al credito artista MusicBrainz;
+  - solo quando il percorso artista non basta si interroga l'URI esatto dell'album Spotify;
+    la richiesta URL MusicBrainz include le relazioni release e release-group corrette;
+  - cache MusicBrainz aggiornata a v6 conservando ricerche/discografie; vengono azzerate le
+    vecchie relazioni Spotify album memorizzate dal lookup precedente e aggiunta la cache
+    degli URI artista. I risultati negativi ritentano dopo un giorno, i cataloghi positivi
+    dopo sette giorni.
+
+Novita' 0.140 (descrizioni playlist e copertura completa album Lidarr):
+  - Exportify/Spotify conserva la descrizione quando viene esposta; la descrizione viene
+    trasferita nel commento Navidrome, poi viene aggiunto un paragrafo di attribuzione con
+    il nome effettivo della M3U e il link GitHub. I valori Spotify null/non esposti non
+    cancellano i commenti gia' presenti in Navidrome.
+  - le descrizioni da sincronizzare restano in una coda JSON persistente finche' la playlist
+    non viene trovata nel DB Navidrome e aggiornata; la sync e' idempotente e non duplica
+    il paragrafo di attribuzione. La coda viene processata dopo una scan riuscita.
+  - Lidarr riceve ora tutti gli album distinti rappresentati dai brani delle playlist, non
+    soltanto gli album con tracce assenti dalla libreria. Questo evita di perdere album
+    completi/localmente presenti che prima non generavano alcuna richiesta di monitoraggio.
+  - il match permissivo senza album resta valido per comporre la M3U, ma se il brano esiste
+    sotto un'altra release il suo album Spotify originale viene comunque candidato per Lidarr.
+  - report_missing riconosce anche Spotify Local Files URI, come gia' faceva la conversione
+    M3U, e conserva album artist/URI/data per ogni riga. Il report distingue tracce mancanti
+    da tracce trovate sotto un album locale diverso.
+  - il sync stampa il Metadata Profile effettivo di Lidarr e avvisa quando Singles, EP,
+    Broadcasts, compilation/live/remix/soundtrack o status non ufficiali risultano filtrati;
+    non modifica automaticamente il profilo scelto dall'utente.
+
+Novita' 0.139 (refresh playlist persistente e cover MusicBrainz esatte):
+  - una risposta Spotify piu' recente per la stessa playlist aggiorna ora anche la cover URL:
+    non viene piu' conservata per errore la prima immagine acquisita durante Export All;
+  - la coda dei sidecar playlist da aggiornare e' persistente: path non abbinati o refresh
+    Navidrome falliti vengono ritentati nelle esecuzioni successive;
+  - il matching Navidrome abbina path assoluti/relativi e, solo quando univoco, il nome playlist;
+    gli ID saltati/non trovati non vengono dichiarati completati;
+  - al primo avvio v0.139 viene riconciliato anche lo stato artwork gia' presente in .sync_state.json,
+    cosi' i sidecar aggiornati dalle versioni precedenti vengono rinfrescati una volta;
+  - i front CAA legati a un MUSICBRAINZ_RELEASEGROUPID nei tag vengono accettati direttamente;
+    i risultati MusicBrainz quasi esatti (score >= 0.96) non richiedono una seconda conferma multi-catalogo;
+    i risultati fuzzy continuano a richiedere conferma indipendente;
+  - ricerca MusicBrainz: se la query artista+titolo non restituisce risultati, viene provata
+    anche una ricerca per titolo, con filtro locale rigoroso su artista e album;
+  - cache negativa artwork aggiornata a v10: gli album precedentemente senza risultato vengono
+    ricontrollati una volta con la nuova regola CAA.
+  - le cover caricate manualmente nell'interfaccia Navidrome non vengono cancellate: hanno
+    priorita' sui sidecar Spotify e vanno rimosse manualmente solo se non sono volute.
+
+Novita' 0.138 (robustezza artwork, Docker Compose e path playlist):
+  - separata la soglia minima per le immagini scaricate dalla soglia che decide se una
+    cover LOCALE esistente e' troppo piccola: cover CAA valide sotto 32 KiB non vengono piu' scartate;
+  - il refresh cover playlist abbina i path anche in forma relativa a PLAYLIST_DIR, cosi'
+    host e container possono usare prefissi diversi senza perdere il refresh Navidrome;
+  - individuato il nome effettivo del container Navidrome dai risultati Docker, supportando
+    anche i nomi Compose come progetto-navidrome-1; le scritture SQLite si fermano se Docker
+    non conferma lo stop del container;
+  - i redirect delle immagini Spotify restano vincolati a HTTPS e ai CDN Spotify ammessi.
+
+Novita' 0.137 (cover playlist Spotify e retry artwork mirati):
+  - acquisizione cover Spotify compatibile con piu' forme JSON (images, image, imageUrl,
+    coverUrl, artworkUrl e URL annidati), mantenendo la whitelist dei CDN Spotify;
+  - verifica magic-bytes del sidecar prima di saltare un download gia' sincronizzato;
+  - dopo lo scan, refresh mirato in Navidrome delle sole playlist il cui sidecar e' cambiato,
+    cosi' la cache artwork non continua a mostrare la vecchia immagine;
+  - ampliati i tentativi Google Images con varianti titolo/punteggiatura (es. Vol.1 / Vol 1);
+  - cache negativa album portata a v9: i precedenti no-result vengono riprovati una volta.
+
+Novita' 0.136 (fix artwork crash e file audio obsoleti):
+  - corretta la barra di avanzamento del download artwork: la fase usa album_progress, non una variabile
+    progress inesistente. Il NameError non interrompe piu' la fase prima dell'embedding e dei ritratti artista.
+  - la riparazione Unknown Artist filtra i percorsi gia' rimossi e tratta un file sparito tra probe e scrittura
+    come elemento obsoleto/rinviato, non come errore di metadati. Gli errori reali di scrittura restano fatali.
+  - il riepilogo della riparazione mostra separatamente i file non piu' disponibili, senza contarli come errori.
+
+Novita' 0.135 (diagnostica artwork verificabile e coda artisti piu' efficiente):
+  - affinata la diagnosi per album: ogni candidato ottiene un esito nominativo, mentre i riepiloghi
+    distinguono risultati negativi completi, errori temporanei, verifiche di cover sane e sostituzioni.
+    Gli errori e i rinvii dello stesso album non vengono conteggiati come due album diversi.
+  - la ricerca artista bilingue resta ordinata per tutti i nomi inglesi/gloss prima della grafia originale;
+    i target bilingui precedono quelli monolingui e possono riutilizzare un artist.* locale solo quando
+    la corrispondenza tra cartelle alias e' univoca.
+  - il cursore round-robin avanza dopo ogni query effettiva. Se i provider diventano indisponibili,
+    ruota oltre la coda differita selezionata, cosi' la run successiva puo' raggiungere gli altri target;
+    gli elementi rinviati restano nella coda circolare e tornano eleggibili al giro successivo.
+  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
+    gli altri provider album; un guasto non correlato non trasforma una ricerca artista in retry.
+  - rimossi helper e rami ridondanti non usati, evitata un'assegnazione senza effetto e semplificato
+    il ciclo di failover della traduzione automatica.
+
+Novita' 0.134 (fair queue artwork, priorita' bilingue e report album completo):
+  - gli artisti con un nome inglese e una grafia originale vengono messi in testa alla coda; per ciascuno
+    la ricerca usa prima tutti gli alias/gloss inglesi e soltanto dopo il nome originale. Sono riconosciute
+    entrambe le disposizioni del gloss, ad esempio "Я сошла с ума (I Went Crazy)" e viceversa.
+  - il cursore round-robin artista/album avanza dopo ogni elemento realmente interrogato; se tutti i
+    provider sono indisponibili, ruota oltre il batch differito e riprende dalla coda successiva.
+  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
+    gli altri provider usati per gli album.
+  - il log stampa l'esito nominativo di ogni album candidato e degli artisti rinviati; i conteggi usano
+    identita' uniche, evitando di sommare due volte errori e rinvii dello stesso album.
+  - i ritratti locali di alias bilingui vengono riutilizzati quando la corrispondenza tra cartelle e' univoca.
+
+Novita' 0.133 (coda artwork riprendibile, alias artista e diagnosi album):
+  - il cursore album/artista avanza soltanto dopo un elemento realmente completato; se tutti i provider
+    utili vanno in cooldown, la fase interrompe il batch senza saltare gli elementi non tentati. La run
+    successiva riparte dal primo candidato ancora incompleto, non dall'inizio o dalla fine del batch.
+  - ricerca ritratti rigorosamente nell'ordine nome inglese (gloss/NAME_TRANSLATIONS/NAME_FIXES/
+    traduzione automatica accettata) -> grafia originale; rimossa la query fonetica intermedia che
+    poteva consumare richieste prima del nome originale.
+  - se una cartella bilingue e una cartella col nome originale identificano in modo univoco lo stesso
+    artista, copia il file locale artist.* gia' valido invece di richiedere un nuovo download. In caso
+    di alias condiviso da piu' cartelle non effettua copie automatiche.
+  - report per run con esito di ogni album senza cover: scaricato, cache negativo, batch rinviato,
+    disaccordo cataloghi, immagine non valida o errore provider. Il riepilogo non confonde piu' i tentativi
+    effettivi con gli artisti saltati dopo il guasto della rete.
+  - corretti contatori duplicati nella struttura di ritorno artwork e aggiornato il formato cache v8.
+
+Novita' 0.132 (immagini originali Google-hosted):
+  - i risultati Google Images ospitati su googleusercontent.com/gstatic.com non vengono esclusi
+    in blocco: sono accettati solo se il file originale supera soglia byte, dimensioni e proporzioni;
+    i domini delle thumbnail `encrypted-tbn` restano rifiutati.
+
+Novita' 0.131 (refresh artwork Navidrome dopo i download):
+  - dopo uno scan libreria riuscito, i nuovi file cover/artist.* vengono applicati alla cache artwork
+    Navidrome con `artwork reprocess --kind ar --kind al --source absent --yes`; si ritentano solo
+    artisti e album attualmente senza immagine, senza rilanciare lookup esterni per tutta la libreria.
+  - l'assenza o l'incompatibilita' della CLI artwork nel container produce un avviso non bloccante.
+
+Novita' 0.130 (configurazione artwork artista):
+  - MISSING_ARTWORK_ARTIST_ENABLED controlla correttamente il recupero artisti; resta accettato
+    anche il nome interno storico MISSING_ARTWORK_ARTIST_ART_ENABLED per compatibilita'.
+
+Novita' 0.129 (Google Images fallback, immagini artista e traduzione cirillica):
+  - per le cover album ancora mancanti, dopo CAA/MusicBrainz e il consenso multi-catalogo viene cercata
+    Google Images con la query richiesta '<album> album cover', poi con artista+album. Sono accettati
+    soltanto URL HTTPS pubblici, redirect sicuri e immagini JPG/PNG/WEBP realmente decodificabili,
+    abbastanza grandi e con proporzioni da copertina; le immagini folder sane non vengono sostituite.
+  - aggiunta la ricerca delle immagini artista mancanti: il gloss inglese dei tag bilingui o la
+    traduzione/alias inglese viene provato prima della romanizzazione e del nome originale; ogni
+    variante passa da Deezer e poi Google Images. Le immagini vengono salvate come artist.* nella
+    cartella artista, secondo la priorita' locale predefinita di Navidrome, senza embedding audio.
+  - coda e cache negative per gli artisti separate da quelle degli album, con batch round-robin;
+    la cache v7 invalida i vecchi no-result album, che erano stati calcolati senza Google Images.
+  - l'auto-traduzione inglese include ora il cirillico russo. La traduzione semantica verificata
+    precede la romanizzazione fonetica; se Google restituisce soltanto una lettura fonetica, la
+    euristica la scarta e mantiene il fallback cirillico/traslitterato.
+
 Novita' 0.128 (artwork provider-aware, ripresa equa, audit FLAC #15 e fasi opzionali):
   - i circuit breaker artwork sono ora indipendenti per MusicBrainz, Cover Art Archive, Apple/iTunes e Deezer:
     un provider irraggiungibile non sospende gli altri; HTTP 429/5xx e rifiuti di connessione applicano
@@ -474,11 +762,13 @@ Novita' 0.124 (piano fasi ricalcolato, verifica artwork multi-catalogo e album a
     le fasi realmente previste. Il riepilogo tempi riallinea il totale al numero di fasi eseguite.
   - le cover locali sane vengono verificate contro il front approvato della release esatta nel Cover Art Archive;
     se la release esatta mostra una copertina diversa, la sostituzione richiede anche accordo visivo
-    Apple+Deezer con il front CAA e metadata concordi di almeno due cataloghi tra Apple, Deezer e Spotify.
+    multi-catalogo con il front CAA e metadata concordi di almeno due cataloghi tra Apple, Deezer e Spotify.
     Le immagini Spotify non vengono scaricate o salvate; Spotify viene usato solo come riscontro metadata.
   - se e' disponibile solo un release-group o manca l'MBID, la cover locale viene verificata contro
-    l'immagine concordata da Apple+Deezer; il match fuzzy non autorizza mai una sovrascrittura.
-    I fallback immagine Apple/Deezer richiedono corrispondenza forte artista+album e dHash concorde.
+    l'immagine concordata da multi-catalogo; il match fuzzy non autorizza mai una sovrascrittura.
+    I fallback TheAudioDB, Wikimedia Commons, Apple/iTunes e Deezer richiedono corrispondenza
+    prudente artista+album; una proposta album viene accettata solo con dHash concorde fra
+    almeno due provider indipendenti. Google Images resta un suggerimento di revisione.
   - le verifiche coprono anche gli album senza MBID, a lotti di massimo 50/run; la cache v4 viene
     invalidata per rifare le verifiche con le regole visive piu' severe (cache v5).
   - cleanup albumartist: collassa componenti ridondanti come 'The Prodigy, Prodigy' solo quando
@@ -1705,7 +1995,9 @@ import contextlib
 import csv
 import difflib
 import fnmatch
+import html
 import http.client
+import ipaddress
 import random
 import shutil
 import signal
@@ -2061,7 +2353,7 @@ def _colorize_terminal_text(text, stream):
 
         # Phase heading and its counter are separate palette roles. Counter has no
         # parentheses in the new terminal layout: === fase name === 2/22.
-        phase_start = re.match(r'^(=== fase .+? ===)(?:\s+(\d+/\d+))?$', line)
+        phase_start = re.match(r'^(=== fase .+? ===)(?:\s+(#?\d+(?:/\d+)?))?$', line)
         if phase_start:
             colored = _paint(phase_start.group(1), 'phase')
             if phase_start.group(2):
@@ -2861,6 +3153,8 @@ def _configure_storage_paths():
     """Apply env/.env paths after loading the environment file and before opening logs."""
     global HOMELAB_ROOT, ARR_CONFIG_ROOT, LIBRARY_ROOT, MUSIC_ROOT, PLAYLIST_DIR
     global SYNC_FILE, EXPORTIFY_DIR, ZIP_DIR, ZIP_LEGACY_DIRS, NAVIDROME_DB, DEDUPE_TRASH
+    global PLAYLIST_ARTWORK_PENDING_FILE, PLAYLIST_ARTWORK_REFRESH_MARKER
+    global PLAYLIST_DESCRIPTION_PENDING_FILE
     global CACHE_DIR, CACHE, EXF_STATE_DIR, EXF_COOKIE_DIR, LOG_DIR, _USER_CFG
     global JELLYFIN_ROOT, EXF_URL, MBDATE_CACHE, MBTITLE_CACHE, MB_ALBUMS_CACHE
     global FLAC16_CACHE, ARTWORK_CACHE, _NAVIDROME_DUPLICATE_REPAIR_CACHE, PROBE_CACHE
@@ -2872,6 +3166,9 @@ def _configure_storage_paths():
     MUSIC_ROOT = str(LIBRARY_ROOT)
     PLAYLIST_DIR = _red1_case_safe_path(_configured_path('E2M_PLAYLIST_DIR', LIBRARY_ROOT / 'Playlists'))
     SYNC_FILE = PLAYLIST_DIR / '.sync_state.json'
+    PLAYLIST_ARTWORK_PENDING_FILE = PLAYLIST_DIR / '.playlist_artwork_pending.json'
+    PLAYLIST_ARTWORK_REFRESH_MARKER = PLAYLIST_DIR / '.playlist_artwork_refresh_v139'
+    PLAYLIST_DESCRIPTION_PENDING_FILE = PLAYLIST_DIR / '.playlist_description_pending.json'
     EXPORTIFY_DIR = _red1_case_safe_path(_configured_path('E2M_EXPORTIFY_DIR', ARR_CONFIG_ROOT / 'exportify'))
     ZIP_DIR = _red1_case_safe_path(_configured_path('E2M_ZIP_DIR', ARR_CONFIG_ROOT / 'spotify_csv'))
     legacy = list(ZIP_LEGACY_DIRS)
@@ -2962,8 +3259,12 @@ _FRESH_EXTRACTED_USERS = set()
 _GENERATED_M3U_PATHS = {}
 _M3U_GENERATION_FAILED_USERS = set()
 _STALE_M3U_REMOVED_PATHS = []
+_PLAYLIST_ARTWORK_CHANGED_PATHS = set()  # sidecar aggiornati da refreshare nel DB Navidrome
+PLAYLIST_ARTWORK_PENDING_FILE = PLAYLIST_DIR / '.playlist_artwork_pending.json'
+PLAYLIST_ARTWORK_REFRESH_MARKER = PLAYLIST_DIR / '.playlist_artwork_refresh_v139'
+PLAYLIST_DESCRIPTION_PENDING_FILE = PLAYLIST_DIR / '.playlist_description_pending.json'
 
-VERSION = "0.128"  # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.151"  # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -3054,6 +3355,129 @@ def _normal_path(path):
     return Path(os.path.abspath(os.fspath(path)))
 
 
+def _playlist_artwork_pending_load():
+    """Legge i sidecar da aggiornare rimasti in sospeso dalle esecuzioni precedenti."""
+    try:
+        payload = json.loads(PLAYLIST_ARTWORK_PENDING_FILE.read_text(encoding='utf-8'))
+        values = payload.get('paths', []) if isinstance(payload, dict) else payload
+        if not isinstance(values, list):
+            return set()
+        return {_normal_path(value) for value in values if isinstance(value, str) and value.strip()}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def _playlist_artwork_pending_save(paths):
+    """Scrive atomicamente la coda persistente senza perdere i refresh rinviati."""
+    values = sorted({_normal_path(path).as_posix() for path in paths})
+    try:
+        PLAYLIST_ARTWORK_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PLAYLIST_ARTWORK_PENDING_FILE.with_name(PLAYLIST_ARTWORK_PENDING_FILE.name + '.tmp')
+        tmp.write_text(json.dumps({'version': 1, 'paths': values}, ensure_ascii=False, indent=2),
+                       encoding='utf-8')
+        os.replace(tmp, PLAYLIST_ARTWORK_PENDING_FILE)
+        return True
+    except OSError as exc:
+        print(f'[warn] coda refresh artwork playlist non salvata: {exc}',
+              file=sys.stderr, flush=True)
+        return False
+
+
+def _queue_playlist_artwork_refresh(m3u_path):
+    """Accoda un M3U modificato sia in memoria sia su disco."""
+    path = _normal_path(m3u_path)
+    _PLAYLIST_ARTWORK_CHANGED_PATHS.add(path)
+    pending = _playlist_artwork_pending_load()
+    pending.add(path)
+    _playlist_artwork_pending_save(pending)
+
+
+def _playlist_description_pending_load():
+    """Carica le descrizioni playlist ancora da sincronizzare con Navidrome."""
+    try:
+        payload = json.loads(PLAYLIST_DESCRIPTION_PENDING_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError):
+        return {}
+    records = payload.get('items', []) if isinstance(payload, dict) else []
+    out = {}
+    if not isinstance(records, list):
+        return out
+    for item in records:
+        if not isinstance(item, dict) or not item.get('path'):
+            continue
+        try:
+            path = _normal_path(item['path']).as_posix()
+        except (TypeError, ValueError, OSError):
+            continue
+        desc_present = bool(item.get('description_present'))
+        desc = item.get('description', '')
+        out[path] = {'path': path, 'description_present': desc_present,
+                     'description': desc if isinstance(desc, str) else '',
+                     'match_count': item.get('match_count'),
+                     'total_count': item.get('total_count'),
+                     'missing_count': item.get('missing_count')}
+    return out
+
+
+def _playlist_description_pending_save(items):
+    """Salva atomicamente le descrizioni da aggiornare, senza perdere i retry."""
+    values = []
+    source = items.values() if isinstance(items, dict) else items
+    for item in source:
+        if not isinstance(item, dict) or not item.get('path'):
+            continue
+        values.append({'path': _normal_path(item['path']).as_posix(),
+                       'description_present': bool(item.get('description_present')),
+                       'description': str(item.get('description') or ''),
+                       'match_count': _optional_nonnegative_int(item.get('match_count')),
+                       'total_count': _optional_nonnegative_int(item.get('total_count')),
+                       'missing_count': _optional_nonnegative_int(item.get('missing_count'))})
+    values.sort(key=lambda item: item['path'].casefold())
+    try:
+        PLAYLIST_DESCRIPTION_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PLAYLIST_DESCRIPTION_PENDING_FILE.with_name(
+            PLAYLIST_DESCRIPTION_PENDING_FILE.name + '.tmp')
+        tmp.write_text(json.dumps({'version': 1, 'items': values},
+                                  ensure_ascii=False, indent=2), encoding='utf-8')
+        os.replace(tmp, PLAYLIST_DESCRIPTION_PENDING_FILE)
+        return True
+    except OSError as exc:
+        print(f'[warn] coda descrizioni playlist non salvata: {exc}',
+              file=sys.stderr, flush=True)
+        return False
+
+
+def _optional_nonnegative_int(value):
+    try:
+        return max(0, int(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _queue_playlist_description_sync(m3u_path, playlist_meta=None, *,
+                                     match_count=None, total_count=None, missing_count=None):
+    """Accoda descrizione e contatori; description=null non cancella il testo già accodato."""
+    if not m3u_path:
+        return False
+    path = _normal_path(m3u_path).as_posix()
+    pending = _playlist_description_pending_load()
+    prior = pending.get(path, {'path': path, 'description_present': False, 'description': ''})
+    present = (isinstance(playlist_meta, dict) and
+               playlist_meta.get('description_present') is True and
+               isinstance(playlist_meta.get('description'), str))
+    if present:
+        prior['description_present'] = True
+        prior['description'] = playlist_meta['description']
+    for key, value in (('match_count', match_count), ('total_count', total_count),
+                       ('missing_count', missing_count)):
+        parsed = _optional_nonnegative_int(value)
+        if parsed is not None:
+            prior[key] = parsed
+    prior['path'] = path
+    pending[path] = prior
+    return _playlist_description_pending_save(pending)
+
+
 def _playlist_collision_key(value):
     """Chiave di collisione per alias di nomi playlist: ignora case, spazi e punteggiatura."""
     value = unicodedata.normalize('NFKC', str(value or '')).casefold()
@@ -3088,6 +3512,26 @@ def _db_playlist_relative_path(db_path):
     if not rel:
         return None
     return '/'.join(rel)
+
+
+def _playlist_artwork_relative_key(path):
+    """Chiave relativa M3U comune a path host, container e path DB relativi."""
+    if not path:
+        return None
+    try:
+        candidate = Path(os.path.abspath(os.fspath(path)))
+        root = Path(os.path.abspath(os.fspath(PLAYLIST_DIR)))
+        return candidate.relative_to(root).as_posix()
+    except (TypeError, ValueError, OSError):
+        relative = _db_playlist_relative_path(path)
+        if relative:
+            parts = Path(relative).parts
+            return Path(*parts).as_posix() if parts and '..' not in parts else None
+        raw = str(path).replace('\\', '/').strip()
+        # Alcune versioni/schema possono memorizzare il percorso gia' relativo.
+        if raw and not raw.startswith('/') and not any(part == '..' for part in raw.split('/')):
+            return Path(raw).as_posix()
+        return None
 
 
 def _record_generated_m3u(user, path):
@@ -3152,13 +3596,78 @@ def _playlist_filename(name):
 def _spotify_image_url(value):
     """Accetta solo URL HTTPS dei CDN immagine Spotify (no URL arbitrari)."""
     try:
-        parsed = urllib.parse.urlparse(str(value or ''))
+        raw = str(value or '').strip()
+        parsed = urllib.parse.urlsplit(raw)
         host = (parsed.hostname or '').lower().rstrip('.')
         spotify_host = (host == 'scdn.co' or host.endswith('.scdn.co') or
                         host == 'spotifycdn.com' or host.endswith('.spotifycdn.com'))
-        return str(value) if parsed.scheme == 'https' and spotify_host else ''
+        return (raw if parsed.scheme == 'https' and spotify_host and
+                parsed.username is None and parsed.password is None and
+                parsed.port in (None, 443) else '')
     except (TypeError, ValueError):
         return ''
+
+
+class _SpotifyCDNRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Blocca redirect Spotify che uscirebbero dalla whitelist CDN HTTPS."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _spotify_image_url(newurl):
+            raise urllib.error.HTTPError(req.full_url, code,
+                                         'redirect artwork fuori dai CDN Spotify bloccato',
+                                         headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _spotify_image_from_node(node):
+    """Estrae un URL artwork Spotify da varianti JSON osservate in Exportify."""
+    found = []
+    image_keys = {'image', 'images', 'imageurl', 'image_url', 'cover', 'coverurl', 'cover_url',
+                  'artwork', 'artworkurl', 'artwork_url', 'picture', 'pictureurl',
+                  'picture_url', 'src', 'url'}
+
+    def visit(value, key=''):
+        if isinstance(value, str):
+            if key.casefold().replace('-', '').replace('_', '') in image_keys:
+                url = _spotify_image_url(value)
+                if url and url not in found:
+                    found.append(url)
+        elif isinstance(value, dict):
+            # Prefer conventional URL fields, then inspect nested image objects.
+            for k in ('url', 'src', 'imageUrl', 'image_url', 'coverUrl', 'cover_url',
+                      'artworkUrl', 'artwork_url'):
+                if isinstance(value.get(k), str):
+                    url = _spotify_image_url(value[k])
+                    if url and url not in found:
+                        found.append(url)
+            for k, child in value.items():
+                if isinstance(child, (dict, list)):
+                    visit(child, str(k))
+                elif isinstance(child, str) and str(k).casefold().replace('-', '').replace('_', '') in image_keys:
+                    url = _spotify_image_url(child)
+                    if url and url not in found:
+                        found.append(url)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, key)
+
+    visit(node)
+    return found[0] if found else ''
+
+
+def _spotify_playlist_description(node):
+    """Ritorna (presente, testo): null/assente significa che Spotify non lo ha esposto."""
+    if not isinstance(node, dict):
+        return False, ''
+    for key in ('description', 'descriptionText', 'description_text'):
+        value = node.get(key)
+        if isinstance(value, str):
+            return True, value
+        if isinstance(value, dict):
+            for nested in ('text', 'value', 'description'):
+                candidate = value.get(nested)
+                if isinstance(candidate, str):
+                    return True, candidate
+    return False, ''
 
 
 def _spotify_playlist_records(payload):
@@ -3173,19 +3682,25 @@ def _spotify_playlist_records(payload):
             tracks = node.get('tracks')
             is_playlist = (ptype == 'playlist' or uri.startswith('spotify:playlist:') or
                            (isinstance(owner, dict) and isinstance(tracks, dict) and
-                            isinstance(node.get('images'), list)))
+                            any(k in node for k in ('images', 'image', 'imageUrl', 'coverUrl',
+                                                    'artworkUrl', 'description', 'descriptionText'))))
             if is_playlist and isinstance(node.get('name'), str):
                 pid = str(node.get('id') or uri.rsplit(':', 1)[-1]).strip()
                 if pid:
-                    image_url = ''
-                    for img in node.get('images') or []:
-                        if isinstance(img, dict):
-                            image_url = _spotify_image_url(img.get('url'))
-                            if image_url:
-                                break
-                    prior = found.get(pid)
-                    if prior is None or (not prior.get('image_url') and image_url):
-                        found[pid] = {'id': pid, 'name': node['name'], 'image_url': image_url}
+                    image_url = _spotify_image_from_node(node)
+                    description_present, description = _spotify_playlist_description(node)
+                    prior = found.get(pid) or {}
+                    # L'ultima risposta valida aggiorna il nome/descrizione; null non
+                    # cancella un valore già acquisito da una risposta precedente.
+                    record = {'id': pid, 'name': node['name'],
+                              'image_url': image_url or prior.get('image_url', '')}
+                    if description_present:
+                        record['description'] = description
+                        record['description_present'] = True
+                    elif prior.get('description_present'):
+                        record['description'] = prior.get('description', '')
+                        record['description_present'] = True
+                    found[pid] = record
             for value in node.values():
                 if isinstance(value, (dict, list)):
                     visit(value)
@@ -3195,6 +3710,21 @@ def _spotify_playlist_records(payload):
 
     visit(payload)
     return list(found.values())
+
+
+def _merge_spotify_playlist_record(previous, current):
+    """Merge duplicate captures, preferring latest non-empty cover/available description."""
+    if not isinstance(previous, dict):
+        return dict(current)
+    merged = dict(previous)
+    if current.get('name'):
+        merged['name'] = current['name']
+    if current.get('image_url'):
+        merged['image_url'] = current['image_url']
+    if current.get('description_present') and isinstance(current.get('description'), str):
+        merged['description'] = current['description']
+        merged['description_present'] = True
+    return merged
 
 
 def _map_playlist_metadata_to_zip(zip_path, records):
@@ -4001,8 +4531,10 @@ def _exf_fetch_user(pw, user, out_dir, headed, timeout_min):
                     return
                 for record in _spotify_playlist_records(response.json()):
                     old_record = playlist_records.get(record['id'])
-                    if old_record is None or (not old_record.get('image_url') and record.get('image_url')):
-                        playlist_records[record['id']] = record
+                    # Keep the latest non-empty image URL; the prior handler froze the
+                    # first image even when a later response carried the new cover.
+                    playlist_records[record['id']] = _merge_spotify_playlist_record(
+                        old_record, record)
             except Exception:
                 # La cattura metadata e' accessoria: non deve interrompere il download dei CSV.
                 pass
@@ -4049,7 +4581,7 @@ def _exf_fetch_user(pw, user, out_dir, headed, timeout_min):
                     }
                     _write_json_atomic(_archive_meta_path(dest), meta_payload,
                                        ensure_ascii=False, indent=2)
-                    print(f"[{user}] metadati Spotify: {len(mapped_meta)}/{n} CSV collegati "
+                    print(f"[{user}] metadati Spotify: {len(mapped_meta)}/{n} CSV collegati (nome/cover/descrizione) "
                           f"a nome originale e cover", flush=True)
                 else:
                     print(f"[{user}] [warn] ricevute {len(records)} playlist da Spotify ma "
@@ -4525,12 +5057,18 @@ MISSING_ARTWORK_CONFIG = {
     'max_verifications_per_run': 0,  # 0 = verifica tutte le cover sane in una run
     'verification_similarity_bits': 8,
     'cover_basename': 'cover',
+    'google_images': True,           # fallback Google Images solo per revisione, dopo CAA e cataloghi artwork
+    'min_google_album_dimension': 400,
+    'artist_art_enabled': True,      # salva artist.* nella cartella artista per Navidrome
+    'max_artist_per_run': 250,       # 0 = tutti gli artisti senza ritratto
+    'min_google_artist_dimension': 300,
 }
 
 # Proxy MP3 per Spotify Local Files: converte SOLO gli album esplicitamente configurati.
 # Output fuori da MUSIC_ROOT: Spotify li legge, ma Navidrome continua a usare i FLAC originali.
 SPOTIFY_LOCAL_PROXY_CONFIG = {
     'enabled': True,
+    'auto_sync': True,  # aggiorna auto_albums in automatico durante --all --apply
     'output_dir': '~/Music/Spotify Local Files',
     'bitrate': '32k',
     'channels': 1,
@@ -4547,7 +5085,7 @@ AUTO_NAME_TRANSLATION_CONFIG = {
     'max_new_per_run': 100,
     'cache_days': 365,
     'timeout': 8,
-    'failure_cooldown_hours': 6,
+    'failure_cooldown_hours': 24,
 }
 AUTO_NAME_TRANSLATION_CACHE = None
 AUTO_NAME_TRANSLATION_NEW = 0
@@ -4710,6 +5248,7 @@ def _config_entry_comment(path, key, value):
         if len(path) == 1:
             return {
                 'enabled': 'Abilita/disabilita la generazione e la scansione dei proxy.',
+                'auto_sync': 'Aggiorna automaticamente auto_albums durante --all; richiede credenziali Spotify se la cache non basta.',
                 'output_dir': 'Directory di output MP3; deve restare fuori dalla libreria Navidrome.',
                 'bitrate': 'Bitrate MP3 dei proxy, da 32k a 320k.',
                 'channels': 'Canali MP3 dei proxy: 1=mono (più compatto), 2=stereo.',
@@ -4853,6 +5392,10 @@ def load_user_config():
                 if not isinstance(proxy_cfg['enabled'], bool):
                     raise ValueError('SPOTIFY_LOCAL_PROXY.enabled deve essere booleano')
                 SPOTIFY_LOCAL_PROXY_CONFIG['enabled'] = proxy_cfg['enabled']
+            if 'auto_sync' in proxy_cfg:
+                if not isinstance(proxy_cfg['auto_sync'], bool):
+                    raise ValueError('SPOTIFY_LOCAL_PROXY.auto_sync deve essere booleano')
+                SPOTIFY_LOCAL_PROXY_CONFIG['auto_sync'] = proxy_cfg['auto_sync']
             if 'output_dir' in proxy_cfg:
                 output_dir = str(proxy_cfg['output_dir']).strip()
                 if not output_dir:
@@ -5006,13 +5549,24 @@ def _apply_environment_runtime_settings():
         TITLE_MATCH_PENALTIES[norm_bare(phrase)] = value
 
     # Artwork scan/download configuration.
-    artwork_bool = {'enabled', 'check_embedded_art', 'embed_audio', 'scan_after_download', 'verify_existing'}
+    artwork_bool = {'enabled', 'check_embedded_art', 'embed_audio', 'scan_after_download',
+                    'verify_existing', 'google_images', 'artist_art_enabled'}
     artwork_int = {'max_per_run', 'request_timeout', 'retry_days', 'min_image_bytes',
                    'min_existing_cover_bytes', 'max_image_bytes', 'max_verifications_per_run',
-                   'verification_similarity_bits'}
+                   'verification_similarity_bits', 'max_artist_per_run',
+                   'min_google_album_dimension', 'min_google_artist_dimension'}
+    artwork_bool_env_names = {
+        # Nome pubblico leggibile; il secondo mantiene compatibilita' con una
+        # variabile interna/documentata erroneamente nelle prime build v0.129.
+        'artist_art_enabled': ('MISSING_ARTWORK_ARTIST_ENABLED',
+                               'MISSING_ARTWORK_ARTIST_ART_ENABLED'),
+    }
     for field in artwork_bool:
-        key = 'MISSING_ARTWORK_' + field.upper()
-        if key in os.environ:
+        keys = artwork_bool_env_names.get(
+            field, ('MISSING_ARTWORK_' + field.upper(),))
+        # Il nome pubblico ha precedenza se entrambi sono presenti.
+        key = next((candidate for candidate in keys if candidate in os.environ), None)
+        if key:
             MISSING_ARTWORK_CONFIG[field] = _env_bool(key, MISSING_ARTWORK_CONFIG[field])
     for field in artwork_int:
         key = 'MISSING_ARTWORK_' + field.upper()
@@ -5035,7 +5589,7 @@ def _apply_environment_runtime_settings():
             MISSING_ARTWORK_CONFIG['min_existing_cover_bytes']):
         raise ValueError('MISSING_ARTWORK_MAX_IMAGE_BYTES deve superare MISSING_ARTWORK_MIN_IMAGE_BYTES e MISSING_ARTWORK_MIN_EXISTING_COVER_BYTES')
 
-    # Automatic CJK/Hangul translation configuration.
+    # Automatic CJK/Hangul/Cyrillic translation configuration.
     for field in ('enabled',):
         key = 'AUTO_NAME_TRANSLATION_' + field.upper()
         if key in os.environ:
@@ -5153,6 +5707,9 @@ def norm_bare(s):
     s = ''.join(c for c in s if not unicodedata.combining(c) or c in '\u3099\u309a')
     s = unicodedata.normalize('NFC', s)
     s = s.lower().strip()
+    # Canonicalize common suite/track abbreviations before punctuation removal.
+    # Spotify may use "(Pts. 6-9)" while the local tag/file says "Parts 6–9".
+    s = re.sub(r'\bpts?\.?(?=\s|$)', 'parts', s)
     s = re.sub(r'[^\w \U0001F300-\U0001FAFF\U00002600-\U000027BF]+', ' ', s)
     s = s.replace('_', ' ')
     return re.sub(r'\s+', ' ', s).strip()
@@ -5188,12 +5745,74 @@ def _artist_is_canonical_display(value):
                             for target in ARTIST_CANONICAL_NAMES.values()))
 
 
+_LIDARR_OFFICIAL_ARTIST_DISPLAY = {
+    'fred again': 'Fred again..',  # canonical MusicBrainz display; Lidarr may have a stripped legacy name
+}
+
+
+def _lidarr_artist_display_cleanup(value):
+    """Remove only the known accidental ``space + period`` suffix.
+
+    ``JPEGMAFIA .`` becomes ``JPEGMAFIA``. Do not trim punctuation generically:
+    ``Fred again..``, ``!!!``, ``AC/DC`` and ``Tyler, The Creator`` are intentional.
+    """
+    raw = unicodedata.normalize('NFKC', str(value or '')).strip()
+    if not raw:
+        return ''
+    # MusicBrainz's canonical display uses two final dots. Lidarr can retain an older
+    # punctuation-stripped metadata name, so restore this exact well-known canonical form.
+    # Keep this explicit rather than treating arbitrary terminal punctuation as removable.
+    override_key = re.sub(r'\s+', ' ', raw).casefold()
+    if override_key in _LIDARR_OFFICIAL_ARTIST_DISPLAY:
+        return _LIDARR_OFFICIAL_ARTIST_DISPLAY[override_key]
+    raw = re.sub(r'\s+\.$', '', raw).rstrip()
+    return re.sub(r'\s+', ' ', raw).strip()
+
 def _lidarr_trusted_artist_key(value):
-    """Exact identity key for a Lidarr artist display; keeps meaningful commas."""
-    raw = unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
+    """Identity key for trusted Lidarr displays; ignores stray terminal punctuation."""
+    raw = _lidarr_artist_display_cleanup(value).casefold()
     raw = re.sub(r'\s*,\s*', ', ', raw)
     return re.sub(r'\s+', ' ', raw)
 
+
+def _lidarr_artist_terminal_dots(value):
+    """Count explicit terminal dots in a display name (e.g. Fred again..)."""
+    match = re.search(r'\.+$', str(value or '').strip())
+    return len(match.group(0)) if match else 0
+
+
+def _lidarr_artist_display_punctuation(value):
+    """Count meaningful punctuation retained in an artist's official display."""
+    return sum(1 for char in str(value or '')
+               if unicodedata.category(char).startswith('P'))
+
+
+def _lidarr_trusted_artist_map(names):
+    """Build one canonical display per punctuation-insensitive Lidarr identity.
+
+    When Lidarr exposes both a punctuated official display (``Fred again..``) and
+    a punctuation-stripped duplicate (``Fred again``), preserve the explicit suffix.
+    Accidental ``JPEGMAFIA .`` is first cleaned to ``JPEGMAFIA``. Exact input keys
+    remain accepted, but every punctuation-only variant points to the same display.
+    """
+    rows = []
+    groups = {}
+    for raw in names or ():
+        display = _lidarr_artist_display_cleanup(raw)
+        identity = _lidarr_artist_identity_key(display)
+        key = _lidarr_trusted_artist_key(display)
+        if not identity or not key or not display:
+            continue
+        quality = (_lidarr_artist_display_punctuation(display),
+                   _lidarr_artist_terminal_dots(display), -len(display),
+                   display.casefold(), display)
+        if identity not in groups or quality > groups[identity][0]:
+            groups[identity] = (quality, display)
+        rows.append((identity, key))
+    chosen = {}
+    for identity, key in rows:
+        chosen[key] = groups[identity][1]
+    return chosen
 
 def _lidarr_trusted_artist_display(value):
     """Return Lidarr's exact display name, also rejoining old split aliases.
@@ -5211,6 +5830,15 @@ def _lidarr_trusted_artist_display(value):
     exact = _LIDARR_TRUSTED_ARTIST_NAMES.get(key) if key else None
     if exact:
         return exact
+    # v0.143-v0.145 stripped every terminal punctuation mark, so tags such as
+    # ``Fred again`` may be the damaged form of a real Lidarr name ``Fred again..``.
+    # Restore only when the punctuation-insensitive Lidarr identity is unique.
+    loose_key = _lidarr_artist_identity_key(raw)
+    if loose_key:
+        loose_matches = {display for display in _LIDARR_TRUSTED_ARTIST_NAMES.values()
+                         if _lidarr_artist_identity_key(display) == loose_key}
+        if len(loose_matches) == 1:
+            return next(iter(loose_matches))
     if ';' not in raw and '•' not in raw:
         return None
     parts = [re.sub(r'\s+', ' ', item).strip()
@@ -5267,7 +5895,7 @@ def _preferred_name(value):
     return _auto_translate_name(value)
 
 
-_AUTO_TRANSLATABLE_RE = re.compile(r'[぀-ヿ㐀-鿿豈-﫿\uac00-\ud7af]')
+_AUTO_TRANSLATABLE_RE = re.compile(r'[぀-ヿ㐀-鿿豈-﫿\uac00-\ud7af\u0400-\u04ff]')
 _AUTO_TRANSLATION_WARNED = False
 # Circuit breaker: se il provider web fallisce, non serializzare timeout per ogni nome CJK.
 _AUTO_TRANSLATION_PROVIDER_FAILED = False
@@ -5285,6 +5913,13 @@ def _auto_translation_cache_load():
         data = json.loads(path.read_text(encoding='utf-8'))
         if data.get('version') == 1 and isinstance(data.get('items', {}), dict):
             AUTO_NAME_TRANSLATION_CACHE = data.get('items', {})
+            # v0.141 negative entries were created when Google was the only provider.
+            # They must not suppress a MyMemory fallback for the next seven days.
+            AUTO_NAME_TRANSLATION_CACHE = {
+                key: value for key, value in AUTO_NAME_TRANSLATION_CACHE.items()
+                if not (isinstance(value, dict) and value.get('error') and
+                        value.get('provider') == 'google-web-heuristic')
+            }
             _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = int(
                 data.get('provider_unavailable_until') or 0)
             if _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL > int(time.time()):
@@ -5327,6 +5962,8 @@ def _auto_translation_phonetic(value):
             return norm(romanizer(value))
         except Exception:
             return ''
+    if _CYRILLIC.search(value):
+        return norm(_romanize_cyrillic(value))
     return ''
 
 
@@ -5375,7 +6012,7 @@ def _google_auto_translate_to_english(value):
         'https://translate.google.com/translate_a/single?',
     )
     errors = []
-    for endpoint_index, endpoint in enumerate(endpoints):
+    for endpoint in endpoints:
         url = endpoint + query
         # Un tentativo per host: il secondo e' un failover di dominio, non un retry
         # duplicato sullo stesso endpoint che allunga inutilmente il circuito aperto.
@@ -5405,6 +6042,72 @@ def _google_auto_translate_to_english(value):
     raise RuntimeError(' | '.join(errors) or 'traduzione non riuscita')
 
 
+_MYMEMORY_DAILY_BUDGET = 4500  # API docs: free anonymous tier is 5,000 chars/day
+_MYMEMORY_USAGE_FILE = CACHE_DIR / 'mymemory_translation_usage.json'
+_MYMEMORY_LOCK = threading.Lock()
+_MYMEMORY_LAST = [0.0]
+_MYMEMORY_USAGE_STATE = {'date': '', 'characters': 0}
+
+def _mymemory_auto_translate_to_english(value):
+    with _MYMEMORY_LOCK:
+        wait = 1.0 - (time.monotonic() - _MYMEMORY_LAST[0])
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return _mymemory_auto_translate_locked(value)
+        finally:
+            _MYMEMORY_LAST[0] = time.monotonic()
+
+def _mymemory_auto_translate_locked(value):
+    """Fallback translation provider with a conservative, persistent daily character budget."""
+    source = str(value or '').strip()
+    if not source or len(source.encode('utf-8')) > 450:
+        return ''
+    today = datetime.now(timezone.utc).date().isoformat()
+    usage = {'date': today, 'characters': 0}
+    try:
+        stored = json.loads(_MYMEMORY_USAGE_FILE.read_text(encoding='utf-8'))
+        if isinstance(stored, dict) and stored.get('date') == today:
+            usage['characters'] = max(0, int(stored.get('characters') or 0))
+    except (OSError, ValueError, TypeError):
+        pass
+    if _MYMEMORY_USAGE_STATE.get('date') == today:
+        usage['characters'] = max(usage['characters'],
+                                 int(_MYMEMORY_USAGE_STATE.get('characters') or 0))
+    amount = len(source)
+    if usage['characters'] + amount > _MYMEMORY_DAILY_BUDGET:
+        return ''
+    params = urllib.parse.urlencode({'q': source, 'langpair': 'autodetect|en', 'mt': '1'})
+    request = urllib.request.Request(
+        'https://api.mymemory.translated.net/get?' + params,
+        headers={'User-Agent': f'exportify_to_m3u/{VERSION} (https://github.com/Chic77/exportify-to-m3u)',
+                 'Accept': 'application/json'},
+    )
+    with urllib.request.urlopen(request, timeout=int(AUTO_NAME_TRANSLATION_CONFIG.get('timeout', 8))) as response:
+        raw_payload = response.read(1_000_001)
+    # The anonymous quota counts queried characters, not only successful translations.
+    # Charge every HTTP response so empty/error bodies cannot be retried indefinitely.
+    usage['characters'] += amount
+    _MYMEMORY_USAGE_STATE.update(usage)
+    try:
+        _MYMEMORY_USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _MYMEMORY_USAGE_FILE.with_name(_MYMEMORY_USAGE_FILE.name + f'.tmp-{os.getpid()}')
+        tmp.write_text(json.dumps(usage, separators=(',', ':')), encoding='utf-8')
+        os.replace(tmp, _MYMEMORY_USAGE_FILE)
+    except OSError as exc:
+        # In-memory usage still limits this process even if the cache path is read-only.
+        print(f'[warn] budget MyMemory non salvato: {exc}', file=sys.stderr)
+    if len(raw_payload) > 1_000_000:
+        return ''
+    payload = json.loads(raw_payload.decode('utf-8', errors='replace'))
+    if int(payload.get('responseStatus') or 0) != 200:
+        detail = str(payload.get('responseDetails') or 'MyMemory risposta non valida')[:160]
+        raise RuntimeError(detail)
+    translated = str((payload.get('responseData') or {}).get('translatedText') or '').strip()
+    translated = html.unescape(re.sub(r'\s+', ' ', translated))
+    return translated
+
+
 def _auto_translate_name(value):
     """Traduzione automatica prudente; provider offline => fonetica senza nuovi timeout."""
     global AUTO_NAME_TRANSLATION_NEW, _AUTO_TRANSLATION_WARNED, _AUTO_TRANSLATION_CACHE_DIRTY
@@ -5424,14 +6127,15 @@ def _auto_translate_name(value):
         if age <= ttl:
             if float(entry.get('confidence') or 0) >= float(cfg.get('min_confidence', 0.72)):
                 return str(entry.get('translation') or '')
-            if entry.get('error') and age < 7 * 86400:
-                return ''
+            if entry.get('error'):
+                # MyMemory's anonymous daily allowance resets; retry these provider
+                # failures after a day instead of retaining a week-long false negative.
+                error_ttl = 86400 if 'mymemory' in str(entry.get('provider') or '').casefold() else 7 * 86400
+                if age < error_ttl:
+                    return ''
             if not entry.get('error'):
                 return ''
-    # Le traduzioni gia' in cache si possono usare anche durante il cooldown; non fare
-    # richieste HTTP nuove dopo un fallimento, altrimenti 100 nomi possono serializzare minuti.
-    if _AUTO_TRANSLATION_PROVIDER_FAILED:
-        return ''
+    # Un cooldown Google preesistente non deve bloccare il fallback alternativo MyMemory.
     max_new = int(cfg.get('max_new_per_run', 100))
     if max_new and AUTO_NAME_TRANSLATION_NEW >= max_new:
         if not _AUTO_TRANSLATION_WARNED:
@@ -5440,28 +6144,50 @@ def _auto_translate_name(value):
             _AUTO_TRANSLATION_WARNED = True
         return ''
     AUTO_NAME_TRANSLATION_NEW += 1
-    try:
-        translated = _google_auto_translate_to_english(value)
-    except Exception as e:
-        # Circuit breaker persistente: un errore definitivo/rete non deve moltiplicarsi
-        # per ogni nome della libreria. Dopo il cooldown una run futura testa di nuovo il provider.
-        cooldown_hours = max(1, int(cfg.get('failure_cooldown_hours', 6)))
-        _AUTO_TRANSLATION_PROVIDER_FAILED = True
-        _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = now + cooldown_hours * 3600
-        if not _AUTO_TRANSLATION_WARNED:
-            reason = str(e).replace('\n', ' ').strip()[:240]
-            print(f'[warn] traduzione automatica non disponibile ({reason or type(e).__name__}); '
-                  f'uso la fonetica e sospendo le richieste per {cooldown_hours}h',
-                  file=sys.stderr)
-            _AUTO_TRANSLATION_WARNED = True
-        cache[key] = {'source': value, 'translation': '', 'confidence': 0.0,
-                      'provider': 'google-web-heuristic', 'checked_at': now, 'error': str(e)[:160]}
-        _AUTO_TRANSLATION_CACHE_DIRTY = True
-        return ''
+    provider = 'google-web-heuristic'
+    google_error = RuntimeError('Google in cooldown persistente') if _AUTO_TRANSLATION_PROVIDER_FAILED else None
+    if google_error is None:
+        try:
+            translated = _google_auto_translate_to_english(value)
+        except Exception as exc:
+            google_error = exc
+    if google_error is not None:
+        # Cache Google 429/503 across the remaining phase and later runs. Do not
+        # suppress MyMemory: it remains the active fallback while Google cools down.
+        if not _AUTO_TRANSLATION_PROVIDER_FAILED:
+            cooldown_hours = max(1, int(cfg.get('failure_cooldown_hours', 24)))
+            _AUTO_TRANSLATION_PROVIDER_FAILED = True
+            _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = now + cooldown_hours * 3600
+            _AUTO_TRANSLATION_CACHE_DIRTY = True
+        try:
+            translated = _mymemory_auto_translate_to_english(value)
+            if not translated:
+                raise RuntimeError('budget MyMemory esaurito o risposta senza traduzione')
+            provider = 'mymemory'
+            if not _AUTO_TRANSLATION_WARNED:
+                print('[i] traduzione Google limitata; completamento tramite MyMemory.', file=sys.stderr)
+                _AUTO_TRANSLATION_WARNED = True
+        except Exception as memory_error:
+            # Circuit breaker persisted: failed providers must not serialize a timeout per name.
+            cooldown_hours = max(1, int(cfg.get('failure_cooldown_hours', 24)))
+            _AUTO_TRANSLATION_PROVIDER_FAILED = True
+            _AUTO_TRANSLATION_PROVIDER_UNAVAILABLE_UNTIL = now + cooldown_hours * 3600
+            if not _AUTO_TRANSLATION_WARNED:
+                reason = (f'Google: {str(google_error)} | MyMemory: {str(memory_error)}')
+                reason = reason.replace('\n', ' ').strip()[:240]
+                print(f'[warn] traduzione automatica non disponibile ({reason}); '
+                      f'uso la fonetica e sospendo le richieste per {cooldown_hours}h',
+                      file=sys.stderr)
+                _AUTO_TRANSLATION_WARNED = True
+            cache[key] = {'source': value, 'translation': '', 'confidence': 0.0,
+                          'provider': 'google+mymemory', 'checked_at': now,
+                          'error': str(memory_error)[:160]}
+            _AUTO_TRANSLATION_CACHE_DIRTY = True
+            return ''
 
     confidence = _auto_translation_confidence(value, translated, _auto_translation_phonetic(value))
     cache[key] = {'source': value, 'translation': translated, 'confidence': confidence,
-                  'provider': 'google-web-heuristic', 'checked_at': now}
+                  'provider': provider, 'checked_at': now}
     _AUTO_TRANSLATION_CACHE_DIRTY = True
     if confidence >= float(cfg.get('min_confidence', 0.72)):
         return translated
@@ -5750,7 +6476,7 @@ def scan_library(root, rels=None):
     return by_full, by_artist, by_strict, path_qual, n
 
 
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 
 
 def _config_crc():
@@ -6171,15 +6897,18 @@ def _best_match_hit(hits, requested_title, allow_penalized=False, use_waveform=T
 
 
 def find_match(by_full, by_artist, by_strict, path_qual, artist, album, title,
-               threshold, _trace=None):
-    """Cerca il file della libreria per (artista, album, titolo). I risultati sono
-    memoizzati per tutta l'esecuzione: le playlist Spotify si sovrappongono
-    molto (stessi brani in 10 playlist) e i mancanti costavano il fuzzy
-    ogni volta. Con _trace (diagnostica --explain) niente memo."""
+               threshold, _trace=None, exclude_paths=None, exact_only=False):
+    """Cerca un file per artista/album/titolo.
+
+    Le ricerche normali sono memoizzate. Le ricerche con path gia' occupati da un'altra
+    riga della stessa playlist non usano la memo e possono limitarsi ai match esatti,
+    evitando di assegnare una variante simile ma diversa al brano sbagliato.
+    """
     prep = _get_prep(by_full, by_artist, by_strict, path_qual)
-    if _trace is not None:
+    if _trace is not None or exclude_paths or exact_only:
         return _find_match_impl(prep, by_full, by_artist, by_strict, path_qual,
-                                artist, album, title, threshold, _trace)
+                                artist, album, title, threshold, _trace,
+                                exclude_paths=exclude_paths, exact_only=exact_only)
     key = (artist, album, title, threshold)
     if key in prep.memo:
         return prep.memo[key]
@@ -6189,7 +6918,12 @@ def find_match(by_full, by_artist, by_strict, path_qual, artist, album, title,
 
 
 def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, album,
-                     title, threshold, _trace=None):
+                     title, threshold, _trace=None, exclude_paths=None, exact_only=False):
+    excluded = {str(path) for path in (exclude_paths or ())}
+
+    def _allowed(path):
+        return str(path) not in excluded
+
     # override per-singolo brano (FORCE_ARTIST da exportify_names.json)
     _fk = norm(f"{artist} - {title}")
     if _fk in FORCE_ARTIST:
@@ -6273,6 +7007,8 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
         cands = []
         for a in akeys:
             for pth in (by_strict or {}).get((a, st_full), []):
+                if not _allowed(pth):
+                    continue
                 cands.append((pth, _alb_score(pth),
                               (path_qual or {}).get(pth, False), 0,
                               _artist_score(pth), 2))
@@ -6316,6 +7052,8 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
     f1 = []
     for a in akeys:
         for pth in (by_full or {}).get((a, nal, nt), []):
+            if not _allowed(pth):
+                continue
             # bonus di specificita': se il NOME FILE contiene la variante
             # lunga della query (nb, parentesi inclusa), il candidato e'
             # piu' specifico degli altri che matchano solo il titolo secco.
@@ -6345,8 +7083,13 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
             continue
         for t in nts:
             for pth in idx.get(t, ()):
+                if not _allowed(pth):
+                    continue
                 hits.append((pth, _alb_score(pth), _qual(t, pth), len(t),
                              _artist_score(pth), 1))   # exact: batte contenimento
+
+    if exact_only:
+        return _pick(hits)
 
     # 3) contenimento del titolo dentro l'artista (stessa preferenza puliti)
     for a in akeys:
@@ -6368,8 +7111,9 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
                     # traccia della cartella) supera il titolo vero (caso
                     # Iron Maiden 'Fear of the Dark - 2015 Remaster').
                     spec = len(t) if t in lt else len(lt)
-                    matched.extend(zip(posd[lt], idx[lt], [lt] * len(idx[lt]),
-                                       [spec] * len(idx[lt]), strict=True))
+                    for position, candidate_path in zip(posd[lt], idx[lt], strict=True):
+                        if _allowed(candidate_path):
+                            matched.append((position, candidate_path, lt, spec))
             matched.sort(key=lambda m: m[0])      # stesso ordine del pool originale
             for _pos, pth, lt, spec in matched:
                 _h = (pth, _alb_score(pth), _qual(lt, pth), spec,
@@ -6391,6 +7135,8 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
             close = prep.fz_title(a, t, threshold)
             if close is not None:
                 for pth in idx[close]:
+                    if not _allowed(pth):
+                        continue
                     _h = (pth, _alb_score(pth), _qual(close, pth), len(t),
                           _artist_score(pth), 1)
                     hits.append(_h)
@@ -6415,6 +7161,8 @@ def _find_match_impl(prep, by_full, by_artist, by_strict, path_qual, artist, alb
                 close_t = _close1(t, lens, max(threshold, 0.85))
                 if close_t is not None:
                     for pth in idx[close_t]:
+                        if not _allowed(pth):
+                            continue
                         hits.append((pth, _alb_score(pth), _qual(close_t, pth),
                                      len(t), _artist_score(pth), 1))
     got = _best_match_hit(hits, title, allow_penalized=True)
@@ -6555,7 +7303,7 @@ def _lidarr_csv_columns(fieldnames):
 
 
 def _lidarr_record_missing_metadata(track_key, row, columns, fallback_artist=''):
-    """Conserva il credito dell'album e la sua identita' Spotify per le sole tracce mancanti.
+    """Conserva il credito dell'album e la sua identita' Spotify delle righe Exportify.
 
     MISSING_ALL resta compatibile con tutti i report esistenti (chiave artista/album/titolo);
     questa mappa parallela evita di trasformare i featuring delle tracce in artisti album Lidarr.
@@ -6587,13 +7335,41 @@ def _lidarr_record_missing_metadata(track_key, row, columns, fallback_artist='')
             current[field] = value
 
 
+def _lidarr_record_playlist_album(track_key, row, columns, fallback_artist='', source=''):
+    """Registra ogni album Spotify delle playlist, anche se tutte le tracce sono locali."""
+    if not isinstance(track_key, tuple) or len(track_key) != 3:
+        return
+    artist, album, title = (str(value or '').strip() for value in track_key)
+    if not artist or not album:
+        return
+    sources = LIDARR_PLAYLIST_ALBUMS.setdefault((artist, album, title), set())
+    if source:
+        sources.add(str(source))
+    _lidarr_record_missing_metadata((artist, album, title), row, columns,
+                                    fallback_artist=fallback_artist or artist)
+
+
+def _lidarr_record_album_mismatch(track_key, source=''):
+    """Annota un brano trovato in libreria sotto un album diverso da quello Spotify."""
+    if not isinstance(track_key, tuple) or len(track_key) != 3:
+        return
+    key = tuple(str(value or '').strip() for value in track_key)
+    if not key[0] or not key[1]:
+        return
+    LIDARR_ALBUM_MISMATCHES.setdefault(key, set()).add(str(source or 'playlist'))
+
+
 def report_missing(files, by_full, by_artist, by_strict, path_qual, threshold, out='-', emit_output=True):
-    """Elenco di TUTTE le tracce che mancano in libreria, RICALCOLATO adesso dai
-    CSV delle playlist attive contro la libreria attuale. Non legge i
-    .missing.txt (che possono contenere righe vecchie: playlist saltate, rinominate
-    o cancellate), non scrive playlist e non tocca nulla."""
+    """Ricalcola tracce mancanti e raccoglie TUTTI gli album Spotify presenti nei CSV.
+
+    La lista missing resta limitata alle tracce assenti; per Lidarr viene però conservata
+    anche l'identità di ogni album playlist, compresi album già presenti nella libreria.
+    """
     missing = {}
     n_rows = 0
+    LIDARR_PLAYLIST_ALBUMS.clear()
+    LIDARR_ALBUM_MISMATCHES.clear()
+    LIDARR_MISSING_METADATA.clear()
     for csv_path in files:
         raw = csv_path.read_bytes()
         with io.StringIO(raw.decode('utf-8-sig')) as fh:
@@ -6602,14 +7378,18 @@ def report_missing(files, by_full, by_artist, by_strict, path_qual, threshold, o
             ct = pick_col(fieldnames, COLS['title'])
             ca = pick_col(fieldnames, COLS['artist'])
             cal = pick_col(fieldnames, COLS['album'])
+            cu = pick_col(fieldnames, COLS['uri'])
             lidarr_columns = _lidarr_csv_columns(fieldnames)
             if not ct or not ca:
                 print(f"[!] {csv_path.name}: intestazioni non riconosciute, saltato", file=sys.stderr)
                 continue
+            cu_user = _csv_user(csv_path)
+            playlist_label = (f"{cu_user}: " if cu_user != DEFAULT_USER else '') +                              re.sub(r'\s+_\s+', ' / ', csv_path.stem)
             for row in reader:
-                title = (row.get(ct) or '').strip().strip('"')
-                artist = clean_artist(row.get(ca))
-                album = (row.get(cal) or '').strip().strip('"') if cal else ''
+                local_meta = _spotify_local_uri_metadata(row.get(cu)) if cu else None
+                title = (row.get(ct) or '').strip().strip('"') or (local_meta or {}).get('title', '')
+                artist = clean_artist(row.get(ca) or (local_meta or {}).get('artist', ''))
+                album = ((row.get(cal) or '').strip().strip('"') if cal else '') or                         (local_meta or {}).get('album', '')
                 if not title or not artist:
                     continue
                 n_rows += 1
@@ -6617,17 +7397,21 @@ def report_missing(files, by_full, by_artist, by_strict, path_qual, threshold, o
                 if ov:
                     artist = ov.get('artist', artist)
                     album = ov.get('album', album)
+                track_key = (artist, album, title)
+                _lidarr_record_playlist_album(track_key, row, lidarr_columns,
+                                              fallback_artist=artist, source=playlist_label)
                 path = find_match(by_full, by_artist, by_strict, path_qual,
                                   artist, album, title, threshold)
                 if not path and album:
-                    path = find_match(by_full, by_artist, by_strict, path_qual,
-                                      artist, '', title, threshold)
+                    # Mantieni il match permissivo per la diagnosi della libreria, ma
+                    # non perdere l'album Spotify originale come candidato Lidarr.
+                    loose_path = find_match(by_full, by_artist, by_strict, path_qual,
+                                            artist, '', title, threshold)
+                    if loose_path:
+                        _lidarr_record_album_mismatch(track_key, playlist_label)
+                    path = loose_path
                 if not path:
-                    missing_key = (artist, album, title)
-                    cu = _csv_user(csv_path)
-                    pl = (f"{cu}: " if cu != DEFAULT_USER else '') + re.sub(r'\s+_\s+', ' / ', csv_path.stem)
-                    missing.setdefault(missing_key, set()).add(pl)
-                    _lidarr_record_missing_metadata(missing_key, row, lidarr_columns, fallback_artist=artist)
+                    missing.setdefault(track_key, set()).add(playlist_label)
     rows = sorted(missing, key=lambda k: (k[0].lower(), k[1].lower(), k[2].lower()))
     text = ''.join(f"{a} - {al} - {t}\n" for a, al, t in rows)
     if emit_output:
@@ -6638,8 +7422,14 @@ def report_missing(files, by_full, by_artist, by_strict, path_qual, threshold, o
             sys.stdout.write(text)
     arts = Counter(k[0] for k in rows)
     albs = Counter((k[0], k[1]) for k in rows)
+    playlist_albums = {(key[0], key[1]) for key in LIDARR_PLAYLIST_ALBUMS}
+    mismatch_tracks = len(LIDARR_ALBUM_MISMATCHES)
+    mismatch_albums = {(key[0], key[1]) for key in LIDARR_ALBUM_MISMATCHES}
     print(f"[i] {len(rows)} tracce mancanti ({len(arts)} artisti, {len(albs)} coppie artista/album) "
           f"su {n_rows} righe di {len(files)} playlist", file=sys.stderr)
+    print(f"[i] candidati playlist per Lidarr: {len(playlist_albums)} album distinti; "
+          f"{mismatch_tracks} tracce già trovate sotto un album locale diverso "
+          f"({len(mismatch_albums)} album Spotify coinvolti)", file=sys.stderr)
     if emit_output and albs:
         print("[i] album con piu' tracce mancanti:", file=sys.stderr)
         for (a, al), c in albs.most_common(12):
@@ -6672,7 +7462,10 @@ def _download_spotify_image(url):
     if not url:
         raise ValueError('URL artwork non riconosciuto come CDN Spotify')
     request = urllib.request.Request(url, headers={'User-Agent': f'exportify-to-m3u/{VERSION}'})
-    with urllib.request.urlopen(request, timeout=20) as response:
+    opener = urllib.request.build_opener(_SpotifyCDNRedirectHandler())
+    with opener.open(request, timeout=20) as response:
+        if not _spotify_image_url(response.geturl()):
+            raise ValueError('redirect artwork finale fuori dai CDN Spotify')
         content_type = response.headers.get('Content-Type', '')
         length = response.headers.get('Content-Length')
         if length and length.isdigit() and int(length) > 20 * 1024 * 1024:
@@ -6697,7 +7490,10 @@ def _sync_playlist_artwork(m3u_path, image_url, state, dry_run=False, metadata_p
             candidate = Path(m3u_path).parent / Path(current_file).name
             try:
                 if candidate in _playlist_sidecar_paths(m3u_path):
+                    existed = candidate.exists()
                     candidate.unlink(missing_ok=True)
+                    if existed:
+                        _queue_playlist_artwork_refresh(m3u_path)
                 if isinstance(state, dict):
                     state.pop('art_url', None)
                     state.pop('art_file', None)
@@ -6706,10 +7502,15 @@ def _sync_playlist_artwork(m3u_path, image_url, state, dry_run=False, metadata_p
         return
 
     sidecars = _playlist_sidecar_paths(m3u_path)
-    if (isinstance(state, dict) and state.get('art_url') == image_url and
-            state.get('art_file') and
-            (Path(m3u_path).parent / Path(state['art_file']).name).is_file()):
-        return
+    if isinstance(state, dict) and state.get('art_url') == image_url and state.get('art_file'):
+        cached_file = Path(m3u_path).parent / Path(state['art_file']).name
+        try:
+            if cached_file.is_file() and cached_file.stat().st_size > 0:
+                with cached_file.open('rb') as stream:
+                    if _image_extension(stream.read(32)):
+                        return
+        except OSError:
+            pass
     if dry_run:
         print(f"[dry-run] cover Spotify: {Path(m3u_path).stem}")
         return
@@ -6720,6 +7521,7 @@ def _sync_playlist_artwork(m3u_path, image_url, state, dry_run=False, metadata_p
         tmp = target.with_name(target.name + '.tmp')
         tmp.write_bytes(data)
         os.replace(tmp, target)
+        _queue_playlist_artwork_refresh(m3u_path)
         for old in sidecars:
             if old != target:
                 old.unlink(missing_ok=True)
@@ -6813,45 +7615,100 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
                   file=sys.stderr)
             return False
 
-        matched, missing, seen, skipped, local_rows = [], [], 0, 0, 0
+        matched_by_index, missing_by_index = {}, {}
+        seen, skipped, local_rows = 0, 0, 0
         seen_paths = set()
         rows = list(reader)
-        progress = _ProgressBar('matching playlist', len(rows), 'brani', stream=sys.stdout, subphase=True)
-        for row_index, row in enumerate(rows, 1):
-            progress.update(row_index)
+        prepared_rows = []
+        for source_index, row in enumerate(rows):
             local_meta = _spotify_local_uri_metadata(row.get(cu)) if cu else None
             if local_meta:
                 local_rows += 1
             title = (row.get(ct) or '').strip().strip('"') or (local_meta or {}).get('title', '')
             artist = clean_artist(row.get(ca) or (local_meta or {}).get('artist', ''))
             album = ((row.get(cal) or '').strip().strip('"') if cal else '') or (local_meta or {}).get('album', '')
-            if not title or not artist:
+            if title and artist:
+                ov = csv_override(csv_path.stem, artist, title)
+                if ov:
+                    artist = ov.get('artist', artist)
+                    album = ov.get('album', album)
+            prepared_rows.append({'index': source_index, 'row': row, 'title': title,
+                                  'artist': artist, 'album': album,
+                                  'valid': bool(title and artist)})
+
+        def _assignment_priority(item):
+            """Specific/exact songs run before broad or ambiguous titles."""
+            if not item['valid']:
+                return (3, 0, 0, item['index'])
+            artist_name, album_name, track_title = item['artist'], item['album'], item['title']
+            strict_title = norm_bare(track_title)
+            artist_keys = set()
+            for component in split_artists(artist_name, by_artist):
+                for base_name in {component, ALIASES.get(component, component), _canon(component)} - {''}:
+                    artist_keys.add(base_name)
+                    romanized = to_romaji(base_name)
+                    if romanized:
+                        artist_keys.add(romanized)
+                        artist_keys.add(''.join(romanized.split()))
+            strict_paths = {path for akey in artist_keys
+                            for path in (by_strict or {}).get((akey, strict_title), ())}
+            full_paths = {path for akey in artist_keys
+                          for path in (by_full or {}).get((akey, norm(album_name), norm(track_title)), ())}
+            exact_paths = strict_paths or full_paths
+            # Unique strict matches have priority; among ties, longer full titles carry
+            # more distinguishing information (e.g. Pts. 1-5 vs Pts. 6-9).
+            return (0 if exact_paths else 1, len(exact_paths) if exact_paths else 10**9,
+                    -len(strict_title), item['index'])
+
+        ordered_rows = sorted(prepared_rows, key=_assignment_priority)
+        progress = _ProgressBar('matching playlist', len(rows), 'brani', stream=sys.stdout, subphase=True)
+        for progress_index, item in enumerate(ordered_rows, 1):
+            progress.update(progress_index)
+            row, title, artist, album = item['row'], item['title'], item['artist'], item['album']
+            source_index = item['index']
+            if not item['valid']:
                 skipped += 1
                 continue
             seen += 1
-            ov = csv_override(csv_path.stem, artist, title)
-            if ov:
-                artist = ov.get('artist', artist)
-                album = ov.get('album', album)
             SEEN_ALL.setdefault((artist, album, title), set()).add((user, pl_name))
+            track_key = (artist, album, title)
+            if album:
+                _lidarr_record_playlist_album(track_key, row, lidarr_columns,
+                                              fallback_artist=artist, source=f'{user}: {pl_name}')
             path = find_match(by_full, by_artist, by_strict, path_qual,
                               artist, album, title, args.threshold)
             if not path and album:
-                # retry senza album: stessa canzone puo' avere stringhe
-                # album diverse tra playlist (una matcha, l'altra no)
+                # Il brano puo' esistere sotto un'altra release: conserva il file per la M3U,
+                # ma segnala a Lidarr l'album Spotify originale da monitorare.
+                loose_path = find_match(by_full, by_artist, by_strict, path_qual,
+                                        artist, '', title, args.threshold)
+                if loose_path:
+                    _lidarr_record_album_mismatch(track_key, f'{user}: {pl_name}')
+                path = loose_path
+            if path in seen_paths:
+                # Il primo match era gia' stato assegnato a una riga piu' specifica.
+                # Cerca un secondo candidato soltanto fra i titoli esatti: mai sostituire
+                # Pts. 6-9 con una versione fuzzy di Pts. 1-5 (o viceversa).
                 path = find_match(by_full, by_artist, by_strict, path_qual,
-                                  artist, '', title, args.threshold)
-            if path:
-                if path in seen_paths:      # niente duplicati nella playlist
-                    continue
+                                  artist, album, title, args.threshold,
+                                  exclude_paths=seen_paths, exact_only=True)
+                if not path and album:
+                    path = find_match(by_full, by_artist, by_strict, path_qual,
+                                      artist, '', title, args.threshold,
+                                      exclude_paths=seen_paths, exact_only=True)
+            if path and path not in seen_paths:
                 seen_paths.add(path)
-                matched.append((artist, title, path))
+                matched_by_index[source_index] = (artist, title, path)
             else:
-                missing.append(f"{artist} - {album} - {title}")
+                missing_text = f"{artist} - {album} - {title}"
+                missing_by_index[source_index] = missing_text
                 missing_key = (artist, album, title)
                 MISSING_ALL.setdefault(missing_key, set()).add((user, pl_name))
                 _lidarr_record_missing_metadata(missing_key, row, lidarr_columns, fallback_artist=artist)
         progress.close(complete=True)
+        # Assignment order is optimized above, but playlist order remains Spotify's order.
+        matched = [matched_by_index[i] for i in range(len(rows)) if i in matched_by_index]
+        missing = [missing_by_index[i] for i in range(len(rows)) if i in missing_by_index]
 
     # IL FIX CHIAVE: niente piu' playlist vuote senza spiegazione
     if seen == 0:
@@ -6886,6 +7743,8 @@ def process_csv(csv_path, by_full, by_artist, by_strict, path_qual, args, user=N
              PLAYLIST_FOLDERS.get(base) or PLAYLIST_FOLDERS.get(base.lower()) or auto_folder
     out_dir = (root / folder) if folder else root
     out_path = out_dir / f"{base}.m3u"
+    if not args.dry_run:
+        _queue_playlist_description_sync(out_path, playlist_meta if metadata_present else None, match_count=len(matched), total_count=seen, missing_count=len(missing))
     if not args.dry_run:        # il dry-run non crea cartelle ne' cancella nulla
         out_dir.mkdir(parents=True, exist_ok=True)
         if folder:      # spostata in sottocartella: rimuovi i file piatti vecchi (nome nuovo e originale)
@@ -7371,6 +8230,8 @@ def _embed_report_in_main_log(title, lines):
 MISSING_ALL = {}      # quelle NON trovate in libreria
 SEEN_ALL = {}         # TUTTE quelle lette dai CSV (servono ai totali X/Y)
 LIDARR_MISSING_METADATA = {}  # (artista, album, traccia) -> identita' Album URI/album-artist/date Spotify
+LIDARR_PLAYLIST_ALBUMS = {}  # tutti gli album presenti nei CSV playlist, anche se i brani sono locali
+LIDARR_ALBUM_MISMATCHES = {}  # brani locali trovati sotto una release diversa da quella Spotify
 MISSING_TOP_PLAYLISTS = 20
 MISSING_TOP_ALBUMS = 10
 
@@ -7601,16 +8462,17 @@ def _romkey(x):
 
 
 def _romanize_core(s):
-    """Lettura latina di CJK, Hangul o cirillico ('' se non disponibile)."""
+    """Traduzione inglese/alias prima della lettura fonetica per CJK, Hangul e cirillico."""
     global _WARNED_HANGUL
-    if _CYRILLIC.search(s):
-        return _romanize_cyrillic(s)
-    ko = _HANGUL.search(s) and not _CJK.search(s)
-    # Traduzione/forma inglese ufficiale (NAME_TRANSLATIONS) e poi alias manuale
-    # (NAME_FIXES) battono la romanizzazione fonetica, anche nella manutenzione tag.
+    # Per tutti gli script non latini, mapping curati e traduzione automatica hanno
+    # precedenza sulla lettura fonetica. In particolare il cirillico non deve uscire
+    # qui prima di provare _preferred_name(), altrimenti Google Translate non viene mai usato.
     r = _preferred_name(s)
     if r:
         return r
+    if _CYRILLIC.search(s):
+        return _romanize_cyrillic(s)
+    ko = _HANGUL.search(s) and not _CJK.search(s)
     if ko:
         # coreano puro (kakasi non lo tocca)
         if _HAS_HANGUL:
@@ -8154,14 +9016,15 @@ def _unify_target_matches(actual, target):
 
 
 def _dominant_original_date(tags):
-    """Pick a reliable album-wide original date from mixed DATE/ORIGINALDATE tags.
+    """Pick a reliable album-wide ORIGINALDATE consensus.
 
-    Only returns a date if one year has at least two tracks and >=60% of dated tracks;
-    ambiguous release-year conflicts are left untouched for manual review.
+    DATE can describe the specific reissue/remaster and must not be promoted to an original
+    date when MusicBrainz is unavailable. Only ORIGINALDATE evidence is eligible; a year is
+    returned when at least two tracks and >=60% of dated tracks agree.
     """
     dated = []
     for tag in tags:
-        value = str(tag.get('originaldate') or tag.get('date') or '').strip()
+        value = str(tag.get('originaldate') or '').strip()
         match = re.match(r'^(\d{4})(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?', value)
         if match:
             dated.append((match.group(1), value))
@@ -8296,8 +9159,12 @@ def run_unify(dry_run=False, base=None, album_dirs_only=None):
                     disc_title = _album_disc_group_title([t.get('album') for t in tags])
                     if disc_title:
                         top = disc_title
-                if k == 'originaldate':
-                    reliable_date = _dominant_original_date(tags)
+                if k in ('originaldate', 'releasedate'):
+                    # First apply an exact source-verified title override (e.g. Radiohead
+                    # original album years); otherwise prefer a reliable ORIGINALDATE consensus.
+                    # A stale RELEASEDATE must never defeat either source.
+                    reliable_date = (_curated_original_year_for_album(album, tags)
+                                     or _dominant_original_date(tags))
                     if reliable_date:
                         top = reliable_date
             if k == 'albumartist':
@@ -9538,9 +10405,9 @@ def _estimate_phase_total(args, selected_users=None, slskd_import_planned=None):
     # sull'esito: vengono prenotati immediatamente prima di essere eseguiti.
     if not args.no_artwork_download and MISSING_ARTWORK_CONFIG.get('enabled', True):
         names.append('recover_and_embed_album_artwork')
-    if args.all and SPOTIFY_LOCAL_PROXY_CONFIG.get('enabled', True):
-        if os.environ.get('SPOTIFY_CLIENT_ID') and os.environ.get('SPOTIFY_CLIENT_SECRET'):
-            names.append('sync_spotify_proxy_config')
+    if (args.all and SPOTIFY_LOCAL_PROXY_CONFIG.get('enabled', True) and
+            SPOTIFY_LOCAL_PROXY_CONFIG.get('auto_sync', True)):
+        names.append('sync_spotify_proxy_config')
         names.append('build_spotify_local_proxies')
     return len(names)
 
@@ -9675,7 +10542,7 @@ def run_phase(logname, fn, *args, _elapsed_override=None, **kwargs):
         print(f'[warn] piano fasi dinamico da riallineare: fase {_PHASE_PROGRESS_INDEX} oltre '
               f'il residuo atteso {_PHASE_PROGRESS_TOTAL}; il riepilogo finale conterà le fasi eseguite',
               file=sys.stderr, flush=True)
-    print(f'=== fase {logname} === #{_PHASE_PROGRESS_INDEX} (totale dinamico)', flush=True)
+    print(f'=== fase {logname} === #{_PHASE_PROGRESS_INDEX}', flush=True)
     started = time.perf_counter()
     result = None
     status = 'completata'
@@ -9866,17 +10733,27 @@ def _prefer_bilingual_artist(a, b):
 
 
 def _titlecase_artist_gloss(value):
-    """Capitalizza il gloss latino generato dalla fonetica, senza toccare nomi gia' stilizzati."""
+    """Capitalize initials in lowercase Latin tokens inside a bilingual artist gloss.
+
+    Existing mixed-case spellings (for example iPhone or Lyn) and all-uppercase acronyms
+    are preserved. Only all-lowercase words are changed, so curated transliterations and
+    catalogue labels receive consistent initials without blanket str.title() damage.
+    """
     if not value or not _has_nonlatin_name(value):
         return value
     match = re.search(r'[\(（]([^()（）]+)[\)）]\s*$', value)
     if not match or not re.search(r'[A-Za-z]', match.group(1)):
         return value
     gloss = match.group(1).strip()
-    letters = ''.join(ch for ch in gloss if ch.isalpha())
-    if letters and letters == letters.lower():
-        return value[:match.start(1)] + gloss.title() + value[match.end(1):]
-    return value
+
+    def capitalize_lowercase_token(token_match):
+        token = token_match.group(0)
+        return token[0].upper() + token[1:] if token.islower() else token
+
+    normalized = re.sub(r'[A-Za-z]+', capitalize_lowercase_token, gloss)
+    if normalized == gloss:
+        return value
+    return value[:match.start(1)] + normalized + value[match.end(1):]
 
 
 def _known_artist_display(value, known_names):
@@ -9962,32 +10839,24 @@ def _canonicalize_artist_value(value, known_names=None, context_names=None):
         # stem CJK, applicala anche alle tracce che hanno ancora solo il kanji puro.
         preferred = _known_artist_display(part, known_names)
         punctuation_alias = ARTIST_CANONICAL_ALIASES.get(norm(part))
-        preserve_catalog_spelling = False
         if punctuation_alias:
             # Explicit canonical aliases override the catalog label. Otherwise a stale
             # Navidrome entity called 'M.O.O.N.' wins and recreates the punctuation split
             # despite the configured canonical spelling 'M.O.O.N'.
             canonical = punctuation_alias
         elif preferred and _has_nonlatin_name(preferred):
-            # Reuse the best catalog spelling for CJK + translated/phonetic gloss forms.
-            # _romanize_tag_value may replace an outdated gloss using an explicit mapping,
-            # but if the catalog gloss is already authoritative keep its exact casing.
-            # Title-casing here changed 'kanji (lowercase translation)' into a second
-            # artist entity 'kanji (Titlecase Translation)' on every run.
+            # Reuse the best catalogue spelling for CJK + translated/phonetic gloss forms.
             canonical = str(preferred).strip()
-            preserve_catalog_spelling = True
         elif preferred:
             # Also canonicalize Latin-only punctuation variants (M_O_O_N / M.O.O.N).
             canonical = preferred
         elif _has_nonlatin_name(part) and _preferred_name_for_key(norm(part)):
-            # Keep the exact casing of a curated NAME_TRANSLATIONS/NAME_FIXES gloss
-            # when no bilingual Navidrome row exists yet (e.g. 'fukui ryou').
             canonical = _romanize_tag_value(part)
-            preserve_catalog_spelling = True
         else:
             canonical = _romanize_tag_value(part) if _has_nonlatin_name(part) else part
-        if not preserve_catalog_spelling:
-            canonical = _titlecase_artist_gloss(canonical)
+        # Apply to both generated and existing catalogue/JSON bilingual forms. Mixed-case
+        # tokens and acronyms remain untouched by _titlecase_artist_gloss().
+        canonical = _titlecase_artist_gloss(canonical)
         hit = next((i for i, old in enumerate(out)
                     if _artist_values_equivalent(old, canonical)), None)
         if hit is None:
@@ -10822,16 +11691,18 @@ def run_mp3_vs_flac(apply=False, hard_delete=False, artist=None, base=None,
 # ===================== fase: date heal =====================
 # Risolve automaticamente le date di pubblicazione sbagliate su TUTTI gli
 # album, senza doverle elencare a mano. Fonti di verita', in ordine:
-#   1. MusicBrainz: MUSICBRAINZ_RELEASEGROUPID / MUSICBRAINZ_ALBUMID dai
-#      tag dei file o dall'album.nfo (Lidarr) -> first-release-date
-#      (richieste lente: 1/sec, cache persistente per mbid)
+#   1. MusicBrainz: lookup per titolo + album artist (match esatto), oppure
+#      RELEASEGROUPID / ALBUMID -> first-release-date del release-group originale;
+#      le ristampe/reissue non sostituiscono l'anno originario. Le annotazioni esplicite
+#      come "Original release date: 2007" hanno priorita' quando presenti.
+#      (richieste lente: 1/sec, cache persistente)
 #   2. album.nfo <releasedate>
 #   3. anno nella cartella album "(1981)"
-# Se l'anno maggioritario dei tag DATE differisce, riscrive DATE e
-# ORIGINALDATE con l'anno corretto su tutti i file della cartella.
+# Considera DATE e ORIGINALDATE (anche quando DATE manca), non congela risultati
+# senza risoluzione e riscrive entrambi i tag su tutti i formati audio supportati.
 
 MBDATE_CACHE = SCRIPT_DIR / '.mbdate_cache.json'
-MB_USER_AGENT = {'User-Agent': 'homelab-exportify/3.2 (local library maintenance)'}
+MB_USER_AGENT = {'User-Agent': f'exportify_to_m3u/{VERSION} (https://github.com/Chic77/exportify-to-m3u)'}
 
 
 def _mb_transient(e):
@@ -10851,30 +11722,29 @@ _MB_FAIL_LIMIT = 5
 
 
 def _mb_json(path, retries=3):
-    """GET su MusicBrainz. Sugli errori temporanei riprova (pausa 4 s, poi 10 s) e solo dopo
-    solleva l'ultimo errore. Dopo _MB_FAIL_LIMIT richieste fallite di fila (MusicBrainz fuori
-    servizio) non ci prova piu' per il resto della run: senza questo limite ogni album costerebbe
-    14 secondi di attese e la notte durerebbe ore."""
+    """GET MusicBrainz usando il rate limiter condiviso con tutti gli altri moduli."""
     if _MB_FAILS[0] >= _MB_FAIL_LIMIT:
         raise MBUnavailable('MusicBrainz non raggiungibile: richieste sospese fino alla prossima run')
-    req = urllib.request.Request('https://musicbrainz.org/ws/2/' + path + '?fmt=json',
-                                 headers=MB_USER_AGENT)
-    for attempt in range(retries):
+    url = str(MB_BASE or 'https://musicbrainz.org/ws/2/').rstrip('/') + '/' + path.lstrip('/')
+    separator = '&' if '?' in url else '?'
+    req = urllib.request.Request(url + separator + 'fmt=json', headers=MB_USER_AGENT)
+    for attempt in range(max(1, int(retries))):
         try:
-            data = json.loads(urllib.request.urlopen(req, timeout=30).read())
+            payload = _musicbrainz_request_bytes(req, timeout=30, max_bytes=8_000_000)
+            data = json.loads(payload.decode('utf-8', errors='replace'))
             _MB_FAILS[0] = 0
             return data
-        except Exception as e:
-            if not _mb_transient(e):
+        except Exception as exc:
+            if not _mb_transient(exc):
                 raise
-            if attempt + 1 >= retries:
+            if attempt + 1 >= max(1, int(retries)):
                 _MB_FAILS[0] += 1
                 if _MB_FAILS[0] >= _MB_FAIL_LIMIT:
-                    print(f"[warn] MusicBrainz non risponde da {_MB_FAIL_LIMIT} richieste: salto le "
-                          f"altre per questa run (gli album saltati si riprovano alla prossima)",
-                          file=sys.stderr)
+                    print(f'[warn] MusicBrainz non risponde da {_MB_FAIL_LIMIT} richieste: '
+                          'salto le altre per questa run (gli album saltati si riprovano alla prossima)',
+                          file=sys.stderr, flush=True)
                 raise
-            time.sleep(4 if attempt == 0 else 10)
+            # Il backoff globale viene applicato dal limiter prima del tentativo seguente.
 
 
 def _mb_cache_purge_negatives(cache, tcache):
@@ -10902,36 +11772,37 @@ def _nfo_field(album, field):
 
 
 def _mb_year(rgid, mbid, cache):
-    """Anno di prima pubblicazione da MusicBrainz, con cache. None se niente."""
+    """Return the original/first-official year, never a cached reissue year.
+
+    Older cache entries stored release-group ``first-release-date`` or the date on a
+    particular release MBID. Those values could be a promo CD-R or a 2009 remaster.
+    New lookups always resolve the parent release-group and use the same authoritative
+    annotation/Official-release policy as date_heal.
+    """
+    if not rgid and mbid:
+        cache_key = f'__release_group_id_for_release_v2__:{mbid}'
+        if cache_key not in cache:
+            try:
+                d = _mb_json(f'release/{mbid}?inc=release-groups')
+                rgid = (d.get('release-group') or {}).get('id') or ''
+                cache[cache_key] = rgid or None
+                if not rgid:
+                    # Only use the release date as a last resort when MusicBrainz cannot
+                    # associate the release with a release-group at all.
+                    date = str(d.get('date') or '')
+                    match = re.match(r'^(19|20)\d{2}', date)
+                    cache[f'__release_direct_year_v2__:{mbid}'] = match.group(0) if match else None
+            except Exception as exc:
+                if not _mb_transient(exc):
+                    print(f'    [warn] MB release {mbid}: {exc}', file=sys.stderr)
+                return None
+        else:
+            rgid = cache.get(cache_key) or ''
+        if not rgid:
+            return cache.get(f'__release_direct_year_v2__:{mbid}')
     if rgid:
-        if rgid not in cache:
-            time.sleep(1.2)     # rate limit MB: max 1 req/sec
-            try:
-                d = _mb_json(f'release-group/{rgid}')
-                cache[rgid] = (d.get('first-release-date') or '')[:4] or None
-            except Exception as e:
-                print(f'    [warn] MB release-group {rgid}: {e}', file=sys.stderr)
-                if _mb_transient(e):
-                    return None          # errore temporaneo: NON si memorizza, si riprova alla prossima run
-                cache[rgid] = None
-        return cache[rgid]
-    if mbid:
-        if mbid not in cache:
-            time.sleep(1.2)
-            try:
-                d = _mb_json(f'release/{mbid}')
-                date = d.get('date') or ''
-                if not date:
-                    rg = (d.get('release-group') or {}).get('id')
-                    if rg:
-                        return _mb_year(rg, None, cache)
-                cache[mbid] = date[:4] or None
-            except Exception as e:
-                print(f'    [warn] MB release {mbid}: {e}', file=sys.stderr)
-                if _mb_transient(e):
-                    return None
-                cache[mbid] = None
-        return cache[mbid]
+        year, _source = _mb_preferred_release_year(rgid, cache)
+        return year
     return None
 
 
@@ -10963,25 +11834,395 @@ def _mb_release_info(rgid, mbid, cache, tcache):
     return year, (tcache.get(key) or '')
 
 
-def _authoritative_year(album, files, probe_fn, cache):
-    rgid = mbid = ''
-    for f in files[:12]:
-        t = probe_fn(f)
-        rgid = rgid or t.get('musicbrainz_releasegroupid', '')
-        mbid = mbid or t.get('musicbrainz_albumid', '')
-    rgid = rgid or _nfo_field(album, 'musicbrainzreleasegroupid')
-    mbid = mbid or _nfo_field(album, 'musicbrainzalbumid')
-    year = _mb_year(rgid, mbid, cache)
-    if year and year.isdigit():
-        return year, 'musicbrainz'
-    rd = _nfo_field(album, 'releasedate')
-    if rd and rd[-4:].isdigit():
-        return rd[-4:], 'nfo'
-    m = re.search(r'\((19|20)\d{2}\)', album.name)
-    if m:
-        return m.group(0).strip('()'), 'cartella'
-    return None, None
+def _mb_date_artist_credit_matches(credit, requested_artist):
+    """Require an exact artist name/credit; a title-only or fuzzy artist hit is unsafe."""
+    wanted = _trk_key(requested_artist)
+    if not wanted:
+        return False
+    credits = credit if isinstance(credit, list) else []
+    names, combined = [], ''
+    for item in credits:
+        if not isinstance(item, dict):
+            continue
+        artist = item.get('artist') if isinstance(item.get('artist'), dict) else {}
+        name = str(artist.get('name') or item.get('name') or '').strip()
+        if name:
+            names.append(name)
+            combined += name
+        combined += str(item.get('joinphrase') or '')
+    return wanted == _trk_key(combined) or wanted in {_trk_key(name) for name in names}
 
+
+def _mb_date_cache_fresh(entry, days):
+    if not isinstance(entry, dict) or not entry.get('checked_at'):
+        return False
+    try:
+        checked = datetime.fromisoformat(str(entry['checked_at']).replace('Z', '+00:00'))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - checked).total_seconds() < days * 86400
+    except Exception:
+        return False
+
+
+def _mb_exact_album_group(artist, album_title, cache):
+    """Resolve an exact MusicBrainz release-group by title and artist credit.
+
+    Search score is the primary ranking signal. The group first-release-date is only a
+    deterministic tie-breaker: it can describe an unofficial pre-release/CD-R and must
+    never outrank a stronger exact title+artist result.
+    """
+    artist = str(artist or '').strip()
+    album_title = str(album_title or '').strip()
+    if not artist or not album_title:
+        return None, None
+    cache_root = cache.setdefault('__album_identity_search__', {})
+    cache_key = f'v2|{_trk_key(artist)}|{_trk_key(album_title)}'
+    cached = cache_root.get(cache_key)
+    if _mb_date_cache_fresh(cached, 30):
+        return (cached.get('id') or None, cached.get('year') or None)
+    if _mb_date_cache_fresh(cached, 3) and not cached.get('id'):
+        return None, None
+    query = f'artist:"{_lucene(artist)}" AND releasegroup:"{_lucene(album_title)}"'
+    params = urllib.parse.urlencode({'query': query, 'limit': '50', 'inc': 'artist-credits'})
+    try:
+        data = _mb_json('release-group/?' + params)
+    except Exception as exc:
+        if not _mb_transient(exc):
+            print(f'[date_heal] ricerca MusicBrainz album non riuscita per {artist} - {album_title}: {exc}',
+                  file=sys.stderr)
+        return None, None  # transient errors and malformed lookups are never negative-cached
+    wanted_title = _trk_key(album_title)
+    candidates = []
+    for group in data.get('release-groups') or []:
+        if not isinstance(group, dict) or not group.get('id'):
+            continue
+        if _trk_key(group.get('title') or '') != wanted_title:
+            continue
+        if not _mb_date_artist_credit_matches(group.get('artist-credit'), artist):
+            continue
+        date = str(group.get('first-release-date') or '')
+        year_match = re.match(r'^(19|20)\d{2}', date)
+        score = int(group.get('score') or 0)
+        candidates.append((-score, int(year_match.group(0)) if year_match else 9999,
+                           str(group['id']), group))
+    if not candidates:
+        cache_root[cache_key] = {'id': '', 'year': '',
+                                 'checked_at': datetime.now(timezone.utc).isoformat()}
+        return None, None
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    _neg_score, year, group_id, _group = candidates[0]
+    record = {'id': group_id, 'year': str(year) if year != 9999 else '',
+              'checked_at': datetime.now(timezone.utc).isoformat()}
+    cache_root[cache_key] = record
+    return group_id, record['year'] or None
+
+def _mb_release_is_unlabelled_cdr(release):
+    """Identify a weak CD-R date that should not outrank a catalogued retail release.
+
+    MusicBrainz can contain an Official, no-label, no-catalog-number CD-R (for example an
+    internal/pre-release copy). If the group also has a labeled/catalogued edition, the
+    unlabelled CD-R is not a reliable public release date. For genuinely self-released
+    groups where it is the only evidence, the caller retains it as a fallback.
+    """
+    media = release.get('media') or []
+    cdr = any(re.search(r'(?i)\bcd[\s-]?r\b', str(item.get('format') or ''))
+              for item in media if isinstance(item, dict))
+    if not cdr:
+        return False
+    label_info = release.get('label-info') or release.get('label-info-list') or []
+    def is_real_label(item):
+        label = item.get('label') if isinstance(item, dict) else None
+        if not isinstance(label, dict):
+            return False
+        name = str(label.get('name') or '').strip().casefold()
+        # MusicBrainz models '[no label]' as a special-purpose label entity in some rows.
+        if 'no label' in name or 'special purpose label' in name:
+            return False
+        return bool(name or str(label.get('id') or '').strip())
+
+    has_label = any(is_real_label(item) for item in label_info)
+    has_catalog_number = any(
+        isinstance(item, dict)
+        and str(item.get('catalog-number') or '').strip().casefold() not in ('', '[none]', 'none', 'n/a')
+        for item in label_info
+    )
+    has_barcode = bool(str(release.get('barcode') or '').strip())
+    return not (has_label or has_catalog_number or has_barcode)
+
+
+def _mb_preferred_release_year(group_id, cache, inspect_releases=False,
+                               expected_artist='', expected_title=''):
+    """Return the first date from the complete set of Official releases in a group.
+
+    ``inc=releases`` on a release-group lookup is deliberately NOT used as the source of
+    truth: MusicBrainz caps linked entities at 25 and orders them by GID, not release date.
+    The release browse endpoint is paged (up to 100 rows per page), so the earliest Official
+    edition cannot be hidden behind a large list of later reissues. A title/artist check
+    protects against stale MBIDs carried by a file tag.
+    """
+    if not group_id:
+        return None, None
+    identity_key = f'{_trk_key(expected_artist)}|{_trk_key(expected_title)}'
+    store = cache.setdefault('__original_release_year__', {})
+    # Cache policy is versioned and annotation-aware: a plain Official year must never
+    # mask a later lookup that can see an explicitly annotated original date.
+    cache_key = f'{group_id}:official-original-v4:{identity_key}:annotations={int(bool(inspect_releases))}'
+    cached = store.get(cache_key)
+    cache_days = 90 if isinstance(cached, dict) and cached.get('year') else 7
+    if _mb_date_cache_fresh(cached, cache_days):
+        return (cached.get('year') or None, cached.get('source') or None)
+
+    pattern = re.compile(
+        r'(?i)\b(?:original(?:\s+release)?\s+date|'
+        r'originally\s+released(?:\s+(?:on|in))?|first\s+released(?:\s+in)?)'
+        r'\s*[:\-]?\s*(?:(?:\d{1,2}\s+)?[A-Za-z]+\s+)?((?:19|20)\d{2})'
+    )
+    try:
+        all_releases = []
+        offset = 0
+        page_size = 100
+        release_count = None
+        max_pages = 50  # bounded safety: at most 5,000 linked releases
+        for _page in range(max_pages):
+            params = urllib.parse.urlencode({
+                'release-group': str(group_id),
+                'status': 'official',
+                'limit': str(page_size),
+                'offset': str(offset),
+                'inc': 'artist-credits+labels+media+annotation' if inspect_releases else 'artist-credits+labels+media',
+            })
+            page = _mb_json('release/?' + params)
+            rows = page.get('releases') or []
+            if not isinstance(rows, list):
+                raise RuntimeError(f'MusicBrainz release-group {group_id}: risposta browse non valida')
+            raw_count = page.get('release-count', page.get('release_count'))
+            try:
+                release_count = int(raw_count) if raw_count is not None else release_count
+            except (TypeError, ValueError):
+                pass
+            if not rows:
+                if release_count is not None and offset < release_count:
+                    raise RuntimeError(f'MusicBrainz release-group {group_id}: browse incompleto a offset {offset}')
+                break
+            all_releases.extend(row for row in rows if isinstance(row, dict))
+            # MusicBrainz may return fewer than 100 releases to stay under its 500-track
+            # response cap. When the total is known, advance by the actual count and keep paging.
+            offset += len(rows)
+            if release_count is not None:
+                if offset >= release_count:
+                    break
+            elif len(rows) < page_size:
+                break
+        else:
+            # Do not pick a possibly incomplete earliest release if the safety cap was hit.
+            if release_count is None or offset < release_count:
+                raise RuntimeError(f'MusicBrainz release-group {group_id}: browse oltre {max_pages} pagine')
+
+        official = []
+        wanted_title = _trk_key(expected_title) if expected_title else ''
+        for release in all_releases:
+            status = str(release.get('status') or '').strip().casefold()
+            if status and status != 'official':
+                continue
+            title = str(release.get('title') or '').strip()
+            if wanted_title and _trk_key(title) != wanted_title:
+                continue
+            if expected_artist and not _mb_date_artist_credit_matches(
+                    release.get('artist-credit'), expected_artist):
+                continue
+            date = str(release.get('date') or '').strip()
+            if re.match(r'^(19|20)\d{2}', date):
+                official.append((date, release))
+
+        if expected_title and expected_artist and all_releases and not official:
+            # Wrong or stale release-group ID: caller may still try an exact text search.
+            return None, None
+
+        # Some groups contain a no-label CD-R dated before the real retail release
+        # (MusicBrainz's The Bends group has a 1994 example before its 1995 retail editions).
+        # Prefer releases with label/catalogue evidence when at least one such candidate exists;
+        # if the group is genuinely self-released and has no alternative, retain the sole CD-R.
+        commercial_official = [
+            item for item in official if not _mb_release_is_unlabelled_cdr(item[1])
+        ]
+        official_for_year = commercial_official or official
+
+        year = ''
+        source = ''
+        if inspect_releases:
+            # Bonus/companion releases may have an explicit original date even when their
+            # standalone Official edition was published later. Inspect the full browse result.
+            for _date, release in sorted(official_for_year, key=lambda item: item[0]):
+                match = pattern.search(str(release.get('annotation') or ''))
+                if match:
+                    year = match.group(1)
+                    source = 'musicbrainz-release-annotation'
+                    break
+            if not year:
+                group_data = _mb_json(f'release-group/{group_id}?inc=artist-credits%2Bannotation')
+                if expected_title and _trk_key(group_data.get('title') or '') != wanted_title:
+                    return None, None
+                if expected_artist and not _mb_date_artist_credit_matches(
+                        group_data.get('artist-credit'), expected_artist):
+                    return None, None
+                match = pattern.search(str(group_data.get('annotation') or ''))
+                if match:
+                    year = match.group(1)
+                    source = 'musicbrainz-group-annotation'
+
+        if not year and official_for_year:
+            year = min(date for date, _release in official_for_year)[:4]
+            source = 'musicbrainz-first-official-release'
+        if not year:
+            # Never fall back to first-release-date: it can be an unofficial pre-release
+            # or a CD-R and may be the very incorrect year this phase is repairing.
+            store[cache_key] = {'year': '', 'source': '',
+                                'checked_at': datetime.now(timezone.utc).isoformat()}
+            return None, None
+    except Exception as exc:
+        if not _mb_transient(exc):
+            print(f'[date_heal] release-group MusicBrainz non disponibile per {group_id}: {exc}',
+                  file=sys.stderr)
+        return None, None
+
+    store[cache_key] = {'year': year, 'source': source,
+                        'checked_at': datetime.now(timezone.utc).isoformat()}
+    return year, source
+
+# Small, source-verified fallbacks for known catalogue corruption. These are not guesses
+# from folder names: each entry is the original album year, used only when MusicBrainz is
+# unavailable or returns no usable original/Official release. Keep keys exact by artist/title.
+_CURATED_ORIGINAL_YEAR_OVERRIDES = {
+    'pablo honey': '1993',
+    'the bends': '1995',
+    'ok computer': '1997',
+    'hail to the thief': '2003',
+    'amnesiac': '2001',
+    'in rainbows': '2007',
+    'in rainbows disk 2': '2007',
+    'in rainbows disc 2': '2007',
+}
+
+
+def _curated_original_year_for_album(album_path, tags):
+    """Return a verified original-year override for an exact artist/album identity."""
+    path = Path(album_path) if album_path is not None else None
+    artist_values = []
+    title_values = []
+    for tag in tags or ():
+        for key in ('albumartist', 'album_artist', 'artist'):
+            value = str(tag.get(key) or '').strip()
+            if value:
+                artist_values.extend(part.strip() for part in value.split(';') if part.strip())
+        value = str(tag.get('album') or '').strip()
+        if value:
+            title_values.append(value)
+    if path is not None:
+        title_values.append(path.name)
+        if re.fullmatch(r'(?:disk|disc|cd)\s*\d+', path.name, re.I):
+            title_values.append(f'{path.parent.name} {path.name}')
+        artist_values.append(path.parent.name)
+
+    if not any(norm(value) == 'radiohead' for value in artist_values if value):
+        return None
+
+    seen = set()
+    for value in title_values:
+        raw = unicodedata.normalize('NFKC', str(value or '')).strip()
+        # Ignore a folder's year annotation, but retain meaningful disc numbers.
+        raw = re.sub(r'\s*[\(\[]\s*(?:19|20)\d{2}\s*[\)\]]\s*$', '', raw)
+        key = norm_bare(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        year = _CURATED_ORIGINAL_YEAR_OVERRIDES.get(key)
+        if year:
+            return year
+    return None
+
+
+def _is_authoritative_original_year_source(source):
+    source = str(source or '')
+    return source.startswith('musicbrainz-') or source == 'curated-original-year-override'
+
+
+def _authoritative_year(album, files, probe_fn, cache, tags_seen=None):
+    """Resolve only an authoritative MusicBrainz original/first-Official year.
+
+    NFO ``releasedate`` and a year in a folder may describe a later remaster. They are not
+    valid evidence for correcting an existing date, so unresolved albums stay retryable.
+    ``tags_seen`` lets date_heal reuse its existing probe results instead of re-reading each
+    album's first 12 files.
+    """
+    if tags_seen is None:
+        # Stand-alone callers keep the bounded probe; date_heal already loaded every file,
+        # so inspect that complete in-memory set (an MBID may only be tagged on a later track).
+        tags_seen = [probe_fn(f) for f in files[:12]]
+    else:
+        tags_seen = list(tags_seen)
+    rgid = ''
+    mbid = ''
+    for tag in tags_seen:
+        rgid = rgid or str(tag.get('musicbrainz_releasegroupid') or '').strip()
+        mbid = mbid or str(tag.get('musicbrainz_albumid') or '').strip()
+
+    album_artist = next((str(t.get('albumartist') or t.get('album_artist') or '').strip()
+                         for t in tags_seen if str(t.get('albumartist') or t.get('album_artist') or '').strip()), '')
+    if not album_artist:
+        album_artist = next((str(t.get('artist') or '').strip() for t in tags_seen
+                             if str(t.get('artist') or '').strip()), '')
+    album_title = next((str(t.get('album') or '').strip() for t in tags_seen
+                        if str(t.get('album') or '').strip()), '') or album.name
+    if not album_artist and album.parent.name:
+        album_artist = album.parent.name
+
+    curated_year = _curated_original_year_for_album(album, tags_seen)
+    if curated_year:
+        return curated_year, 'curated-original-year-override'
+
+    bonus_disc = bool(re.search(r'\b(?:disk|disc|bonus|companion)\s*\d*\b',
+                                album_title, re.I))
+
+    # Prefer a tagged release-group ID: a single paged browse validates its contents
+    # and fetches all Official editions. Avoid a redundant text search when the ID is good.
+    if rgid:
+        year, source = _mb_preferred_release_year(
+            rgid, cache, inspect_releases=bonus_disc,
+            expected_artist=album_artist, expected_title=album_title)
+        if year and year.isdigit():
+            return year, source
+
+    # If only a release MBID is present, resolve its parent release-group, then validate it.
+    if mbid:
+        cache_key = f'__release_group_id_for_release_v3__:{mbid}'
+        group_id = cache.get(cache_key)
+        if group_id is None:
+            try:
+                release = _mb_json(f'release/{mbid}?inc=release-groups')
+                group_id = str((release.get('release-group') or {}).get('id') or '')
+                cache[cache_key] = group_id or ''
+            except Exception as exc:
+                if not _mb_transient(exc):
+                    print(f'[date_heal] release MusicBrainz non disponibile per {mbid}: {exc}',
+                          file=sys.stderr)
+                group_id = ''
+        if group_id:
+            year, source = _mb_preferred_release_year(
+                group_id, cache, inspect_releases=bonus_disc,
+                expected_artist=album_artist, expected_title=album_title)
+            if year and year.isdigit():
+                return year, source
+
+    # Last resort: exact title + artist-credit search, then the same complete Official browse.
+    group_id, _searched_year = _mb_exact_album_group(album_artist, album_title, cache)
+    if group_id:
+        year, source = _mb_preferred_release_year(
+            group_id, cache, inspect_releases=bonus_disc,
+            expected_artist=album_artist, expected_title=album_title)
+        if year and year.isdigit():
+            return year, source
+    return None, None
 
 def _root_album_title_keys(root, files):
     """Titoli di release ricavati da cartella e tag; include il nome parent solo per sottodischi."""
@@ -11017,6 +12258,7 @@ def _remove_musicbrainz_ids(paths, dry_run=False, drop_album=True, drop_releaseg
                 write_flac(f, diff)
             else:
                 _rewrite_nonflac(f, diff)
+            invalidate_probe_cache([f])
             changed += 1
         except Exception as e:
             errors += 1
@@ -11138,9 +12380,7 @@ def _repair_mbid_sanity(base, cache, tcache, dry_run=False, album_dirs_only=None
 
 def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
     import shutil as _sh
-    if not dry_run and not _sh.which('metaflac'):
-        print('[ERRORE] metaflac non trovato: salto date_heal')
-        return
+    have_metaflac = bool(_sh.which('metaflac'))
     base = Path(base) if base else LIBRARY_ROOT
     try:
         cache = json.loads(MBDATE_CACHE.read_text())
@@ -11155,12 +12395,17 @@ def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
         heal_cache = json.loads(HEAL_CACHE.read_text())
     except Exception:
         heal_cache = {}
+    # v0.151 adds source-verified original-year overrides and repairs legacy RELEASEDATE
+    # values even while MusicBrainz is offline. Invalidate earlier cached decisions once.
+    if not isinstance(heal_cache, dict) or heal_cache.get('__version__') != 6:
+        heal_cache = {'__version__': 6}
     if not dry_run:
         n_purged = _mb_cache_purge_negatives(cache, tcache)
         if n_purged:
             print(f"  [date_heal] ripulita la cache MusicBrainz da {n_purged} voci 'nessun dato' "
                   f"(potevano essere errori temporanei): verranno richieste di nuovo, una volta sola")
-    healed = checked = errors = stripped = failed_write = skipped_cached = 0
+    healed = checked = errors = stripped = failed_write = skipped_cached = unresolved = 0
+    unresolved_samples = []
     folders = {}
     for r in _walk_audio(base, AUDIO_EXT):
         if not r[-1].endswith('.backup'):
@@ -11168,8 +12413,6 @@ def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
             folders.setdefault(f.parent, []).append(f)
     prefetch_probe([f for fl in folders.values() for f in fl], 'date_heal')
 
-    # MBID sanity condivisa con la utility di riparazione album: verifica l'intero album
-    # logico, inclusi sottodischi e tutti i formati audio.
     mbid_result = _repair_mbid_sanity(base, cache, tcache, dry_run=dry_run)
     stripped = mbid_result.get('roots', 0)
     errors += mbid_result.get('errors', 0)
@@ -11178,75 +12421,157 @@ def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
     progress = _ProgressBar('date_heal', len(sorted_folders), 'album', subphase=True)
     for album_index, (album, files) in enumerate(sorted_folders, 1):
         progress.update(album_index)
-        if len(album.parent.name) < 1:
-            continue
         try:
-            tags = [probe_dur(f)[0] for f in files]
-            years = [t.get('date', '')[:4] for t in tags if t.get('date', '')[:4].isdigit()]
-            if not years:
+            tags = [probe(f) for f in files]
+            years = []
+            for tag in tags:
+                # Include RELEASEDATE-only albums: Navidrome uses it for album identity.
+                for key in ('originaldate', 'date', 'releasedate', 'release_date', 'year'):
+                    value = str(tag.get(key) or '').strip()
+                    match = re.match(r'^(19|20)\d{2}', value)
+                    if match:
+                        years.append(match.group(0))
+                        break
+            curated_year = _curated_original_year_for_album(album, tags)
+            if not years and not curated_year:
                 continue
             checked += 1
-            maj = Counter(years).most_common(1)[0][0]
-            sig = [len(files), sum(f.stat().st_size for f in files)]
-            # Identita' MBID/NFO senza rete: le vecchie cache (senza il quarto campo)
-            # vengono promosse al nuovo formato al primo hit, preservando il risparmio
-            # immediato ma rilevando in futuro cambi di MBID anche a parita' di byte.
+            maj = Counter(years).most_common(1)[0][0] if years else curated_year
+
+            # Strong cache signature: mtime+size per file, tags/MBIDs and NFO identity.
+            stat_sig = []
+            for f in files:
+                st = f.stat()
+                stat_sig.append((str(f), int(st.st_mtime_ns), int(st.st_size)))
+            file_sig = hashlib.sha256(json.dumps(
+                stat_sig, ensure_ascii=False, separators=(',', ':')
+            ).encode('utf-8')).hexdigest()
             identity_payload = {
                 'ids': sorted({(
                     str(t.get('musicbrainz_releasegroupid') or ''),
                     str(t.get('musicbrainz_albumid') or ''),
                 ) for t in tags}),
+                'album_artist': sorted({str(t.get('albumartist') or t.get('album_artist') or '')
+                                        for t in tags if t.get('albumartist') or t.get('album_artist')}),
+                'album_title': sorted({str(t.get('album') or '') for t in tags if t.get('album')}),
                 'nfo_releasegroupid': _nfo_field(album, 'musicbrainzreleasegroupid'),
                 'nfo_albumid': _nfo_field(album, 'musicbrainzalbumid'),
-                'nfo_releasedate': _nfo_field(album, 'releasedate'),
             }
             identity_sig = hashlib.sha256(json.dumps(
                 identity_payload, ensure_ascii=False, sort_keys=True
             ).encode('utf-8')).hexdigest()
+
             ck = heal_cache.get(str(album))
-            # La cache veniva verificata solo DOPO una query MusicBrainz rate-limited:
-            # un album gia' corretto poteva costare 1.2 s anche a ogni run.
-            if (not dry_run and ck and len(ck) >= 3 and ck[0] == maj and ck[2] == sig
-                    and (len(ck) < 4 or ck[3] == identity_sig)):
-                if len(ck) < 4:
-                    ck.append(identity_sig)  # promuove la cache legacy senza rifare la query
-                    heal_cache[str(album)] = ck
+            cached_year = str(ck.get('year') or '') if isinstance(ck, dict) else ''
+            cached_ok = bool(
+                not dry_run and isinstance(ck, dict)
+                and _is_authoritative_original_year_source(ck.get('source'))
+                and ck.get('file_sig') == file_sig and ck.get('identity_sig') == identity_sig
+                and cached_year.isdigit()
+                and all(
+                    str(tag.get('originaldate') or '').strip()[:4] == cached_year
+                    and str(tag.get('releasedate') or tag.get('release_date') or '').strip()[:4] == cached_year
+                    and (not str(tag.get('date') or '').strip()
+                         or str(tag.get('date') or '').strip()[:4] == cached_year)
+                    and (not str(tag.get('year') or '').strip()
+                         or str(tag.get('year') or '').strip()[:4] == cached_year)
+                    for tag in tags
+                )
+            )
+            if cached_ok:
                 skipped_cached += 1
                 continue
-            year, fonte = _authoritative_year(album, files, lambda f: probe_dur(f)[0], cache)
-            heal_cache[str(album)] = [maj, year or '', sig, identity_sig]
-            if not year or year == maj:
+
+            year, fonte = _authoritative_year(
+                album, files, probe, cache, tags_seen=tags)
+            if not year or not str(year).isdigit() or not _is_authoritative_original_year_source(fonte):
+                # Never turn NFO/RELEASEDATE/folder values into proof of an original year.
+                # Exact source-verified overrides are permitted when MusicBrainz is offline.
+                unresolved += 1
+                if len(unresolved_samples) < 20:
+                    unresolved_samples.append(f'{album.parent.name} / {album.name}')
+                heal_cache.pop(str(album), None)
                 continue
-            progress.clear()
-            print(f"{'[dry] ' if dry_run else ''}HEAL {album.parent.name} / {album.name}: "
-                  f"date {maj} -> {year} ({fonte})")
+
+            # DATE may be absent on a FLAC after fix_date_tags removes the redundant field;
+            # if present, it must be correct. ORIGINALDATE and RELEASEDATE are mandatory.
+            needs_update = any(
+                str(tag.get('originaldate') or '').strip()[:4] != str(year)
+                or str(tag.get('releasedate') or tag.get('release_date') or '').strip()[:4] != str(year)
+                or (str(tag.get('date') or '').strip()
+                    and str(tag.get('date') or '').strip()[:4] != str(year))
+                or (str(tag.get('year') or '').strip()
+                    and str(tag.get('year') or '').strip()[:4] != str(year))
+                for tag in tags
+            )
+            if needs_update:
+                progress.clear()
+                print(f"{'[dry] ' if dry_run else ''}HEAL {album.parent.name} / {album.name}: "
+                      f'date {maj or "assente"} -> {year} ({fonte}); aggiorno DATE/ORIGINALDATE/RELEASEDATE')
             if dry_run:
-                healed += 1
+                if needs_update:
+                    healed += 1
                 continue
+
             ok = True
-            for f in files:
-                if f.suffix.lower() != '.flac':
+            if needs_update:
+                for f, current_tags in zip(files, tags):
+                    if f.suffix.lower() == '.flac':
+                        if not have_metaflac:
+                            ok = False
+                            progress.clear()
+                            print(f'    [ERRORE] metaflac non trovato: impossibile correggere {f.name}',
+                                  file=sys.stderr)
+                            continue
+                        date_args = [
+                            '--remove-tag=DATE', '--remove-tag=ORIGINALDATE', '--remove-tag=RELEASEDATE',
+                            f'--set-tag=DATE={year}', f'--set-tag=ORIGINALDATE={year}',
+                            f'--set-tag=RELEASEDATE={year}',
+                        ]
+                        if str(current_tags.get('year') or '').strip():
+                            date_args.extend(['--remove-tag=YEAR', f'--set-tag=YEAR={year}'])
+                        r = subprocess.run([*METAFLAC, *date_args, str(f)],
+                                           capture_output=True, timeout=60)
+                        if r.returncode != 0:
+                            ok = False
+                            progress.clear()
+                            print(f'    [ERRORE] metaflac su {f.name}: '
+                                  f'{r.stderr.decode()[:150]}', file=sys.stderr)
+                        else:
+                            invalidate_probe_cache([f])
+                    else:
+                        try:
+                            date_updates = {
+                                'date': str(year), 'originaldate': str(year), 'releasedate': str(year)
+                            }
+                            if str(current_tags.get('year') or '').strip():
+                                date_updates['year'] = str(year)
+                            _rewrite_nonflac(f, date_updates)
+                            invalidate_probe_cache([f])
+                        except Exception as write_error:
+                            ok = False
+                            progress.clear()
+                            print(f'    [ERRORE] tag data su {f.name}: {write_error}', file=sys.stderr)
+                if ok:
+                    healed += 1
+                else:
+                    failed_write += 1
+                    heal_cache.pop(str(album), None)
                     continue
-                # metaflac --set-tag AGGIUNGE un campo: senza --remove-tag prima
-                # restavano DATE/ORIGINALDATE doppi (vecchio + nuovo)
-                # ORIGINALDATE che ha gia' l'anno giusto (magari completa, 1982-01-21) si
-                # tiene (togliendo gli eventuali doppioni); altrimenti si imposta l'anno
-                od = probe_dur(f)[0].get('originaldate', '').split(';')[0].strip()
-                new_od = od if od[:4] == str(year) else str(year)
-                r = subprocess.run([*METAFLAC, '--remove-tag=DATE', '--remove-tag=ORIGINALDATE',
-                                    f'--set-tag=DATE={year}',
-                                    f'--set-tag=ORIGINALDATE={new_od}', str(f)],
-                                   capture_output=True, timeout=60)
-                if r.returncode != 0:
-                    ok = False
-                    progress.clear()
-                    print(f'    [ERRORE] metaflac su {f.name}: '
-                          f'{r.stderr.decode()[:150]}', file=sys.stderr)
-            if ok:
-                healed += 1
-            else:
-                failed_write += 1
-                heal_cache.pop(str(album), None)    # scrittura fallita: si ritenta la notte dopo
+
+            # Cache only confirmed MusicBrainz values, and use the post-write signature.
+            post_sig = []
+            for f in files:
+                st = f.stat()
+                post_sig.append((str(f), int(st.st_mtime_ns), int(st.st_size)))
+            post_file_sig = hashlib.sha256(json.dumps(
+                post_sig, ensure_ascii=False, separators=(',', ':')
+            ).encode('utf-8')).hexdigest()
+            heal_cache[str(album)] = {
+                'year': str(year), 'source': str(fonte),
+                'file_sig': post_file_sig, 'identity_sig': identity_sig,
+                'checked_at': datetime.now(timezone.utc).isoformat(),
+            }
         except Exception as e:
             errors += 1
             heal_cache.pop(str(album), None)
@@ -11258,13 +12583,19 @@ def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
         _write_json_atomic(MBTITLE_CACHE, tcache)
         _write_json_atomic(HEAL_CACHE, heal_cache)
     print(f'date_heal: {checked} controllati, {healed} corretti, '
-          f'{skipped_cached} gia ok (cache), {stripped} MBID rimossi, '
-          f'{failed_write} scritture fallite, {errors} errori')
+          f'{skipped_cached} gia ok (cache), {unresolved} irrisolti/ritentabili, '
+          f'{stripped} MBID rimossi, {failed_write} scritture fallite, {errors} errori')
+    if unresolved_samples:
+        print('  [date_heal][retry] MusicBrainz non ha confermato una prima release Official per:')
+        for sample in unresolved_samples:
+            print(f'    - {sample}')
+        if unresolved > len(unresolved_samples):
+            print(f'    ... altri {unresolved - len(unresolved_samples)} album irrisolti')
 
 
 # ===================== fase: fix date tags =====================
-# (da fix_date_tags.sh: se ORIGINALDATE esiste elimina DATE; altrimenti crea
-# ORIGINALDATE prendendo l'anno dal nome della cartella album "(1979)")
+# Uniforma ORIGINALDATE/RELEASEDATE solo quando esiste un consenso tra tag esistenti;
+# non promuove automaticamente l'anno di una cartella, che potrebbe riferirsi a una ristampa.
 
 DATE_YEAR_RE = re.compile(r'\((19|20)\d{2}\)')
 
@@ -11292,13 +12623,12 @@ def _flac_tags(path, *names):
 
 
 def run_fix_dates(dry_run=False, base=None, files_only=None):
-    """Uniforma la data originale per album logico e rimuove DATE ridondanti.
+    """Uniforma ORIGINALDATE/RELEASEDATE per album logico e rimuove DATE ridondante.
 
-    Se >=60% delle tracce con una data (almeno due) concordano su una stessa data/anno,
-    quella data diventa il valore ORIGINALDATE condiviso per le tracce FLAC selezionate,
-    anche quando alcuni file hanno il campo mancante o una data residua diversa. Questo
-    evita che Navidrome divida un singolo album in base a tag discordanti. Se non esiste
-    un consenso affidabile, conserva il precedente fallback basato sull'anno nella cartella.
+    Una data condivisa affidabile (>=2 tracce e >=60% delle tracce datate) prevale su un
+    RELEASEDATE discordante: Navidrome usa RELEASEDATE per il proprio Album PID. Quando non
+    c'e' consenso, conserva i valori esistenti invece di promuovere automaticamente un anno
+    di cartella che potrebbe essere quello di una ristampa.
     """
     import shutil as _sh
     if not _sh.which('metaflac'):
@@ -11313,14 +12643,19 @@ def run_fix_dates(dry_run=False, base=None, files_only=None):
         files = [f for f in files if f.resolve() in wanted_files]
     prefetch_probe(files, 'fix_date_tags')
 
-    # Use logical album roots so an album split into CD1/CD2 still shares one date.
+    # Reuse metadata and logical roots calculated during grouping: the old code probed
+    # each FLAC once while grouping and again while writing, and recalculated its root.
     groups = {}
+    file_roots = {}
+    file_tags = {}
     for f in files:
-        groups.setdefault(_album_root_for_file(base, f), []).append(f)
+        root = _album_root_for_file(base, f)
+        file_roots[f] = root
+        file_tags[f] = probe(f)
+        groups.setdefault(root, []).append(f)
     shared_dates = {}
     for root, group_files in groups.items():
-        group_tags = [probe(f) for f in group_files]
-        target = _dominant_original_date(group_tags)
+        target = _dominant_original_date([file_tags[f] for f in group_files])
         if target:
             shared_dates[root] = target
 
@@ -11328,62 +12663,44 @@ def run_fix_dates(dry_run=False, base=None, files_only=None):
     for file_index, f in enumerate(files, 1):
         progress.update(file_index)
         try:
-            tags = probe(f)
+            tags = file_tags[f]
             date_v = str(tags.get('date') or '').strip()
             orig_v = str(tags.get('originaldate') or '').strip()
+            release_v = str(tags.get('releasedate') or tags.get('release_date') or '').strip()
             if not tags:
-                raw = _flac_tags(f, 'DATE', 'ORIGINALDATE')
-                date_v, orig_v = raw['DATE'].strip(), raw['ORIGINALDATE'].strip()
+                raw = _flac_tags(f, 'DATE', 'ORIGINALDATE', 'RELEASEDATE')
+                date_v = raw.get('DATE', '').strip()
+                orig_v = raw.get('ORIGINALDATE', '').strip()
+                release_v = raw.get('RELEASEDATE', '').strip()
 
-            shared = shared_dates.get(_album_root_for_file(base, f))
+            shared = shared_dates.get(file_roots[f])
+            target_date = shared or orig_v
             changes = []
-            if shared:
-                # One agreed release date is more reliable than leaving one-off DATE tags
-                # or missing ORIGINALDATE values to create separate Navidrome album rows.
-                if orig_v != shared:
-                    changes.extend(['--remove-tag=ORIGINALDATE', f'--set-tag=ORIGINALDATE={shared}'])
+            if target_date:
+                if orig_v != target_date:
+                    changes.extend(['--remove-tag=ORIGINALDATE', f'--set-tag=ORIGINALDATE={target_date}'])
+                if release_v != target_date:
+                    changes.extend(['--remove-tag=RELEASEDATE', f'--set-tag=RELEASEDATE={target_date}'])
                 if date_v:
                     changes.append('--remove-tag=DATE')
-                if not changes:
-                    continue
-                proposed += 1
-                progress.clear()
-                actions = []
-                if orig_v != shared:
-                    actions.append(f"ORIGINALDATE {orig_v or '(assente)'} -> {shared}")
-                if date_v:
-                    actions.append(f"rimuovo DATE={date_v}")
-                print(f"{'[dry] ' if dry_run else ''}FIX(album-date): {f.name}  "
-                      f"{' ; '.join(actions)}")
-            elif orig_v:
-                # The documented invariant is one original-date field only, even if DATE
-                # happens to contain the same value. Navidrome should not have two sources.
-                if not date_v:
-                    continue
-                changes = ['--remove-tag=DATE']
-                proposed += 1
-                progress.clear()
-                print(f"{'[dry] ' if dry_run else ''}FIX(rem): {f.name}  "
-                      f"DATE={date_v} ORIGINALDATE={orig_v}")
-            elif date_v:
-                year = ''
-                for d in (f.parent, f.parent.parent):
-                    m = DATE_YEAR_RE.search(d.name)
-                    if m:
-                        year = m.group(0).strip('()')
-                        break
-                if not year or date_v == year:
-                    continue
-                changes = [f'--set-tag=ORIGINALDATE={year}', '--remove-tag=DATE']
-                proposed += 1
-                progress.clear()
-                print(f"{'[dry] ' if dry_run else ''}FIX(set): {f.name}  "
-                      f"DATE={date_v} -> ORIGINALDATE={year}")
-            else:
+            elif date_v and release_v and date_v[:4] == release_v[:4]:
+                changes.append('--remove-tag=DATE')
+            if not changes:
                 continue
-
+            proposed += 1
+            progress.clear()
+            actions = []
+            if target_date and orig_v != target_date:
+                actions.append(f'ORIGINALDATE {orig_v or "(assente)"} -> {target_date}')
+            if target_date and release_v != target_date:
+                actions.append(f'RELEASEDATE {release_v or "(assente)"} -> {target_date}')
+            if date_v:
+                actions.append(f'rimuovo DATE={date_v}')
+            print(f"{'[dry] ' if dry_run else ''}FIX(album-date): {f.name}  "
+                  f"{' ; '.join(actions)}")
             if not dry_run:
                 _metaflac_run(*changes, path=f)
+                invalidate_probe_cache([f])
                 fixed += 1
         except Exception as e:
             errors += 1
@@ -11394,6 +12711,7 @@ def run_fix_dates(dry_run=False, base=None, files_only=None):
         print(f'fix_date_tags: {proposed} file con modifiche proposte (--dry-run), {errors} errori')
     else:
         print(f'fix_date_tags: {fixed} file sistemati, {errors} errori')
+
 
 # ===================== fase: flac 16bit =====================
 # (da flac_16bit.py, ottimizzata: 24bit -> 16bit; 16bit con ratio
@@ -11657,12 +12975,9 @@ def run_flac_16bit(dry_run=False, base=None, cache_path=None):
 def prune_playlist_refs():
     if not NAVIDROME_DB.exists():
         return
-    ps = _docker('ps', '--filter', 'name=navidrome', '--format', '{{.Names}}')
-    running = 'navidrome' in ps.stdout
-    if running:
-        print('  fermo navidrome per pulizia reference playlist...')
-        _docker('stop', 'navidrome')
+    stopped_container = None
     try:
+        stopped_container = _stop_navidrome_container('pulizia reference playlist')
         con = sqlite3.connect(str(NAVIDROME_DB))
         cur = con.cursor()
         dangling = cur.execute(
@@ -11688,14 +13003,14 @@ def prune_playlist_refs():
     except Exception as e:
         print(f'  [ERRORE] pulizia playlist: {e}', file=sys.stderr)
     finally:
-        if running:
+        if stopped_container:
             print('  riavvio navidrome...')
-            _docker('start', 'navidrome')
-            # docker start restituisce quando il container e' partito, non quando l'API HTTP
-            # e' pronta. Senza attesa, star_liked subito dopo riceveva Connection refused.
-            if not _wait_navidrome_api_ready(timeout=120):
-                print('  [ERRORE] Navidrome non e' + "'" + ' tornato raggiungibile dopo la pulizia DB.',
-                      file=sys.stderr, flush=True)
+            if _start_navidrome_container(stopped_container):
+                # docker start restituisce quando il container e' partito, non quando l'API HTTP
+                # e' pronta. Senza attesa, star_liked subito dopo riceveva Connection refused.
+                if not _wait_navidrome_api_ready(timeout=120):
+                    print('  [ERRORE] Navidrome non e' + "'" + ' tornato raggiungibile dopo la pulizia DB.',
+                          file=sys.stderr, flush=True)
 
 
 # ===================== scan Navidrome =====================
@@ -11816,6 +13131,11 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
                 # davvero online prima di dichiarare pronta la fase successiva.
                 if not _wait_navidrome_api_ready(timeout=120):
                     return False
+            if (_PLAYLIST_ARTWORK_CHANGED_PATHS or _playlist_artwork_pending_load() or
+                    not PLAYLIST_ARTWORK_REFRESH_MARKER.exists()):
+                run_navidrome_playlist_artwork_refresh()
+            if _playlist_description_pending_load():
+                run_navidrome_playlist_description_sync()
             return True
         cnt = st.get('count', 0)
         if progress_total:
@@ -11825,6 +13145,350 @@ def run_navidrome_scan(full_scan=True, prune_refs=True):
     print(f'[ERRORE] scan Navidrome: timeout dopo {timeout // 60} minuti',
           file=sys.stderr, flush=True)
     return False
+
+
+def run_navidrome_artwork_reprocess_absent():
+    """Chiede a Navidrome di ricalcolare soltanto artisti/album attualmente senza art.
+
+    Le versioni recenti memorizzano lo stato artwork: una semplice scansione non ritenta
+    gli elementi gia' registrati come assenti. La CLI viene eseguita nel container, quindi
+    usa esattamente configurazione e data folder del server. Un CLI non disponibile e'
+    un avviso non bloccante: i file locali sono gia' stati salvati correttamente.
+    """
+    try:
+        container = _navidrome_container_name()
+        if not container:
+            print('[warn] refresh artwork Navidrome saltato: container navidrome non attivo; '
+                  'i file locali sono stati salvati.', file=sys.stderr, flush=True)
+            return True
+        result = _docker('exec', container, 'navidrome', 'artwork', 'reprocess',
+                         '--kind', 'ar', '--kind', 'al', '--source', 'absent', '--yes')
+        output = '\n'.join(part.strip() for part in (result.stdout, result.stderr) if part and part.strip())
+        if output:
+            for line in output.splitlines():
+                print(f'[navidrome artwork] {line}', flush=True)
+        if result.returncode == 0:
+            print('[i] refresh artwork Navidrome accodato per artisti e album senza immagine.',
+                  flush=True)
+            return True
+        folded = output.casefold()
+        if any(token in folded for token in ('no items', 'no item', 'no artwork',
+                                              'no matching', 'nessun elemento')):
+            print('[i] Navidrome non ha elementi assenti da rimettere in coda.', flush=True)
+        else:
+            print('[warn] CLI artwork Navidrome non disponibile o refresh non riuscito; '
+                  'i file locali restano salvati. Controllare il log del container.',
+                  file=sys.stderr, flush=True)
+        return True
+    except (OSError, subprocess.SubprocessError, AttributeError, RuntimeError) as exc:
+        print(f'[warn] impossibile avviare il refresh artwork Navidrome: {exc}; '
+              'i file locali restano salvati.', file=sys.stderr, flush=True)
+        return True
+
+
+
+def run_navidrome_playlist_artwork_refresh():
+    """Refresh changed Spotify sidecars and safely retry paths missed by prior runs."""
+    changed = set(_PLAYLIST_ARTWORK_CHANGED_PATHS) | _playlist_artwork_pending_load()
+    migration_pending = not PLAYLIST_ARTWORK_REFRESH_MARKER.exists()
+
+    # One-time reconciliation for sidecars saved by v0.138 whose refresh queue was
+    # in memory only and therefore disappeared after an incomplete run.
+    if migration_pending and isinstance(SYNC_STATE, dict):
+        for sync_key, state in SYNC_STATE.items():
+            if not isinstance(state, dict) or not state.get('art_url') or not state.get('art_file'):
+                continue
+            if '::' in str(sync_key):
+                user, base = str(sync_key).split('::', 1)
+                playlist_root = _user_playlist_root(user)
+            else:
+                base = str(sync_key)
+                playlist_root = _user_playlist_root(DEFAULT_USER)
+            m3u_path = playlist_root / f'{base}.m3u'
+            sidecar = playlist_root / Path(str(state.get('art_file'))).name
+            if m3u_path.is_file() and sidecar.is_file():
+                changed.add(_normal_path(m3u_path))
+
+    if not changed:
+        return True
+    _playlist_artwork_pending_save(changed)
+    if not NAVIDROME_DB.exists():
+        print('[warn] refresh cover playlist rinviato: DB Navidrome non trovato; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+    try:
+        with _nd_db(write=False) as con:
+            columns = _nd_table_cols(con, 'playlist')
+            if not {'id', 'path'} <= set(columns):
+                print('[warn] refresh cover playlist rinviato: colonne id/path non trovate nel DB.',
+                      file=sys.stderr, flush=True)
+                return False
+            select_cols = ['id', 'path'] + (['name'] if 'name' in columns else [])
+            quoted = ', '.join('"' + col.replace('"', '""') + '"' for col in select_cols)
+            rows = con.execute(
+                f"SELECT {quoted} FROM playlist WHERE path IS NOT NULL AND path != ''").fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        print(f'[warn] impossibile individuare le playlist Navidrome: {exc}; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+    row_records = []
+    for row in rows:
+        pid, db_path = str(row[0]), str(row[1] or '')
+        db_name = str(row[2] or '') if len(row) > 2 else ''
+        row_records.append((pid, db_path, db_name))
+
+    matched_ids = []
+    matched_paths = set()
+    for path in changed:
+        relative = _playlist_artwork_relative_key(path)
+        for pid, db_path, _db_name in row_records:
+            try:
+                absolute_match = _normal_path(db_path) == _normal_path(path)
+            except (TypeError, OSError, ValueError):
+                absolute_match = False
+            db_relative = _playlist_artwork_relative_key(db_path)
+            if absolute_match or (relative and db_relative == relative):
+                matched_ids.append(pid)
+                matched_paths.add(path)
+
+    # Some Navidrome DBs store rewritten/relative paths. Fall back to the name only
+    # when exactly one changed M3U and exactly one database row share that name.
+    unmatched = changed - matched_paths
+    changed_by_stem = {}
+    for path in unmatched:
+        key = _playlist_collision_key(Path(path).stem)
+        if key:
+            changed_by_stem.setdefault(key, []).append(path)
+    rows_by_stem = {}
+    for pid, db_path, db_name in row_records:
+        for label in (db_name, Path(db_path.replace('\\', '/')).stem):
+            key = _playlist_collision_key(label)
+            if key:
+                rows_by_stem.setdefault(key, set()).add(pid)
+    for key, paths in changed_by_stem.items():
+        candidate_ids = rows_by_stem.get(key, set())
+        if len(paths) == 1 and len(candidate_ids) == 1:
+            matched_paths.add(paths[0])
+            matched_ids.extend(candidate_ids)
+
+    ids = list(dict.fromkeys(matched_ids))
+    unresolved = changed - matched_paths
+    if unresolved:
+        names = ', '.join(Path(path).name for path in sorted(unresolved)[:8])
+        more = f' (+{len(unresolved) - 8} altri)' if len(unresolved) > 8 else ''
+        print(f'[warn] {len(unresolved)} cover playlist restano in coda: nessun match univoco nel DB '
+              f'({names}{more}); riprovero.', file=sys.stderr, flush=True)
+    if not ids:
+        _playlist_artwork_pending_save(unresolved or changed)
+        print(f'[warn] nessun ID Navidrome abbinato a {len(changed)} sidecar; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+    try:
+        container = _navidrome_container_name()
+        if not container:
+            print('[warn] refresh cover playlist rinviato: container Navidrome non attivo; coda conservata.',
+                  file=sys.stderr, flush=True)
+            return False
+        refreshed = 0
+        for offset in range(0, len(ids), 40):
+            batch = ids[offset:offset + 40]
+            result = _docker('exec', container, 'navidrome', 'artwork', 'refresh', 'pl', *batch)
+            output = '\n'.join(part.strip() for part in (result.stdout, result.stderr)
+                                if part and part.strip())
+            if output:
+                for line in output.splitlines():
+                    print(f'[navidrome playlist artwork] {line}', flush=True)
+            folded = output.casefold()
+            not_found = any(token in folded for token in (
+                'playlist not found', 'not found:', 'unknown playlist',
+                'could not find playlist', 'cannot find playlist', 'invalid playlist id'))
+            if result.returncode != 0 or not_found:
+                print('[warn] refresh artwork playlist incompleto; coda conservata per retry.',
+                      file=sys.stderr, flush=True)
+                return False
+            refreshed += len(batch)
+        remaining = changed - matched_paths
+        _PLAYLIST_ARTWORK_CHANGED_PATHS.difference_update(matched_paths)
+        _playlist_artwork_pending_save(remaining)
+        if migration_pending and not remaining:
+            try:
+                PLAYLIST_ARTWORK_REFRESH_MARKER.parent.mkdir(parents=True, exist_ok=True)
+                PLAYLIST_ARTWORK_REFRESH_MARKER.write_text('0.139\n', encoding='ascii')
+            except OSError as exc:
+                print(f'[warn] marker migrazione artwork playlist non salvato: {exc}',
+                      file=sys.stderr, flush=True)
+        print(f'[i] refresh artwork Navidrome accodato per {refreshed} playlist; '
+              f'{len(remaining)} restano in coda.', flush=True)
+        return not remaining
+    except (OSError, subprocess.SubprocessError, AttributeError, RuntimeError) as exc:
+        print(f'[warn] refresh artwork playlist non disponibile: {exc}; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+
+_EXPORTIFY_GITHUB_URL = 'https://github.com/Chic77/exportify-to-m3u'
+
+
+def _playlist_import_attribution(m3u_path, match_count=None, total_count=None, missing_count=None):
+    """Attribution in plain text, senza Markdown/link auto-generati."""
+    match_count = _optional_nonnegative_int(match_count)
+    total_count = _optional_nonnegative_int(total_count)
+    missing_count = _optional_nonnegative_int(missing_count)
+    if match_count is None or total_count is None or missing_count is None:
+        match_count = total_count = missing_count = 0
+    return (f"{Path(m3u_path).name}: {match_count}/{total_count} match, "
+            f"{missing_count} mancanti\n{_EXPORTIFY_GITHUB_URL}")
+
+
+def _strip_playlist_import_attribution(comment):
+    """Rimuove attribuzioni Exportify precedenti lasciando intatto il testo utente."""
+    text = str(comment or '').replace('\r\n', '\n').replace('\r', '\n')
+    kept = []
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if re.match(r"^#{0,6}\s*[\"']?Imported from\b", stripped, re.I) and 'exportify_to_m3u' in stripped.casefold():
+            continue
+        url_only = re.sub(r'[\[\]\(\)\s\"\']', '', stripped)
+        if url_only and url_only.replace(_EXPORTIFY_GITHUB_URL, '') == '':
+            continue
+        if re.fullmatch(r'.+?\.m3u:\s*\d+\s*/\s*\d+\s+match,\s*\d+\s+mancanti',
+                        stripped, re.I):
+            continue
+        kept.append(line.rstrip())
+    cleaned = '\n'.join(kept)
+    cleaned = re.sub(r'\n[ \t]*\n(?:[ \t]*\n)+', '\n\n', cleaned)
+    return cleaned.strip()
+
+
+def run_navidrome_playlist_description_sync():
+    """Scrive descrizione Spotify + attribuzione nel commento playlist Navidrome."""
+    pending = _playlist_description_pending_load()
+    if not pending:
+        return True
+    if not NAVIDROME_DB.exists():
+        print('[warn] descrizioni playlist rinviate: DB Navidrome non trovato; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+    try:
+        with _nd_db(write=False) as con:
+            columns = _nd_table_cols(con, 'playlist')
+            required = {'id', 'path', 'name', 'comment'}
+            if not required <= set(columns):
+                print('[warn] descrizioni playlist rinviate: DB Navidrome senza colonne '
+                      'id/path/name/comment; coda conservata.', file=sys.stderr, flush=True)
+                return False
+            rows = con.execute(
+                'SELECT id, path, name, comment FROM playlist WHERE path IS NOT NULL AND path != ""'
+            ).fetchall()
+    except (sqlite3.Error, OSError, RuntimeError) as exc:
+        print(f'[warn] impossibile leggere playlist Navidrome per sincronizzare le descrizioni: '
+              f'{exc}; coda conservata.', file=sys.stderr, flush=True)
+        return False
+
+    row_records = [(str(row[0]), str(row[1] or ''), str(row[2] or ''), str(row[3] or ''))
+                   for row in rows]
+    path_to_row = {}
+    matched_paths = set()
+    ambiguous_paths = set()
+    for path in pending:
+        relative = _playlist_artwork_relative_key(path)
+        candidates = []
+        for record in row_records:
+            _pid, db_path, _db_name, _comment = record
+            try:
+                absolute_match = _normal_path(db_path) == _normal_path(path)
+            except (TypeError, ValueError, OSError):
+                absolute_match = False
+            db_relative = _playlist_artwork_relative_key(db_path)
+            if absolute_match or (relative and db_relative == relative):
+                candidates.append(record)
+        if len(candidates) == 1:
+            path_to_row[path] = candidates[0]
+            matched_paths.add(path)
+        elif len(candidates) > 1:
+            ambiguous_paths.add(path)
+
+    # I path riscritti/relativi vengono abbinati per basename soltanto se l'associazione è unica.
+    changed_by_stem = {}
+    for path in set(pending) - matched_paths - ambiguous_paths:
+        key = _playlist_collision_key(Path(path).stem)
+        if key:
+            changed_by_stem.setdefault(key, []).append(path)
+    rows_by_stem = {}
+    for record in row_records:
+        _pid, db_path, db_name, _comment = record
+        for label in (db_name, Path(db_path.replace('\\', '/')).stem):
+            key = _playlist_collision_key(label)
+            if key:
+                rows_by_stem.setdefault(key, set()).add(record[0])
+    by_id = {record[0]: record for record in row_records}
+    for key, paths in changed_by_stem.items():
+        candidate_ids = rows_by_stem.get(key, set())
+        if len(paths) == 1 and len(candidate_ids) == 1:
+            path = paths[0]
+            path_to_row[path] = by_id[next(iter(candidate_ids))]
+            matched_paths.add(path)
+
+    unmatched = set(pending) - matched_paths
+    if unmatched:
+        names = ', '.join(Path(path).name for path in sorted(unmatched)[:8])
+        more = f' (+{len(unmatched) - 8} altri)' if len(unmatched) > 8 else ''
+        print(f'[warn] {len(unmatched)} descrizioni playlist restano in coda: '
+              f'nessun match Navidrome univoco ({names}{more}); riprovero.',
+              file=sys.stderr, flush=True)
+
+    changes = []
+    for path in sorted(matched_paths):
+        record = path_to_row.get(path)
+        if not record:
+            continue
+        pid, _db_path, _db_name, current_comment = record
+        queued = pending[path]
+        # Spotify restituisce null per playlist la cui descrizione non è esposta: in
+        # quel caso il commento corrente Navidrome viene preservato e solo ri-attribuito.
+        base = (queued.get('description', '') if queued.get('description_present')
+                else current_comment)
+        base = _strip_playlist_import_attribution(base)
+        attribution = _playlist_import_attribution(
+            path, queued.get('match_count'), queued.get('total_count'), queued.get('missing_count'))
+        new_comment = f'{base}\n\n{attribution}' if base else attribution
+        if new_comment != current_comment:
+            changes.append((new_comment, pid, Path(path).name))
+
+    try:
+        if changes:
+            with _nd_db(write=True, reason='sincronizzo descrizioni playlist Exportify') as con:
+                columns = _nd_table_cols(con, 'playlist')
+                if not {'id', 'comment'} <= set(columns):
+                    raise sqlite3.OperationalError('colonne playlist id/comment non presenti')
+                for comment, playlist_id, label in changes:
+                    con.execute('UPDATE playlist SET comment = ? WHERE id = ?',
+                                (comment, playlist_id))
+                    print(f'[i] descrizione Navidrome aggiornata: {label}', flush=True)
+                con.commit()
+    except (sqlite3.Error, OSError, RuntimeError) as exc:
+        print(f'[warn] sync descrizioni playlist non riuscita: {exc}; coda conservata.',
+              file=sys.stderr, flush=True)
+        return False
+
+    remaining = {path: item for path, item in pending.items() if path in unmatched}
+    if not _playlist_description_pending_save(remaining):
+        return False
+    done = len(matched_paths)
+    print(f'[i] descrizioni playlist Navidrome: {done} sincronizzate, '
+          f'{len(unmatched)} in attesa.', flush=True)
+    return not unmatched
+
+
+def run_navidrome_scan_after_artwork():
+    """Scansiona le nuove immagini e riaccoda gli album/artisti ancora senza artwork."""
+    if not run_navidrome_scan(full_scan=False, prune_refs=False):
+        return False
+    return run_navidrome_artwork_reprocess_absent()
 
 
 # ===================== riconciliazione album dopo scan Navidrome =====================
@@ -12240,11 +13904,14 @@ def _saved_albums_csv(user):
             return path
     return None
 
-def _read_saved_album_rows(user):
-    """Legge gli album salvati Spotify, includendo URI e data quando l'export li espone."""
+def _read_saved_album_rows(user, with_status=False):
+    """Legge gli album salvati; with_status distingue CSV assente/invalido da CSV vuoto."""
+    def finish(rows, ok):
+        return (rows, ok) if with_status else rows
+
     path = _saved_albums_csv(user)
-    if not path:
-        return []
+    if not path or not path.is_file():
+        return finish([], False)
     rows = []
     try:
         with path.open('r', encoding='utf-8-sig', newline='') as fh:
@@ -12259,7 +13926,7 @@ def _read_saved_album_rows(user):
             date_col = _csv_header(fields, 'Album Release Date', 'Release Date', 'Data di pubblicazione')
             if not name_col:
                 print(f"[{user}] [ERRORE] {path.name}: manca la colonna 'Album Name'", file=sys.stderr)
-                return []
+                return finish([], False)
             for row in reader:
                 name = (row.get(name_col) or '').strip()
                 artists = (row.get(artist_col) or '').strip() if artist_col else ''
@@ -12272,9 +13939,9 @@ def _read_saved_album_rows(user):
                                  'release_date': release_date, 'user': str(user)})
     except (OSError, csv.Error, UnicodeError) as e:
         print(f"[{user}] [ERRORE] lettura {path.name}: {e}", file=sys.stderr)
-        return []
+        return finish([], False)
     print(f"[{user}] raccolta album: letti {len(rows)} album da {path.name}")
-    return rows
+    return finish(rows, True)
 
 def _list_container(value, key):
     if not value:
@@ -12324,11 +13991,12 @@ def _saved_album_ids(rows, catalog, user):
         key = norm(album.get('name', ''))
         if key:
             by_name.setdefault(key, []).append(album)
-    ids, matched = set(), 0
+    ids, matched, unmatched = set(), 0, []
     for row in rows:
         title_key = norm(row.get('name', ''))
         candidates = by_name.get(title_key, [])
         if not candidates:
+            unmatched.append(dict(row))
             continue
         raw_artists = str(row.get('artists', '') or '')
         source_artist = norm(raw_artists)
@@ -12359,9 +14027,11 @@ def _saved_album_ids(rows, catalog, user):
                 print(f"[{user}] [info] artista non riconosciuto esattamente per "
                       f"{row.get('artists','')} - {row.get('name','')}; usato il titolo "
                       "normalizzato per individuare l'album locale")
+        else:
+            unmatched.append(dict(row))
     if len(rows) > matched:
         print(f"[{user}] album Spotify senza corrispondenza locale: {len(rows)-matched}")
-    return ids, matched
+    return ids, matched, unmatched
 
 def _saved_artist_ids(rows, catalog, user):
     by_name = {}
@@ -12391,7 +14061,7 @@ def _star_liked_for(user, password):
     saved_playlist = _find_user_playlist(user, password, SAVED_ALBUMS_PLNAMES)  # compatibilita' vecchia
     liked_entries = _playlist_entries(liked, user, password) if liked else []
     legacy_saved_entries = _playlist_entries(saved_playlist, user, password) if saved_playlist else []
-    album_rows = _read_saved_album_rows(user)
+    album_rows, saved_csv_ok = _read_saved_album_rows(user, with_status=True)
 
     if liked:
         print(f"[{user}] trovata playlist '{liked.get('name')}' id={liked.get('id')} ({len(liked_entries)} brani)")
@@ -12414,11 +14084,11 @@ def _star_liked_for(user, password):
     for entry in liked_entries + legacy_saved_entries:
         if isinstance(entry, dict):
             artist_ids.update(_entry_artist_ids(entry))
-    album_ids, album_matched = set(), 0
-    if album_rows:
+    album_ids, album_matched, album_unmatched = set(), 0, None
+    if saved_csv_ok and album_rows:
         try:
             album_catalog = _navidrome_album_catalog(user, password)
-            album_ids, album_matched = _saved_album_ids(album_rows, album_catalog, user)
+            album_ids, album_matched, album_unmatched = _saved_album_ids(album_rows, album_catalog, user)
         except Exception as e:
             print(f"[{user}] [ERRORE] catalogo album Navidrome: {type(e).__name__}: {e}", file=sys.stderr)
         try:
@@ -12427,11 +14097,14 @@ def _star_liked_for(user, password):
         except Exception as e:
             print(f"[{user}] [ERRORE] catalogo artisti Navidrome: {type(e).__name__}: {e}", file=sys.stderr)
     else:
+        if saved_csv_ok:
+            # CSV valido ma senza righe: lista vuota verificata, non file mancante.
+            album_unmatched = []
         # Compatibilita' con la vecchia versione che ricavava albumId da una M3U salvata.
         for entry in legacy_saved_entries:
             if isinstance(entry, dict) and entry.get('albumId') not in (None, ''):
                 album_ids.add(str(entry['albumId']))
-        if not legacy_saved_entries:
+        if not legacy_saved_entries and not saved_csv_ok:
             print(f"[{user}] [warn] CSV 'saved albums' non trovato: nessun album da stellare")
 
     album_todo, album_fail = _star_ids(album_ids, 'albumId', user, password, starred_albums)
@@ -12440,42 +14113,97 @@ def _star_liked_for(user, password):
           f"{f' ({album_matched}/{len(album_rows)} righe CSV)' if album_rows else ''}, "
           f"{album_todo} da stellare, {album_fail} errori")
     print(f"[{user}] artisti di liked/album salvati: {len(artist_ids)} ID, {artist_todo} da stellare, {artist_fail} errori")
-    if not liked and not album_rows and not legacy_saved_entries:
+    if not liked and not album_rows and not legacy_saved_entries and not saved_csv_ok:
         print(f"[{user}] nessuna fonte Spotify disponibile: nulla da fare")
+    return album_unmatched
+
+_SAVED_ALBUM_UNMATCHED_START = '# >>> INIZIO REPORT ALBUM SALVATI SPOTIFY SENZA MATCH NAVIDROME >>>'
+_SAVED_ALBUM_UNMATCHED_END = '# <<< FINE REPORT ALBUM SALVATI SPOTIFY SENZA MATCH NAVIDROME <<<'
+
+
+def write_saved_album_unmatched_report(items_by_user):
+    """Persist the actual saved-album rows that have no Navidrome title match."""
+    now = datetime.now()
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    out = LOG_DIR / f'e2m_mancanti_{now:%d-%m-%Y}.txt'
+    total = sum(len(rows or []) for rows in (items_by_user or {}).values())
+    lines = [_SAVED_ALBUM_UNMATCHED_START,
+             f'# album salvati Spotify senza corrispondenza locale: {total} | esecuzione {now:%Y-%m-%d %H:%M}',
+             '# Questa sezione corrisponde ai conteggi per utente stampati come '
+             "'album Spotify senza corrispondenza locale'. Non e' il report Lidarr.",
+             f'=== ALBUM SPOTIFY SENZA MATCH NAVIDROME ({total}) ===',
+             '# Formato: utente | artista - album | data | Spotify URI']
+    for user in sorted((items_by_user or {}), key=str.casefold):
+        for row in sorted((items_by_user.get(user) or []),
+                          key=lambda r: (str(r.get('artists') or '').casefold(),
+                                         str(r.get('name') or '').casefold(),
+                                         str(r.get('release_date') or ''))):
+            artist = re.sub(r'\s+', ' ', str(row.get('artists') or '(artista sconosciuto)')).strip()
+            album = re.sub(r'\s+', ' ', str(row.get('name') or '(album sconosciuto)')).strip()
+            date = re.sub(r'[\r\n]+', ' ', str(row.get('release_date') or 'n/d')).strip()
+            uri = str(row.get('album_uri') or '').strip()
+            if not uri:
+                album_id = str(row.get('id') or '').strip()
+                uri = f'spotify:album:{album_id}' if album_id else 'n/d'
+            lines.append(f'{user} | {artist} - {album} | data: {date} | Spotify: {uri}')
+    if total == 0:
+        lines.append('(nessun album salvato senza corrispondenza locale)')
+    lines.append(_SAVED_ALBUM_UNMATCHED_END)
+    section = '\n'.join(lines) + '\n'
+    try:
+        previous = out.read_text(encoding='utf-8', errors='replace') if out.exists() else ''
+    except OSError as exc:
+        print(f'[warn] report album salvati non leggibile: {exc}', file=sys.stderr)
+        previous = ''
+    content = _replace_marked_report(previous, section,
+                                     _SAVED_ALBUM_UNMATCHED_START,
+                                     _SAVED_ALBUM_UNMATCHED_END)
+    tmp = out.with_name(out.name + '.tmp')
+    tmp.write_text(content, encoding='utf-8')
+    os.replace(tmp, out)
+    print(f'[i] report album salvati Spotify: {total} senza match Navidrome -> {out}', flush=True)
+    return {'path': str(out), 'unmatched': total}
+
 
 def run_star_liked(users=None):
-    """Stella la musica Spotify importata in Navidrome per utente.
-
-    -- liked / liked songs: tutte le tracce
-    -- saved albums: tutti gli album distinti presenti
-    -- artists: ogni artista ID presente nei brani di entrambe le playlist
-
-    Limite: Exportify esporta playlist, non la raccolta autonoma di artisti seguiti su Spotify;
-    gli artisti seguiti che non compaiono in questi brani non sono disponibili in questa fase.
-    Serve ND_PASS_<UTENTE> (per ND_USER basta ND_PASS)."""
+    """Stella per-utente; credenziali errate/assenti non annullano il lavoro degli altri."""
     errors = 0
     skipped = 0
-    for u in (users if users is not None else (_db_users() or [SUBSONIC_USER])):
+    successes = 0
+    unmatched_by_user = {}
+    configured_users = list(users if users is not None else (_db_users() or [SUBSONIC_USER]))
+    for u in configured_users:
         pw, key = _user_password(u)
         if pw is None:
             skipped += 1
-            print(f"[{u}] star_liked: nessuna password (imposta {key}), saltato", file=sys.stderr)
+            print(f"[{u}] star_liked: nessuna password (imposta {key}), saltato")
             continue
         try:
-            _star_liked_for(u, pw)
+            unmatched_rows = _star_liked_for(u, pw)
+            if isinstance(unmatched_rows, list):
+                unmatched_by_user[u] = unmatched_rows
+            successes += 1
         except Exception as e:
             errors += 1
             if 'wrong username or password' in str(e).casefold():
                 password_key = 'ND_PASS_' + re.sub(r'\W', '_', str(u)).upper()
-                print(f'[{u}] [ERRORE] credenziale Navidrome rifiutata: controlla {password_key} '
-                      'nel file env/.env (per l’utente ND_USER può essere usata ND_PASS).',
-                      file=sys.stderr)
+                print(f'[{u}] [warn] credenziale Navidrome rifiutata: controlla {password_key}; '
+                      'gli altri utenti continuano normalmente.', file=sys.stderr)
             else:
-                print(f"[{u}] [ERRORE] star_liked: {type(e).__name__}: {e}", file=sys.stderr)
-    if errors:
-        print(f'star_liked: {errors} utenti con errore API, {skipped} saltati per password assente',
-              file=sys.stderr)
-        return False
+                print(f"[{u}] [warn] star_liked: {type(e).__name__}: {e}; gli altri utenti continuano.",
+                      file=sys.stderr)
+    if unmatched_by_user:
+        try:
+            write_saved_album_unmatched_report(unmatched_by_user)
+        except OSError as e:
+            print(f'[warn] impossibile scrivere il report album salvati senza match: {e}',
+                  file=sys.stderr, flush=True)
+    if errors or skipped:
+        print(f'star_liked: {successes} utenti completati, {errors} con errore API, '
+              f'{skipped} saltati per password assente', file=sys.stderr)
+    # Each Navidrome account is independent. A rejected/missing credential may leave
+    # that account's stars untouched, but must never abort the other accounts or the
+    # rest of the nightly pipeline. All per-user errors remain explicit in the log.
     return True
 
 
@@ -12489,17 +14217,54 @@ def _docker(*args):
     return subprocess.run(['docker', *args], capture_output=True, text=True)
 
 
+def _navidrome_container_name():
+    """Risolvi il container Navidrome attivo, anche con il nome Compose predefinito."""
+    result = _docker('ps', '--filter', 'name=navidrome', '--format', '{{.Names}}')
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or 'errore Docker sconosciuto').strip()
+        raise RuntimeError(f'impossibile interrogare Docker per Navidrome: {detail}')
+    names = [line.strip().lstrip('/') for line in (result.stdout or '').splitlines()
+             if line.strip()]
+    if not names:
+        return None
+    if 'navidrome' in names:
+        return 'navidrome'
+    if len(names) == 1:
+        return names[0]
+    raise RuntimeError('piu container attivi corrispondono a Navidrome: ' + ', '.join(names) +
+                       '; imposta un container_name univoco o arresta il duplicato')
+
+
+def _stop_navidrome_container(reason=''):
+    """Arresta Navidrome e restituisce il nome reale; fallisce chiuso se lo stop fallisce."""
+    name = _navidrome_container_name()
+    if not name:
+        return None
+    label = f' ({reason})' if reason else ''
+    print(f'  fermo navidrome{label}...')
+    result = _docker('stop', name)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or 'errore Docker sconosciuto').strip()
+        raise RuntimeError(f'impossibile fermare il container {name}: {detail}')
+    return name
+
+
+def _start_navidrome_container(name):
+    if not name:
+        return True
+    result = _docker('start', name)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or 'errore Docker sconosciuto').strip()
+        print(f'[ERRORE] impossibile riavviare il container {name}: {detail}',
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 @contextlib.contextmanager
 def _nd_db(write=False, reason=''):
-    """Connessione al DB Navidrome. write=True: ferma il container, apre in scrittura e lo
-    riavvia alla fine; write=False: sola lettura (anche a Navidrome acceso)."""
-    running = False
-    if write:
-        ps = _docker('ps', '--filter', 'name=navidrome', '--format', '{{.Names}}')
-        running = 'navidrome' in ps.stdout
-        if running:
-            print(f'  fermo navidrome ({reason})...')
-            _docker('stop', 'navidrome')
+    """Connessione al DB Navidrome. Per scrivere ferma il container reale e lo riavvia."""
+    stopped_container = _stop_navidrome_container(reason) if write else None
     try:
         if write:
             con = sqlite3.connect(str(NAVIDROME_DB), timeout=30)
@@ -12510,9 +14275,9 @@ def _nd_db(write=False, reason=''):
         finally:
             con.close()
     finally:
-        if running:
+        if stopped_container:
             print('  riavvio navidrome...')
-            _docker('start', 'navidrome')
+            _start_navidrome_container(stopped_container)
 
 
 def _owner_for_playlist_path(path, users_lower, default):
@@ -13135,39 +14900,177 @@ def run_fix_collab_artists(apply=False, album=None, artist=None):
 
 MB_BASE = os.environ.get('MB_BASE', 'https://musicbrainz.org/ws/2/')
 MB_ALBUMS_CACHE = SCRIPT_DIR / '.mb_albums_cache.json'
-_MB_MIN_INTERVAL = 1.1          # MusicBrainz: al massimo ~1 richiesta/secondo
-_MB_LAST = [0.0]
+_MB_MIN_INTERVAL = 1.2          # margine prudenziale sotto il massimo ufficiale di 1 richiesta/s
+_MB_LAST = [0.0]                # monotonic timestamp dell'ultima richiesta nel processo
 _MB_CALLS = [0]
+_MB_REQUEST_LOCK = threading.Lock()
+_MB_BACKOFF_UNTIL = [0.0]       # monotonic timestamp, condiviso fra date/artwork/Lidarr
+_MB_HTTP_FAILURES = [0]
+_MB_RATE_STATE_FILE = CACHE_DIR / 'musicbrainz_rate_limit.json'
+_MB_RATE_LOCK_WARNED = [False]
+
+
+@contextlib.contextmanager
+def _musicbrainz_cross_process_state():
+    """Blocca anche altri processi dello stesso host, non solo i thread del processo."""
+    handle = None
+    state = {'last_request_at': 0.0, 'backoff_until': 0.0, 'failures': 0}
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        import fcntl
+        handle = open(_MB_RATE_STATE_FILE, 'a+', encoding='utf-8')
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        raw = handle.read(16384)
+        try:
+            stored = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            stored = {}
+        if isinstance(stored, dict):
+            try:
+                state['last_request_at'] = max(0.0, float(stored.get('last_request_at') or 0.0))
+                state['backoff_until'] = max(0.0, float(stored.get('backoff_until') or 0.0))
+                state['failures'] = max(0, int(stored.get('failures') or 0))
+            except (TypeError, ValueError, OverflowError):
+                state = {'last_request_at': 0.0, 'backoff_until': 0.0, 'failures': 0}
+    except (ImportError, OSError):
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+        handle = None
+        if not _MB_RATE_LOCK_WARNED[0]:
+            print('[warn] lock MusicBrainz inter-processo non disponibile; resta attivo il limiter interno al processo.',
+                  file=sys.stderr, flush=True)
+            _MB_RATE_LOCK_WARNED[0] = True
+
+    def save():
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            handle.truncate()
+            json.dump(state, handle, separators=(',', ':'))
+            handle.flush()
+            os.fsync(handle.fileno())
+        except OSError:
+            if not _MB_RATE_LOCK_WARNED[0]:
+                print('[warn] stato rate-limit MusicBrainz non persistibile; resta attivo il limiter interno.',
+                      file=sys.stderr, flush=True)
+                _MB_RATE_LOCK_WARNED[0] = True
+
+    try:
+        yield state, save
+    finally:
+        if handle is not None:
+            save()
+            try:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+
+def _musicbrainz_request_bytes(request, timeout=30, max_bytes=None):
+    """Richiesta MusicBrainz serializzata, rate-limited e condivisa fra processi."""
+    with _MB_REQUEST_LOCK:
+        with _musicbrainz_cross_process_state() as (shared, save_shared):
+            now_mono = time.monotonic()
+            now_wall = time.time()
+            local_delay = max(0.0, _MB_MIN_INTERVAL - (now_mono - _MB_LAST[0]))
+            local_delay = max(local_delay, _MB_BACKOFF_UNTIL[0] - now_mono)
+            shared_age = max(0.0, now_wall - float(shared.get('last_request_at') or 0.0))
+            shared_delay = max(0.0, _MB_MIN_INTERVAL - shared_age)
+            shared_delay = max(shared_delay, min(900.0, max(0.0,
+                float(shared.get('backoff_until') or 0.0) - now_wall)))
+            delay = max(local_delay, shared_delay)
+            if delay > 0:
+                time.sleep(delay)
+
+            # Persist the request start as well as its completion, so a concurrent
+            # invocation does not burst immediately after this process is interrupted.
+            shared['last_request_at'] = time.time()
+            save_shared()
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    payload = response.read((int(max_bytes) + 1) if max_bytes else -1)
+                finished_mono = time.monotonic()
+                finished_wall = time.time()
+                _MB_LAST[0] = finished_mono
+                _MB_CALLS[0] += 1
+                _MB_HTTP_FAILURES[0] = 0
+                _MB_BACKOFF_UNTIL[0] = 0.0
+                shared.update({'last_request_at': finished_wall, 'backoff_until': 0.0, 'failures': 0})
+                return payload
+            except urllib.error.HTTPError as exc:
+                finished_mono = time.monotonic()
+                finished_wall = time.time()
+                _MB_LAST[0] = finished_mono
+                _MB_CALLS[0] += 1
+                shared['last_request_at'] = finished_wall
+                if exc.code in (429, 503):
+                    failures = max(_MB_HTTP_FAILURES[0], int(shared.get('failures') or 0)) + 1
+                    _MB_HTTP_FAILURES[0] = failures
+                    minimum = 30.0 if exc.code == 429 else 12.0
+                    exponent = min(max(0, failures - 1), 4)
+                    wait_for = min(300.0, minimum * (2 ** exponent))
+                    retry_after = None
+                    try:
+                        raw_retry = exc.headers.get('Retry-After') if exc.headers else None
+                        if raw_retry:
+                            retry_after = float(raw_retry)
+                    except (TypeError, ValueError):
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            raw_retry = exc.headers.get('Retry-After') if exc.headers else None
+                            parsed = parsedate_to_datetime(raw_retry) if raw_retry else None
+                            if parsed:
+                                retry_after = max(0.0, parsed.timestamp() - time.time())
+                        except Exception:
+                            retry_after = None
+                    if retry_after is not None:
+                        wait_for = max(wait_for, min(900.0, retry_after))
+                    _MB_BACKOFF_UNTIL[0] = max(_MB_BACKOFF_UNTIL[0], finished_mono + wait_for)
+                    shared['failures'] = failures
+                    shared['backoff_until'] = max(float(shared.get('backoff_until') or 0.0),
+                                                   finished_wall + wait_for)
+                save_shared()
+                raise
+            except Exception:
+                finished_mono = time.monotonic()
+                _MB_LAST[0] = finished_mono
+                _MB_CALLS[0] += 1
+                shared['last_request_at'] = time.time()
+                save_shared()
+                raise
 
 
 def _mb_get(path, **params):
-    """GET su MusicBrainz con rate limit, retry su 429/503. None se 404."""
-    url = MB_BASE + path + '?' + urllib.parse.urlencode({'fmt': 'json', **params})
+    """GET MusicBrainz tramite rate limiter globale. None se 404."""
+    base = str(MB_BASE or 'https://musicbrainz.org/ws/2/').rstrip('/') + '/'
+    url = base + path.lstrip('/') + '?' + urllib.parse.urlencode({'fmt': 'json', **params})
     req = urllib.request.Request(url, headers=MB_USER_AGENT)
     last = None
-    for attempt in range(4):
-        wait = _MB_MIN_INTERVAL - (time.time() - _MB_LAST[0])
-        if wait > 0:
-            time.sleep(wait)
+    for attempt in range(3):
         try:
-            _MB_CALLS[0] += 1
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read())
-            _MB_LAST[0] = time.time()
-            return data
-        except urllib.error.HTTPError as e:
-            _MB_LAST[0] = time.time()
-            if e.code == 404:
+            payload = _musicbrainz_request_bytes(req, timeout=30, max_bytes=8_000_000)
+            return json.loads(payload.decode('utf-8', errors='replace'))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
                 return None
-            last = e
-            if e.code in (429, 503):
-                time.sleep(5 * (attempt + 1))
-                continue
-            raise
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            last = e
-            time.sleep(3 * (attempt + 1))
-    raise RuntimeError(f"MusicBrainz non risponde ({last})")
+            last = exc
+            if exc.code not in (429, 500, 502, 503, 504) or attempt >= 2:
+                raise
+        except (urllib.error.URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+            last = exc
+            if attempt >= 2:
+                break
+    raise RuntimeError(f'MusicBrainz non risponde ({last})')
 
 
 def _mb_load_cache():
@@ -14419,30 +16322,35 @@ def run_repair_navidrome_duplicate_album_groups(dry_run=False, base=None,
             aa_counts = Counter(value for value in canonical_aa if value)
             target_albumartist = aa_counts.most_common(1)[0][0] if aa_counts else ''
 
-            shared_date = _dominant_original_date(tags)
+            shared_date = (_curated_original_year_for_album(files[0].parent, tags)
+                           or _dominant_original_date(tags))
             # Navidrome's default PID fallback uses RELEASEDATE (not ORIGINALDATE or DATE).
             # Keep the same explicit release date when one is consistently tagged; otherwise
             # use the album's common original date, then the most represented DB release date.
-            release_values = [str(t.get('releasedate') or '').strip() for t in tags
-                              if str(t.get('releasedate') or '').strip()]
-            release_counts = Counter(release_values)
-            if release_counts:
-                target_releasedate = sorted(release_counts,
-                    key=lambda value: (-release_counts[value], -len(value), value))[0]
-            else:
-                originaldate_only = _dominant_original_date(
-                    [{'originaldate': t.get('originaldate') or ''} for t in tags])
-                target_releasedate = originaldate_only
-                db_release_votes = []
-                for album_row in group:
-                    if album_row.get('release_date'):
-                        db_release_votes.extend([str(album_row['release_date']).strip()]
-                                                * max(1, len(album_row.get('paths') or ())))
-                db_release_counts = Counter(v for v in db_release_votes if v)
-                if not target_releasedate:
-                    target_releasedate = (sorted(db_release_counts,
-                        key=lambda value: (-db_release_counts[value], -len(value), value))[0]
-                        if db_release_counts else None)
+            # Prefer a stable original-date consensus; otherwise a stale RELEASEDATE
+            # majority (e.g. a 2009 remaster date) would overwrite the repaired year.
+            target_releasedate = shared_date
+            if not target_releasedate:
+                release_values = [str(t.get('releasedate') or '').strip() for t in tags
+                                  if str(t.get('releasedate') or '').strip()]
+                release_counts = Counter(release_values)
+                if release_counts:
+                    target_releasedate = sorted(release_counts,
+                        key=lambda value: (-release_counts[value], -len(value), value))[0]
+                else:
+                    originaldate_only = _dominant_original_date(
+                        [{'originaldate': t.get('originaldate') or ''} for t in tags])
+                    target_releasedate = originaldate_only
+                    db_release_votes = []
+                    for album_row in group:
+                        if album_row.get('release_date'):
+                            db_release_votes.extend([str(album_row['release_date']).strip()]
+                                                    * max(1, len(album_row.get('paths') or ())))
+                    db_release_counts = Counter(v for v in db_release_votes if v)
+                    if not target_releasedate:
+                        target_releasedate = (sorted(db_release_counts,
+                            key=lambda value: (-db_release_counts[value], -len(value), value))[0]
+                            if db_release_counts else None)
             id_targets = {}
             db_id_fields = {
                 'musicbrainz_albumid': 'mbid',
@@ -15484,8 +17392,37 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
         wanted_dirs = {Path(d).resolve() for d in album_dirs_only}
         dirs = [(album, files) for album, files in dirs if album.resolve() in wanted_dirs]
     known_names = _navidrome_artist_name_map()
+    seen = fixed_files = errors = ambiguous = stale_files = 0
+    stale_paths = set()
+
+    def _file_missing_now(file_path, context):
+        nonlocal stale_files
+        file_path = Path(file_path)
+        try:
+            file_path.stat()
+            return False
+        except FileNotFoundError:
+            if file_path not in stale_paths:
+                stale_paths.add(file_path)
+                stale_files += 1
+                print(f'[warn] file audio non piu\' disponibile durante {context}: {file_path}; '
+                      'elemento obsoleto saltato', file=sys.stderr)
+            return True
+        except OSError:
+            # Permission or I/O failures are not assumed to be deletions. Let the actual
+            # metadata operation report them as real errors rather than silently skipping.
+            return False
+
+    # Drop stale index entries before ffprobe; files can also disappear later, so each
+    # write path below performs a second check and handles a FileNotFoundError race.
+    current_dirs = []
+    for album, album_files in dirs:
+        current_files = [f for f in album_files if not _file_missing_now(f, 'pre-scan')]
+        if current_files:
+            current_dirs.append((album, current_files))
+    dirs = current_dirs
+
     prefetch_probe((f for _album, files in dirs for f in files), 'fix_unknown_artists')
-    seen = fixed_files = errors = ambiguous = 0
     tg = '[dry] ' if dry_run else ''
     progress = _ProgressBar('fix_unknown_artists', len(dirs), 'album', subphase=True)
     for album_index, (album, files) in enumerate(dirs, 1):
@@ -15588,6 +17525,8 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
 
         for idx, parts in repairable.items():
             f = files[idx]
+            if _file_missing_now(f, 'UNKNOWN-ARTIST'):
+                continue
             display = _canonicalize_artist_value('; '.join(parts), known_names=known_names,
                                                  context_names=path_contexts[f])
             canonical_parts = [p.strip() for p in display.split(';') if p.strip()]
@@ -15622,6 +17561,12 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
                 else:
                     _rewrite_nonflac(f, changes)
                 fixed_files += 1
+            except FileNotFoundError as e:
+                if _file_missing_now(f, 'scrittura UNKNOWN-ARTIST'):
+                    continue
+                errors += 1
+                progress.clear()
+                print(f'[ERRORE] UNKNOWN-ARTIST {f}: {type(e).__name__}: {e}', file=sys.stderr)
             except Exception as e:
                 errors += 1
                 progress.clear()
@@ -15641,6 +17586,8 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
             # album-artist credit. Folder evidence narrows it to the folder's primary artist.
             for idx in sorted(albumartist_idxs):
                 f = files[idx]
+                if _file_missing_now(f, 'UNKNOWN-ALBUMARTIST'):
+                    continue
                 valid_here = any(_clean_artist_tag_components(tags[idx].get(key), known_names)
                                  for key in ('albumartist', 'album_artist', 'albumartists'))
                 if valid_here and idx not in unknown_albumartist_idxs:
@@ -15677,6 +17624,12 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
                             nonflac_updates['albumartists'] = albumartist_updates['albumartists']
                         _rewrite_nonflac(f, nonflac_updates)
                     fixed_files += 1
+                except FileNotFoundError as e:
+                    if _file_missing_now(f, 'scrittura UNKNOWN-ALBUMARTIST'):
+                        continue
+                    errors += 1
+                    progress.clear()
+                    print(f'[ERRORE] UNKNOWN-ALBUMARTIST {f}: {type(e).__name__}: {e}', file=sys.stderr)
                 except Exception as e:
                     errors += 1
                     progress.clear()
@@ -15691,8 +17644,10 @@ def run_fix_unknown_artists(dry_run=False, base=None, album_dirs_only=None):
             missing_albumartist_idxs if target and valid_albumartist_idxs else [])
     progress.close(complete=True)
     print(f'unknown artist: {seen} tracce candidate, {fixed_files} '
-          f'{"da correggere" if dry_run else "corrette"}, {ambiguous} da rivedere, {errors} errori')
-    return {'candidates': seen, 'fixed': fixed_files, 'ambiguous': ambiguous, 'errors': errors}
+          f'{"da correggere" if dry_run else "corrette"}, {ambiguous} da rivedere, '
+          f'{stale_files} file non piu\' disponibili, {errors} errori')
+    return {'candidates': seen, 'fixed': fixed_files, 'ambiguous': ambiguous,
+            'stale_files': stale_files, 'errors': errors}
 
 def _navidrome_artist_name_map(con=None):
     """Mappa norm(nome artista) -> grafia in DB; vuota se la tabella non e' leggibile."""
@@ -16177,12 +18132,9 @@ def rebuild_album(name_frag):
     if not NAVIDROME_DB.exists():
         print('[ERRORE] DB non trovato')
         return
-    ps = _docker('ps', '--filter', 'name=navidrome', '--format', '{{.Names}}')
-    running = 'navidrome' in ps.stdout
-    if running:
-        print('fermo navidrome...')
-        _docker('stop', 'navidrome')
+    stopped_container = None
     try:
+        stopped_container = _stop_navidrome_container('ricostruzione album')
         con = sqlite3.connect(str(NAVIDROME_DB))
         cur = con.cursor()
         rows = cur.execute(
@@ -16198,9 +18150,9 @@ def rebuild_album(name_frag):
         con.commit()
         con.close()
     finally:
-        if running:
+        if stopped_container:
             print('riavvio navidrome...')
-            _docker('start', 'navidrome')
+            _start_navidrome_container(stopped_container)
 
 
 def explain_row(by_full, by_artist, by_strict, path_qual, artist, album, title):
@@ -16236,20 +18188,41 @@ _ARTWORK_KNOWN_STEMS = {
 
 
 def _artwork_cache_load():
+    """Carica la cache artwork v10 con cursori di ripresa per album e artisti."""
     try:
         value = json.loads(ARTWORK_CACHE.read_text(encoding='utf-8'))
-        if isinstance(value, dict) and value.get('version') in (3, 4, 5, 6) and isinstance(value.get('not_found'), dict):
-            if value.get('version') in (3, 4):
-                # v5 changed verification semantics; v6 adds a persistent round-robin cursor.
-                return {'version': 6, 'not_found': dict(value.get('not_found') or {}),
-                        'verified': {}, 'pending_cursor': ''}
-            value['version'] = 6
-            value.setdefault('verified', {})
-            value.setdefault('pending_cursor', '')
-            return value
-    except (OSError, ValueError):
+        if isinstance(value, dict) and isinstance(value.get('not_found'), dict):
+            version = int(value.get('version') or 0)
+            if version == 10:
+                value.setdefault('verified', {})
+                value.setdefault('pending_cursor', '')
+                value.setdefault('artist_not_found', {})
+                value.setdefault('artist_pending_cursor', '')
+                return value
+            if version in (7, 8, 9):
+                # La ricerca CAA ora recupera anche tag artista con piccoli refusi:
+                # riprova una volta gli album precedentemente in cache negativa.
+                return {
+                    'version': 10,
+                    'not_found': {},
+                    'verified': dict(value.get('verified') or {}),
+                    'pending_cursor': str(value.get('pending_cursor') or ''),
+                    'artist_not_found': dict(value.get('artist_not_found') or {}),
+                    'artist_pending_cursor': str(value.get('artist_pending_cursor') or ''),
+                }
+            if version in (3, 4, 5, 6):
+                return {
+                    'version': 10,
+                    'not_found': {},
+                    'verified': dict(value.get('verified') or {}),
+                    'pending_cursor': str(value.get('pending_cursor') or ''),
+                    'artist_not_found': {},
+                    'artist_pending_cursor': '',
+                }
+    except (OSError, ValueError, TypeError):
         pass
-    return {'version': 6, 'not_found': {}, 'verified': {}, 'pending_cursor': ''}
+    return {'version': 10, 'not_found': {}, 'verified': {}, 'pending_cursor': '',
+            'artist_not_found': {}, 'artist_pending_cursor': ''}
 
 
 def _artwork_cache_save(cache):
@@ -16264,21 +18237,21 @@ def _artwork_cache_key(artist, album):
 
 
 def _select_artwork_candidate_batch(candidates, limit, cursor_key=''):
-    """Select a bounded round-robin batch so a failing prefix cannot starve later albums."""
+    """Select a circular batch; resume after the last queried or deferred item."""
     candidates = list(candidates or [])
     if not candidates:
         return []
     limit = max(0, int(limit or 0))
-    if limit == 0 or len(candidates) <= limit:
-        return candidates
     start_index = 0
     if cursor_key:
         previous_index = next((i for i, row in enumerate(candidates)
-                               if row.get('key') == cursor_key), None)
+                               if (row.get('cursor_key') or row.get('key')) == cursor_key), None)
         if previous_index is not None:
             start_index = (previous_index + 1) % len(candidates)
-    return [candidates[(start_index + offset) % len(candidates)]
-            for offset in range(min(limit, len(candidates)))]
+    # Respect the cursor even when the whole queue fits in one run (or limit=0).
+    # Otherwise a single mid-batch outage repeatedly starves everything after it.
+    count = len(candidates) if limit == 0 else min(limit, len(candidates))
+    return [candidates[(start_index + offset) % len(candidates)] for offset in range(count)]
 
 
 def _album_art_directory(track_path):
@@ -16368,6 +18341,8 @@ _ARTWORK_NETWORK_STATE = {'providers': {}, 'run_started_at': 0.0}
 _ARTWORK_PROVIDER_LABELS = {
     'musicbrainz': 'MusicBrainz', 'coverartarchive': 'Cover Art Archive',
     'itunes': 'Apple/iTunes', 'deezer': 'Deezer',
+    'theaudiodb': 'TheAudioDB', 'wikimedia_commons': 'Wikimedia Commons',
+    'google_images': 'Google Images',
 }
 
 
@@ -16383,6 +18358,12 @@ def _artwork_provider_for_url(url):
         return 'itunes'
     if host == 'api.deezer.com' or host.endswith('.dzcdn.net'):
         return 'deezer'
+    if host.endswith('.theaudiodb.com') or host == 'theaudiodb.com':
+        return 'theaudiodb'
+    if host.endswith('.wikimedia.org') or host == 'wikimedia.org':
+        return 'wikimedia_commons'
+    if host in {'google.com', 'www.google.com', 'google.it', 'www.google.it'} or host.endswith('.google.com') or host.endswith('.google.it'):
+        return 'google_images'
     try:
         mb_host = (urllib.parse.urlsplit(str(MB_BASE or '')).hostname or '').casefold()
     except ValueError:
@@ -16463,6 +18444,9 @@ def _artwork_note_network_failure(exc, provider=None, url=None):
                 retry_after = None
         fallback = min(600, 30 * (2 ** min(failures - 1, 4)))
         cooldown = max(5, min(900, retry_after if retry_after is not None else fallback))
+        if provider == 'musicbrainz' and code in (429, 503):
+            # One bad response must not cause one failed API request per album.
+            cooldown = max(cooldown, min(900, 120 * (2 ** min(failures - 1, 3))))
     state['disabled_until'] = max(float(state.get('disabled_until') or 0.0), now + cooldown)
     state['reason'] = str(exc)[:240]
     if not state.get('warned'):
@@ -16517,79 +18501,89 @@ def _itunes_artwork_urls(artist, album, timeout):
     return list(dict.fromkeys(url for _, url in ranked[:5])), True
 
 
-def _musicbrainz_artwork_urls(artist, album, timeout):
-    """Cerca un release-group MusicBrainz esatto e restituisce il front CAA.
+def _musicbrainz_artwork_urls(artist, album, timeout, include_scores=False):
+    """Find CAA front art by exact artist+title, then retry title-only for typoed tags.
 
-    MusicBrainz lega titolo e artist-credit a un identificatore stabile; il Cover Art
-    Archive fornisce poi l'immagine curata per quel release-group. Rispetta il limite
-    pubblico di circa una richiesta al secondo e usa un User-Agent identificabile.
+    A title-only fallback is still ranked locally against both album and artist, so it
+    can recover small artist-tag typos without accepting unrelated same-title releases.
     """
     if _artwork_provider_disabled('musicbrainz'):
         return [], False
+
     def lucene_quote(value):
         value = str(value or '').strip()
-        value = re.sub(r'([+\-&|!(){}\[\]^"~*?:\\/])', r'\\\1', value)
+        value = re.sub(r'([+\-&|!(){}\[\]^"~*?:\\/])', r'\1', value)
         return '"' + value + '"'
 
-    query = f'releasegroup:{lucene_quote(album)} AND artist:{lucene_quote(artist)}'
     base = str(MB_BASE or 'https://musicbrainz.org/ws/2/').rstrip('/') + '/'
-    url = base + 'release-group?' + urllib.parse.urlencode({
-        'query': query, 'fmt': 'json', 'limit': 12,
-    })
-    request = urllib.request.Request(url, headers=MB_USER_AGENT)
-    wait = _MB_MIN_INTERVAL - (time.time() - _MB_LAST[0])
-    if wait > 0:
-        time.sleep(wait)
-    try:
-        _MB_CALLS[0] += 1
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read(2_500_001)
-        _MB_LAST[0] = time.time()
-        if len(payload) > 2_500_000:
-            raise ValueError('risposta MusicBrainz artwork troppo grande')
-        data = json.loads(payload.decode('utf-8', errors='replace'))
-    except urllib.error.HTTPError as exc:
-        _MB_LAST[0] = time.time()
-        if exc.code == 404:
-            return [], True
-        _artwork_note_network_failure(exc, provider='musicbrainz')
-        print(f'[artwork] MusicBrainz non disponibile per {artist} — {album}: {exc}',
-              file=sys.stderr)
-        return [], False
-    except Exception as exc:
-        _MB_LAST[0] = time.time()
-        _artwork_note_network_failure(exc, provider='musicbrainz')
-        print(f'[artwork] ricerca MusicBrainz fallita per {artist} — {album}: {exc}',
-              file=sys.stderr)
-        return [], False
-
-    results = data.get('release-groups') or data.get('release_groups') or []
+    title_term = f'releasegroup:{lucene_quote(album)}'
+    queries = [f'{title_term} AND artist:{lucene_quote(artist)}', title_term]
     ranked = []
-    for item in results:
-        mbid = str(item.get('id') or '').strip()
-        if not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', mbid):
-            continue
-        result_artist = str(item.get('artist-credit-phrase') or '').strip()
-        if not result_artist:
-            credit = item.get('artist-credit') or []
-            parts = []
-            for entry in credit:
-                if isinstance(entry, dict):
-                    value = str(entry.get('name') or (entry.get('artist') or {}).get('name') or '')
-                    parts.append(value + str(entry.get('joinphrase') or ''))
-            result_artist = ''.join(parts).strip()
-        result_album = str(item.get('title') or '').strip()
-        local_score = _artwork_score(artist, album, result_artist, result_album)
-        if local_score is None or local_score < 0.80:
-            continue
+    all_queries_ok = True
+    for query in queries:
+        if _artwork_provider_disabled('musicbrainz'):
+            return [], False
+        url = base + 'release-group?' + urllib.parse.urlencode({
+            'query': query, 'fmt': 'json', 'limit': 25 if query == title_term else 12,
+        })
+        request = urllib.request.Request(url, headers=MB_USER_AGENT)
         try:
-            server_score = float(item.get('score', 0) or 0)
-        except (TypeError, ValueError):
-            server_score = 0.0
-        ranked.append((local_score, server_score, mbid))
-    ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
+            payload = _musicbrainz_request_bytes(request, timeout=timeout, max_bytes=2_500_000)
+            if len(payload) > 2_500_000:
+                raise ValueError('risposta MusicBrainz artwork troppo grande')
+            data = json.loads(payload.decode('utf-8', errors='replace'))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue
+            _artwork_note_network_failure(exc, provider='musicbrainz')
+            print(f'[artwork] MusicBrainz non disponibile per {artist} — {album}: {exc}',
+                  file=sys.stderr, flush=True)
+            all_queries_ok = False
+            break
+        except Exception as exc:
+            _artwork_note_network_failure(exc, provider='musicbrainz')
+            print(f'[artwork] ricerca MusicBrainz fallita per {artist} — {album}: {exc}',
+                  file=sys.stderr, flush=True)
+            all_queries_ok = False
+            break
+
+        results = data.get('release-groups') or data.get('release_groups') or []
+        for item in results:
+            mbid = str(item.get('id') or '').strip()
+            if not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', mbid):
+                continue
+            result_artist = str(item.get('artist-credit-phrase') or '').strip()
+            if not result_artist:
+                credit = item.get('artist-credit') or []
+                parts = []
+                for entry in credit:
+                    if isinstance(entry, dict):
+                        value = str(entry.get('name') or (entry.get('artist') or {}).get('name') or '')
+                        parts.append(value + str(entry.get('joinphrase') or ''))
+                result_artist = ''.join(parts).strip()
+            result_album = str(item.get('title') or '').strip()
+            local_score = _artwork_score(artist, album, result_artist, result_album)
+            if local_score is None or local_score < 0.80:
+                continue
+            try:
+                server_score = float(item.get('score', 0) or 0)
+            except (TypeError, ValueError):
+                server_score = 0.0
+            ranked.append((local_score, server_score, mbid))
+        if ranked:
+            break
+
+    best_by_mbid = {}
+    for score, server_score, mbid in ranked:
+        prior = best_by_mbid.get(mbid)
+        if prior is None or (score, server_score) > prior[:2]:
+            best_by_mbid[mbid] = (score, server_score, mbid)
+    selected = sorted(best_by_mbid.values(), key=lambda row: (-row[0], -row[1], row[2]))[:5]
+    if include_scores:
+        return [(f'https://coverartarchive.org/release-group/{mbid}/front-500', score)
+                for score, _server_score, mbid in selected], all_queries_ok
     return [f'https://coverartarchive.org/release-group/{mbid}/front-500'
-            for _, _, mbid in ranked[:5]], True
+            for _, _, mbid in selected], all_queries_ok
 
 
 def _deezer_artwork_urls(artist, album, timeout):
@@ -16617,13 +18611,490 @@ def _deezer_artwork_urls(artist, album, timeout):
     return list(dict.fromkeys(url for _, url in ranked[:5])), True
 
 
-def _read_artwork_image(url, timeout, min_bytes, max_bytes):
+_THEAUDIODB_LAST_REQUEST = 0.0
+
+
+def _theaudiodb_artwork_urls(artist, album, timeout):
+    """Search TheAudioDB album catalogue; pace the public demo key below 30/minute."""
+    global _THEAUDIODB_LAST_REQUEST
+    if _artwork_provider_disabled('theaudiodb'):
+        return [], False
+    wait = 2.1 - (time.monotonic() - _THEAUDIODB_LAST_REQUEST)
+    if wait > 0:
+        time.sleep(wait)
+    _THEAUDIODB_LAST_REQUEST = time.monotonic()
+    params = urllib.parse.urlencode({'s': artist, 'a': album})
+    url = 'https://www.theaudiodb.com/api/v1/json/123/searchalbum.php?' + params
+    try:
+        data = _artwork_json(url, timeout, max_bytes=2_000_000)
+    except Exception as exc:
+        print(f'[artwork] TheAudioDB non disponibile per {artist} — {album}: {exc}',
+              file=sys.stderr)
+        return [], False
+    ranked = []
+    for item in data.get('album') or []:
+        result_artist = str(item.get('strArtist') or '')
+        result_album = str(item.get('strAlbum') or '')
+        score = _artwork_score(artist, album, result_artist, result_album)
+        image_url = item.get('strAlbumThumbHQ') or item.get('strAlbumThumb')
+        if score is None or score < 0.93 or not image_url:
+            continue
+        if _safe_artwork_url(image_url, ('theaudiodb.com',)):
+            ranked.append((score, image_url))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1]))
+    return list(dict.fromkeys(url for _score, url in ranked[:4])), True
+
+
+def _wikimedia_commons_artwork_urls(artist, album, timeout):
+    """Search Wikimedia Commons file names conservatively for album-cover images."""
+    if _artwork_provider_disabled('wikimedia_commons'):
+        return [], False
+    query = f'"{artist}" "{album}" (cover OR front)' 
+    params = urllib.parse.urlencode({
+        'action': 'query', 'format': 'json', 'formatversion': 2,
+        'generator': 'search', 'gsrsearch': query, 'gsrnamespace': 6,
+        'gsrlimit': 20, 'prop': 'imageinfo', 'iiprop': 'url|size', 'iiurlwidth': 1200,
+    })
+    url = 'https://commons.wikimedia.org/w/api.php?' + params
+    try:
+        data = _artwork_json(url, timeout, max_bytes=3_000_000)
+    except Exception as exc:
+        print(f'[artwork] Wikimedia Commons non disponibile per {artist} — {album}: {exc}',
+              file=sys.stderr)
+        return [], False
+    artist_tokens = set(norm(artist).split())
+    album_tokens = set(norm(album).split())
+    ranked = []
+    for page in (data.get('query') or {}).get('pages') or []:
+        filename = norm(str(page.get('title') or '').removeprefix('File:'))
+        if not filename or not artist_tokens or not album_tokens:
+            continue
+        artist_overlap = len(artist_tokens & set(filename.split())) / max(1, len(artist_tokens))
+        album_overlap = len(album_tokens & set(filename.split())) / max(1, len(album_tokens))
+        if artist_overlap < 0.8 or album_overlap < 0.8:
+            continue
+        info = (page.get('imageinfo') or [{}])[0]
+        image_url = info.get('thumburl') or info.get('url')
+        try:
+            width, height = int(info.get('width') or 0), int(info.get('height') or 0)
+        except (TypeError, ValueError):
+            width = height = 0
+        if (width and height and min(width, height) >= 300 and image_url and
+                _safe_artwork_url(image_url, ('.wikimedia.org',))):
+            ranked.append((artist_overlap + album_overlap, image_url))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1]))
+    return list(dict.fromkeys(url for _score, url in ranked[:4])), True
+
+
+def _safe_public_https_image_url(url):
+    """Allow public HTTPS image URLs, rejecting local/private targets and Google thumbnails."""
+    try:
+        parsed = urllib.parse.urlsplit(str(url or '').strip())
+        host = (parsed.hostname or '').casefold().rstrip('.')
+        if parsed.scheme != 'https' or not host or parsed.username or parsed.password:
+            return False
+        if parsed.port not in (None, 443):
+            return False
+        if host in {'localhost', 'metadata.google.internal'} or host.endswith(
+                ('.localhost', '.local', '.internal', '.test', '.invalid')):
+            return False
+        if host in {'google.com', 'google.it', 'www.google.com', 'www.google.it'} or host.endswith(
+                ('.google.com', '.google.it')):
+            return False
+        # Google Images may expose either low-res encrypted-tbn thumbnails or a genuine
+        # source image hosted on googleusercontent/gstatic. Reject the former explicitly;
+        # allow the latter through to the strict byte/format/dimension checks below.
+        if host.startswith('encrypted-tbn') and host.endswith('.gstatic.com'):
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+            if not address.is_global:
+                return False
+        except ValueError:
+            # Hostnames from Google Images are allowed; DNS is resolved by urllib.
+            if not re.fullmatch(r'(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host):
+                return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _google_images_artwork_urls(query, timeout, limit=12):
+    """Extract original image URLs (not Google thumbnails) from Google Images HTML."""
+    if _artwork_provider_disabled('google_images'):
+        return [], False
+    params = urllib.parse.urlencode({
+        'tbm': 'isch', 'q': str(query or '').strip(), 'hl': 'en', 'safe': 'active',
+        'tbs': 'isz:l',
+    })
+    url = 'https://www.google.com/search?' + params
+    request = urllib.request.Request(url, headers={
+        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                       '(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            final_url = response.geturl()
+            if not _safe_google_search_url(final_url):
+                return [], False
+            payload = response.read(8_000_001)
+        if len(payload) > 8_000_000:
+            payload = payload[:8_000_000]
+        document = html.unescape(payload.decode('utf-8', errors='replace'))
+        lower_document = document.casefold()
+        blocked_markers = (
+            'our systems have detected unusual traffic', 'automated queries',
+            'sorry/index', 'recaptcha', 'before you continue to google',
+        )
+        final_host = (urllib.parse.urlsplit(final_url).hostname or '').casefold()
+        if final_host.startswith('consent.') or any(marker in lower_document for marker in blocked_markers):
+            return [], False
+    except Exception as exc:
+        _artwork_note_network_failure(exc, provider='google_images')
+        print(f'[artwork] Google Images non disponibile per {query!r}: {exc}',
+              file=sys.stderr)
+        return [], False
+
+    found = []
+    # Google embeds originals in JSON fields named ou (occasionally murl/imgurl).
+    # Decode JSON string escaping so \u003d, \/ and escaped query parameters work.
+    pattern = re.compile(r'"(?:ou|murl|imgurl)"\s*:\s*"((?:\\.|[^"\\]){12,4096})"')
+    for match in pattern.finditer(document):
+        raw = match.group(1)
+        try:
+            candidate = json.loads('"' + raw + '"')
+        except (ValueError, TypeError):
+            candidate = raw.replace('\\/', '/').replace('\\u003d', '=').replace('\\u0026', '&')
+        candidate = urllib.parse.unquote(str(candidate).strip())
+        if _safe_public_https_image_url(candidate):
+            found.append(candidate)
+        if len(found) >= max(1, int(limit)) * 3:
+            break
+
+    # Older/alternate markup exposes original URLs in imgurl= query parameters.
+    if len(found) < max(1, int(limit)):
+        for match in re.finditer(r'(?:^|[?&])imgurl=([^&"\s]+)', document):
+            candidate = urllib.parse.unquote(html.unescape(match.group(1)))
+            if _safe_public_https_image_url(candidate):
+                found.append(candidate)
+            if len(found) >= max(1, int(limit)) * 3:
+                break
+
+    unique = list(dict.fromkeys(found))[:max(1, int(limit))]
+    return unique, True
+
+
+def _safe_google_search_url(url):
+    try:
+        parsed = urllib.parse.urlsplit(str(url or ''))
+        host = (parsed.hostname or '').casefold().rstrip('.')
+        return parsed.scheme == 'https' and host in {
+            'google.com', 'www.google.com', 'google.it', 'www.google.it',
+            'consent.google.com', 'consent.google.it',
+        }
+    except ValueError:
+        return False
+
+
+def _artwork_image_dimensions(data, timeout=15):
+    """Read actual image dimensions with ffprobe; no Pillow dependency is required."""
+    if not shutil.which('ffprobe'):
+        return None
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=width,height', '-of', 'json', '-i', 'pipe:0'],
+            input=bytes(data or b''), capture_output=True, timeout=timeout)
+        if result.returncode != 0:
+            return None
+        streams = json.loads(result.stdout.decode('utf-8', errors='replace')).get('streams') or []
+        if not streams:
+            return None
+        width, height = int(streams[0].get('width') or 0), int(streams[0].get('height') or 0)
+        return (width, height) if width > 0 and height > 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _image_matches_artwork_shape(data, min_dimension, min_ratio, max_ratio, timeout=15):
+    dimensions = _artwork_image_dimensions(data, timeout=timeout)
+    if not dimensions:
+        return False
+    width, height = dimensions
+    ratio = width / max(1, height)
+    return min(width, height) >= int(min_dimension) and float(min_ratio) <= ratio <= float(max_ratio)
+
+
+def _google_album_artwork_image(artist, album, timeout, min_bytes, max_bytes):
+    """Last-resort cover lookup with punctuation/volume variants and artist context."""
+    if not MISSING_ARTWORK_CONFIG.get('google_images', True):
+        return None, True, False
+    title = re.sub(r'\s+', ' ', str(album or '')).strip()
+    artist = re.sub(r'\s+', ' ', str(artist or '')).strip()
+    plain_title = re.sub(r'[,._-]+', ' ', title)
+    plain_title = re.sub(r'\s+', ' ', plain_title).strip()
+    volume_title = re.sub(r'\bvol\.?\s*(\d+)\b', r'Volume \1', plain_title, flags=re.I)
+    queries = [
+        f'{title} album cover',
+        f'{artist} {title} album cover',
+        f'{artist} "{title}" album cover',
+        f'{artist} {plain_title} album artwork',
+        f'{artist} {volume_title} cover art',
+    ]
+    unique_queries, seen_queries = [], set()
+    for query in queries:
+        key = norm(query)
+        if key and key not in seen_queries:
+            seen_queries.add(key)
+            unique_queries.append(query)
+    queries = unique_queries
+    had_candidates = False
+    search_ok = True
+    min_dimension = int(MISSING_ARTWORK_CONFIG.get('min_google_album_dimension', 400))
+    for query in queries:
+        urls, ok = _google_images_artwork_urls(query, timeout, limit=12)
+        search_ok = search_ok and ok
+        had_candidates = had_candidates or bool(urls)
+        for candidate_url in urls:
+            image = _read_artwork_image(candidate_url, timeout, min_bytes, max_bytes,
+                                        provider_hint='google_images')
+            if image and _image_matches_artwork_shape(image[0], min_dimension, 0.78, 1.28,
+                                                       timeout=min(timeout, 15)):
+                return image, search_ok, had_candidates
+    return None, search_ok, had_candidates
+
+
+def _artist_artwork_search_name_groups(value):
+    """Return English lookup spellings first and the source spelling as last fallback."""
+    value = re.sub(r'\s+', ' ', str(value or '')).strip()
+    if not value:
+        return {'english': [], 'original': []}
+    source = value
+    gloss = ''
+    match = re.match(r'^(.*?)\s*[（(]([^()（）]+)[)）]\s*$', value)
+    if match:
+        left, right = match.group(1).strip(), match.group(2).strip()
+        has_nonlatin = lambda text: bool(re.search(
+            r'[\u0400-\u04ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]', text))
+        if re.search(r'[A-Za-z]', right) and has_nonlatin(left):
+            source, gloss = left, right
+        elif re.search(r'[A-Za-z]', left) and has_nonlatin(right):
+            source, gloss = right, left
+    # An explicit bilingual gloss is already the preferred English search key; do not
+    # make a redundant network translation request for the same source-script name.
+    preferred = '' if gloss else _preferred_name(source)
+    english, seen = [], set()
+    for candidate in (gloss, preferred):
+        candidate = re.sub(r'\s+', ' ', str(candidate or '')).strip()
+        key = norm_bare(candidate)
+        if candidate and key and key != norm_bare(source) and key not in seen:
+            seen.add(key)
+            english.append(candidate)
+    # The original artist spelling is the only fallback after all English aliases have failed.
+    original = [source] if source else []
+    return {'english': english, 'original': original}
+
+
+def _artist_name_match_score(query_artist, result_artist):
+    query = _canon(norm(query_artist))
+    result = _canon(norm(result_artist))
+    if not query or not result:
+        return 0.0
+    if query == result:
+        return 1.0
+    ratio = difflib.SequenceMatcher(None, query, result).ratio()
+    q_tokens, r_tokens = set(query.split()), set(result.split())
+    overlap = len(q_tokens & r_tokens) / max(1, min(len(q_tokens), len(r_tokens)))
+    return max(ratio, overlap * 0.9)
+
+
+def _deezer_artist_artwork_urls(artist, timeout):
+    """Return high-resolution artist pictures only for a close name match."""
+    if _artwork_provider_disabled('deezer'):
+        return [], False
+    query = urllib.parse.urlencode({'q': artist, 'limit': 15})
+    try:
+        data = _artwork_json('https://api.deezer.com/search/artist?' + query, timeout)
+    except Exception as exc:
+        print(f'[artwork] Deezer artist non disponibile per {artist}: {exc}', file=sys.stderr)
+        return [], False
+    if data.get('error'):
+        return [], False
+    ranked = []
+    for item in data.get('data') or []:
+        name = str(item.get('name') or '')
+        score = _artist_name_match_score(artist, name)
+        if score < 0.82:
+            continue
+        url = item.get('picture_xl') or item.get('picture_big') or item.get('picture_medium')
+        if url and _safe_artwork_url(url, ('.dzcdn.net',)):
+            ranked.append((score, url))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return list(dict.fromkeys(url for _, url in ranked[:4])), True
+
+
+def _google_artist_artwork_image(search_name, timeout, min_bytes, max_bytes):
+    """Find a usable artist portrait in Google Images for one spelling of the name."""
+    queries = [f'{search_name} artist photo', f'{search_name} musician portrait']
+    search_ok = True
+    had_candidates = False
+    min_dimension = int(MISSING_ARTWORK_CONFIG.get('min_google_artist_dimension', 300))
+    for query in queries:
+        urls, ok = _google_images_artwork_urls(query, timeout, limit=10)
+        search_ok = search_ok and ok
+        had_candidates = had_candidates or bool(urls)
+        for candidate_url in urls:
+            image = _read_artwork_image(candidate_url, timeout, min_bytes, max_bytes,
+                                        provider_hint='google_images')
+            # Artist portraits need not be square, but reject tiny badges and panoramas.
+            if image and _image_matches_artwork_shape(image[0], min_dimension, 0.58, 1.9,
+                                                       timeout=min(timeout, 15)):
+                return image, search_ok, had_candidates
+    return None, search_ok, had_candidates
+
+
+def _artist_folder_cover(artist_dir, paths):
+    """Return an existing artist.* file, preferring JPEG and then larger images."""
+    candidates = []
+    for value in paths or ():
+        path = Path(value)
+        if norm_bare(path.stem) != 'artist':
+            continue
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                with path.open('rb') as stream:
+                    if _artwork_ext_from_bytes(stream.read(16)):
+                        candidates.append(path)
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda path: (
+        {'.jpg': 0, '.jpeg': 0, '.png': 1, '.webp': 2}.get(path.suffix.lower(), 9),
+        -path.stat().st_size if path.exists() else 0, path.name.casefold()))[0]
+
+
+def _collect_artist_artwork_targets(groups, artwork_paths_by_dir, min_bytes):
+    """Build artist targets and an unambiguous map of existing alias-folder artwork."""
+    by_directory = {}
+    ignored = {'various artists', 'unknown artist', 'unknown', 'various', 'va'}
+    for album_dir, tracks in groups.items():
+        if not tracks:
+            continue
+        artist_dir = Path(album_dir).parent
+        try:
+            if artist_dir.resolve() == Path(LIBRARY_ROOT).resolve():
+                continue
+        except OSError:
+            continue
+        tags = probe(tracks[0])
+        artist = (tags.get('albumartist') or tags.get('album_artist') or
+                  tags.get('artist') or '').strip() or artist_dir.name
+        if norm_bare(artist) in ignored:
+            continue
+        if re.search(r'\s(?:feat\.?|featuring|with)\s|[;•]', artist, re.I):
+            continue
+        record = by_directory.setdefault(artist_dir, {'names': Counter()})
+        record['names'][artist] += max(1, len(tracks))
+
+    targets = []
+    alias_sources = {}
+    threshold = int(min_bytes)
+    for artist_dir, record in sorted(by_directory.items(), key=lambda pair: str(pair[0]).casefold()):
+        names = [name for name, _count in record['names'].most_common()]
+        names.insert(0, artist_dir.name)
+        variants = [_artist_artwork_search_name_groups(name) for name in names]
+        english_names, original_names = [], []
+        for variant in variants:
+            english_names.extend(variant['english'])
+            original_names.extend(variant['original'])
+        search_names, seen = [], set()
+        # All English spellings precede every source-script spelling.
+        for candidate in (*english_names, *original_names):
+            key = norm_bare(candidate)
+            if key and key not in seen:
+                seen.add(key)
+                search_names.append(candidate)
+        bilingual = bool(english_names and original_names)
+        alias_keys = tuple(dict.fromkeys(norm_bare(name) for name in search_names if norm_bare(name)))
+        existing = _artist_folder_cover(artist_dir, artwork_paths_by_dir.get(artist_dir, ()))
+        healthy_existing = None
+        if existing:
+            try:
+                if existing.stat().st_size >= threshold:
+                    healthy_existing = existing
+            except OSError:
+                existing = None
+        if healthy_existing:
+            for alias in alias_keys:
+                alias_sources.setdefault(alias, []).append((artist_dir, healthy_existing))
+            continue
+        if not search_names:
+            continue
+        identity = norm_bare(names[0]) or artist_dir.name.casefold()
+        cache_key = f'{artist_dir.relative_to(LIBRARY_ROOT)}\t{identity}'
+        targets.append({'dir': artist_dir, 'artist': names[0], 'search_names': search_names,
+                        'aliases': alias_keys, 'bilingual': bilingual,
+                        'existing': existing, 'key': cache_key})
+    # Bilingual artists first, then stable path order. This prevents a large Latin-only
+    # prefix from consuming every per-run slot before CJK/Cyrillic folders are reached.
+    targets.sort(key=lambda target: (not target.get('bilingual', False),
+                                     str(target['dir']).casefold()))
+    return targets, alias_sources
+
+
+def _reuse_bilingual_artist_artwork(targets, alias_sources, artwork_paths_by_dir,
+                                    min_bytes, dry_run=False):
+    """Copy existing artist.* across a unique bilingual/original alias; never guess homonyms."""
+    remaining, reused, planned = [], 0, 0
+    threshold = int(min_bytes)
+    for target in targets:
+        sources_by_dir = {}
+        for alias in target.get('aliases', ()):
+            for source_dir, source_path in alias_sources.get(alias, ()):
+                if Path(source_dir) != Path(target['dir']):
+                    sources_by_dir[Path(source_dir)] = Path(source_path)
+        if len(sources_by_dir) != 1:
+            remaining.append(target)
+            continue
+        source_dir, source_path = next(iter(sources_by_dir.items()))
+        try:
+            data = source_path.read_bytes()
+        except OSError:
+            remaining.append(target)
+            continue
+        ext = _artwork_ext_from_bytes(data[:32])
+        if not ext or len(data) < threshold:
+            remaining.append(target)
+            continue
+        if dry_run:
+            print(f'[dry-run][artwork][artist] riutilizzerei {source_path} per {target["dir"]}',
+                  flush=True)
+            planned += 1
+            continue
+        saved = _save_artwork_cover(target['dir'], 'artist', data, ext,
+                                    replace_existing=target.get('existing'))
+        if saved is None:
+            remaining.append(target)
+            continue
+        artwork_paths_by_dir.setdefault(Path(target['dir']), []).append(saved)
+        reused += 1
+        print(f'[artwork][artist] riutilizzata da alias non ambiguo: {source_path} -> {saved}',
+              flush=True)
+    return remaining, reused, planned
+
+
+def _read_artwork_image(url, timeout, min_bytes, max_bytes, provider_hint=None):
     """Scarica solo JPG/PNG/WEBP validi e limitati; la sostituzione locale e' decisa dal chiamante."""
     is_caa = str(url).startswith(('https://coverartarchive.org/release/',
                                          'https://coverartarchive.org/release-group/'))
-    if not (is_caa or _safe_artwork_url(url, ('.mzstatic.com', '.dzcdn.net'))):
+    google_result = provider_hint == 'google_images'
+    if not (is_caa or _safe_artwork_url(url, ('.mzstatic.com', '.dzcdn.net')) or
+            (google_result and _safe_public_https_image_url(url))):
         return None
-    provider = _artwork_provider_for_url(url)
+    provider = provider_hint or _artwork_provider_for_url(url)
     if _artwork_provider_disabled(provider):
         return None
     request = urllib.request.Request(url, headers={
@@ -16636,6 +19107,9 @@ def _read_artwork_image(url, timeout, min_bytes, max_bytes):
             if is_caa:
                 final_host = (urllib.parse.urlsplit(final_url).hostname or '').casefold()
                 if not (final_host in {'coverartarchive.org', 'archive.org'} or final_host.endswith('.archive.org')):
+                    return None
+            elif google_result:
+                if not _safe_public_https_image_url(final_url):
                     return None
             elif not _safe_artwork_url(final_url, ('.mzstatic.com', '.dzcdn.net')):
                 return None
@@ -16812,44 +19286,66 @@ def _artwork_catalog_consensus(artist, album, timeout):
 
 def _fetch_corroborated_catalog_artwork(artist, album, timeout, min_bytes, max_bytes,
                                          similarity_bits=8):
-    """Use Apple/Deezer image fallback only when both return the same cover."""
-    itunes_urls, itunes_ok = _itunes_artwork_urls(artist, album, timeout)
-    deezer_urls, deezer_ok = _deezer_artwork_urls(artist, album, timeout)
-    if not itunes_urls or not deezer_urls:
-        return None, bool(itunes_ok and deezer_ok), False
-    itunes_images, deezer_images = [], []
-    for url in itunes_urls[:4]:
-        result = _read_artwork_image(url, timeout, min_bytes, max_bytes)
-        if result:
+    """Return a cover only when two independent catalogue providers agree visually.
+
+    TheAudioDB and Wikimedia Commons supplement Apple/iTunes and Deezer. Each provider
+    may return several candidates; a pair must come from different providers and be
+    within the perceptual-hash distance threshold. A provider outage does not prevent a
+    valid pair from the remaining sources.
+    """
+    providers = (
+        ('itunes', _itunes_artwork_urls),
+        ('deezer', _deezer_artwork_urls),
+        ('theaudiodb', _theaudiodb_artwork_urls),
+        ('wikimedia_commons', _wikimedia_commons_artwork_urls),
+    )
+    images_by_provider = {}
+    providers_ok = True
+    had_candidates = False
+    for provider, lookup in providers:
+        urls, ok = lookup(artist, album, timeout)
+        providers_ok = providers_ok and bool(ok)
+        had_candidates = had_candidates or bool(urls)
+        provider_images = []
+        for url in urls[:4]:
+            result = _read_artwork_image(url, timeout, min_bytes, max_bytes)
+            if not result:
+                continue
             digest = _artwork_dhash(data=result[0], timeout=timeout)
             if digest is not None:
-                itunes_images.append((result, digest))
-    for url in deezer_urls[:4]:
-        result = _read_artwork_image(url, timeout, min_bytes, max_bytes)
-        if result:
-            digest = _artwork_dhash(data=result[0], timeout=timeout)
-            if digest is not None:
-                deezer_images.append((result, digest))
+                provider_images.append((result, digest))
+        if provider_images:
+            images_by_provider[provider] = provider_images
+
     matches = []
-    for apple_result, apple_hash in itunes_images:
-        for deezer_result, deezer_hash in deezer_images:
-            distance = _artwork_hash_distance(apple_hash, deezer_hash)
-            if distance is not None and distance <= int(similarity_bits):
-                # Prefer the larger image while preserving bytes from a single provider.
-                chosen = max((apple_result, deezer_result), key=lambda pair: len(pair[0]))
-                matches.append((distance, chosen))
+    available = list(images_by_provider.items())
+    for index, (provider_a, images_a) in enumerate(available):
+        for provider_b, images_b in available[index + 1:]:
+            if provider_a == provider_b:
+                continue
+            for result_a, hash_a in images_a:
+                for result_b, hash_b in images_b:
+                    distance = _artwork_hash_distance(hash_a, hash_b)
+                    if distance is None or distance > int(similarity_bits):
+                        continue
+                    chosen = max((result_a, result_b), key=lambda pair: len(pair[0]))
+                    matches.append((distance, len(chosen[0]), chosen, provider_a, provider_b))
     if not matches:
-        return None, bool(itunes_ok and deezer_ok), True
-    matches.sort(key=lambda entry: (entry[0], -len(entry[1][0])))
-    return matches[0][1], bool(itunes_ok and deezer_ok), True
+        return None, providers_ok, had_candidates
+    matches.sort(key=lambda entry: (entry[0], -entry[1], entry[3], entry[4]))
+    best = matches[0]
+    print(f'[artwork][consensus] {artist} — {album}: immagini concordi da '
+          f'{_ARTWORK_PROVIDER_LABELS[best[3]]} + {_ARTWORK_PROVIDER_LABELS[best[4]]} '
+          f'(dHash={best[0]})', flush=True)
+    return best[2], providers_ok, had_candidates
 
 
 def _verify_existing_album_artwork(item, cache_entry, timeout, min_bytes, max_bytes,
                                    similarity_bits=8):
-    """Verify current art with exact CAA identity and independent Apple/Deezer images.
+    """Verify current art with exact CAA identity and two-provider visual corroboration.
 
     Exact MusicBrainz release front art is authoritative for that edition. For release-
-    group or fuzzy matches, Apple and Deezer must independently agree with the local
+    group or fuzzy matches, two independent catalogue providers must agree with the local
     picture; those weaker identities are never used to overwrite local artwork.
     """
     cover = item.get('local_cover')
@@ -16900,12 +19396,13 @@ def _verify_existing_album_artwork(item, cache_entry, timeout, min_bytes, max_by
                 'distance': distance, 'source': source_label}
 
     # If the exact release image is missing, or only a release-group/fuzzy candidate is
-    # available, check the actual picture against independent Apple and Deezer results.
+    # available, check the actual picture against two independent artwork catalogues.
     catalog_image, catalogs_ok, had_catalog_images = _fetch_corroborated_catalog_artwork(
         item['artist'], item['album'], timeout, min_bytes, max_bytes,
         similarity_bits=threshold)
-    catalog_provider_unavailable = (not catalogs_ok or _artwork_provider_disabled('itunes') or
-                                    _artwork_provider_disabled('deezer'))
+    catalog_provider_unavailable = (not catalogs_ok or any(
+        _artwork_provider_disabled(name) for name in
+        ('itunes', 'deezer', 'theaudiodb', 'wikimedia_commons')))
     catalog_hash = (_artwork_dhash(data=catalog_image[0], timeout=timeout)
                     if catalog_image else None)
     local_catalog_distance = _artwork_hash_distance(local_hash, catalog_hash)
@@ -16919,7 +19416,7 @@ def _verify_existing_album_artwork(item, cache_entry, timeout, min_bytes, max_by
                 local_catalog_distance <= threshold):
             return {'status': 'verified-catalog-consensus', 'fingerprint': fingerprint,
                     'distance': distance, 'catalog_distance': local_catalog_distance,
-                    'source': 'Apple+Deezer', 'caa_source': source_label}
+                    'source': 'multi-catalogue artwork consensus', 'caa_source': source_label}
         status = ('review-catalog-disagreement' if catalog_image or had_catalog_images
                   else 'review-catalog-corroboration-unavailable')
         return {'status': status, 'fingerprint': fingerprint,
@@ -16928,12 +19425,12 @@ def _verify_existing_album_artwork(item, cache_entry, timeout, min_bytes, max_by
                 'retryable': bool(_artwork_failures_since(network_snapshot) or caa_unavailable or
                                   catalog_provider_unavailable or _artwork_any_provider_disabled())}
 
-    # Exact-release mismatch: replace only when the Apple+Deezer images agree with the
-    # exact CAA image, and at least two independent catalog metadata sources identify
-    # the same artist+album. Spotify contributes metadata only, never a stored image.
+    # Exact-release mismatch: replace only when the exact CAA image also agrees with
+    # a candidate independently corroborated by at least two artwork catalogues. The
+    # returned catalog_image cannot exist after only one provider match.
     consensus = _artwork_catalog_consensus(item['artist'], item['album'], timeout)
     if (candidate and catalog_image and catalog_distance is not None and
-            catalog_distance <= threshold and len(consensus) >= 2):
+            catalog_distance <= threshold):
         return {'status': 'replace-exact-release', 'fingerprint': fingerprint,
                 'distance': distance, 'catalog_distance': catalog_distance,
                 'source': source_label, 'consensus': consensus, 'image': candidate}
@@ -17409,7 +19906,7 @@ def run_missing_album_artwork(dry_run=False):
     """Recupera/aggiorna solo cover assenti o piccole, poi le incorpora dove serve.
 
     Una cover locale/embedded sana non viene riscaricata, ma puo' essere verificata a
-    lotti contro il front approvato CAA e l'accordo visivo Apple+Deezer. Le verifiche
+    lotti contro il front approvato CAA e l'accordo visivo multi-catalogo. Le verifiche
     ambigue sono solo review; una sostituzione richiede la release MusicBrainz esatta.
     Per l'embedding si usa Mutagen se disponibile; FLAC ha anche un fallback nativo
     metaflac e MP3/M4A un remux ffmpeg stream-copy, senza ricodificare l'audio.
@@ -17427,12 +19924,16 @@ def run_missing_album_artwork(dry_run=False):
     groups, artwork_stems_by_dir, artwork_paths_by_dir = _load_artwork_album_groups()
     cache = _artwork_cache_load()
     negative = cache.setdefault('not_found', {})
+    artist_negative = cache.setdefault('artist_not_found', {})
     now = int(time.time())
     timeout = int(cfg['request_timeout'])
-    threshold = int(cfg.get('min_existing_cover_bytes', 32768))
-    min_bytes = max(int(cfg['min_image_bytes']), threshold)
+    threshold = max(1, int(cfg.get('min_existing_cover_bytes', 32768)))
+    # min_existing_cover_bytes decides whether to replace a LOCAL image only. Applying
+    # it to downloads rejected valid small CAA fronts and compact catalog images.
+    min_bytes = max(1, int(cfg.get('min_image_bytes', 2048)))
     max_bytes = int(cfg['max_image_bytes'])
     candidates, negative_skipped = [], 0
+    negative_skipped_items = []
     embedded_unknown = 0
     healthy_existing = 0
     verification_items = []
@@ -17522,6 +20023,10 @@ def run_missing_album_artwork(dry_run=False):
         until = int(negative.get(key, 0) or 0)
         if until > now:
             negative_skipped += 1
+            negative_skipped_items.append({
+                'artist': artist_name, 'album': album_name, 'dir': album_dir,
+                'key': key, 'retry_at': until,
+            })
             continue
         if until:
             negative.pop(key, None)
@@ -17561,8 +20066,9 @@ def run_missing_album_artwork(dry_run=False):
 
         candidates.append({
             'dir': album_dir, 'tracks': tracks, 'artist': artist_name,
-            'album': album_name, 'key': key, 'mbid': '', 'rgid': '',
-            'replace_cover': local_cover,
+            'album': album_name, 'key': key,
+            'cursor_key': f'{album_dir.relative_to(LIBRARY_ROOT)}\t{key}',
+            'mbid': '', 'rgid': '', 'replace_cover': local_cover,
             'embedded_unknown': embedded_unknown_for_album,
         })
 
@@ -17586,6 +20092,28 @@ def run_missing_album_artwork(dry_run=False):
     limit = int(cfg['max_per_run'])
     cursor_key = str(cache.get('pending_cursor') or '')
     selected = _select_artwork_candidate_batch(candidates, limit, cursor_key)
+
+    artist_targets, artist_alias_sources = (_collect_artist_artwork_targets(
+        groups, artwork_paths_by_dir, threshold)
+        if cfg.get('artist_art_enabled', True) else ([], {}))
+    artist_targets, artist_reused, artist_reuse_planned = _reuse_bilingual_artist_artwork(
+        artist_targets, artist_alias_sources, artwork_paths_by_dir, threshold, dry_run=dry_run)
+    artist_negative_skipped = 0
+    artist_negative_skipped_items = []
+    artist_pending = []
+    for target in artist_targets:
+        until = int(artist_negative.get(target['key'], 0) or 0)
+        if until > now:
+            artist_negative_skipped += 1
+            artist_negative_skipped_items.append((target, until))
+            continue
+        if until:
+            artist_negative.pop(target['key'], None)
+        artist_pending.append(target)
+    artist_limit = max(0, int(cfg.get('max_artist_per_run', 0)))
+    artist_selected = _select_artwork_candidate_batch(
+        artist_pending, artist_limit, str(cache.get('artist_pending_cursor') or ''))
+
     print(f'[artwork] album/cartelle audio: {len(groups)} | cover sane saltate: {healthy_existing} | '
           f'senza cover o sotto {threshold // 1024} KiB: {len(candidates) + negative_skipped} | '
           f'query da fare questa run: {len(selected)} | cover embedded sane estratte: {len(embed_jobs)} | '
@@ -17598,12 +20126,23 @@ def run_missing_album_artwork(dry_run=False):
             print(f"[dry-run][artwork] cercherei: {item['artist']} — {item['album']} -> {item['dir']}{suffix}")
         if len(selected) > 20:
             print(f'[dry-run][artwork] ... e altre {len(selected) - 20} cartelle')
+        if artist_reuse_planned:
+            print(f'[dry-run][artwork] riutilizzerei {artist_reuse_planned} immagini locali da cartelle alias non ambigue')
+        if artist_selected:
+            print(f'[dry-run][artwork] cercherei immagini artista per {len(artist_selected)} cartelle; '
+                  f'nome inglese prima, grafia originale soltanto come fallback')
+            for target in artist_selected[:10]:
+                print(f"[dry-run][artwork][artist] {target['artist']} -> {target['dir']} "
+                      f"(query: {' -> '.join(target['search_names'][:3])})")
+            if len(artist_selected) > 10:
+                print(f'[dry-run][artwork][artist] ... e altri {len(artist_selected) - 10} artisti')
         if cfg.get('embed_audio', True) and embed_jobs:
             print(f'[dry-run][artwork] incorporerei le cover embedded sane in {len(embed_jobs)} album')
         if cfg.get('verify_existing', True) and verification_items:
             print(f'[dry-run][artwork] verificherei {min(len(verification_items), max(0, int(cfg.get("max_verifications_per_run", 0))) or len(verification_items))} cover esistenti contro Cover Art Archive e cataloghi')
-        return {'downloaded': 0, 'embedded': 0,
-                'missing': len(candidates) + negative_skipped, 'attempted': 0}
+        return {'downloaded': 0, 'artist_downloaded': 0, 'embedded': 0,
+                'missing': len(candidates) + negative_skipped,
+                'artist_missing': len(artist_pending) + artist_negative_skipped, 'attempted': 0}
 
     # Verify healthy current artwork in bounded batches. Only an approved exact-release
     # CAA front that disagrees with the local image AND two independent catalog metadata
@@ -17654,7 +20193,7 @@ def run_missing_album_artwork(dry_run=False):
             verified_messages.append(f"[artwork][verify] cover confermata: {item['artist']} — {item['album']} "
                                      f"({providers}; dHash={result.get('distance')})")
         elif status == 'verified-catalog-consensus':
-            verified_messages.append(f"[artwork][verify] cover confermata da Apple+Deezer: "
+            verified_messages.append(f"[artwork][verify] cover confermata da multi-catalogo: "
                                      f"{item['artist']} — {item['album']} "
                                      f"(confronto locale={result.get('catalog_distance')}; "
                                      f"CAA={result.get('caa_source') or 'non disponibile'})")
@@ -17679,15 +20218,27 @@ def run_missing_album_artwork(dry_run=False):
 
     retry_seconds = int(cfg['retry_days']) * 86400
     basename = cfg['cover_basename']
-    progress = _ProgressBar('download artwork', len(selected), 'album', stream=sys.stdout, subphase=True)
+    album_outcomes = []
+    album_last_cursor_key = cursor_key
+    album_progress = _ProgressBar('download artwork', len(selected), 'album', stream=sys.stdout, subphase=True)
     for index, item in enumerate(selected, 1):
-        progress.update(index)
+        album_progress.update(index)
         artist, album, album_dir = item['artist'], item['album'], item['dir']
         mbid, rgid = item['mbid'], item['rgid']
         if _artwork_all_providers_disabled():
-            network_deferred += 1
-            continue
+            deferred_items = selected[index - 1:]
+            network_deferred += len(deferred_items)
+            for deferred_item in deferred_items:
+                album_outcomes.append((deferred_item, 'rinviato: tutti i provider artwork in cooldown'))
+            if deferred_items:
+                # No lookup was possible; rotate across the batch so the next invocation
+                # does not remain pinned to the same first album forever.
+                album_last_cursor_key = deferred_items[-1].get('cursor_key') or deferred_items[-1]['key']
+            break
         attempted += 1
+        # Persist the last candidate actually queried, even if the network/save later fails.
+        # The next run continues after it; circular selection eventually retries this item.
+        album_last_cursor_key = item.get('cursor_key') or item['key']
         network_snapshot = _artwork_failure_snapshot()
         image_result = None
         group_level_art = False
@@ -17704,20 +20255,30 @@ def run_missing_album_artwork(dry_run=False):
         itunes_ok = deezer_ok = False
         had_candidate_url = False
         fuzzy_musicbrainz_art = False
+        exact_musicbrainz_art = False
         catalog_art_attempted = False
         if image_result is None and not _artwork_provider_disabled('musicbrainz'):
-            mb_urls, musicbrainz_ok = _musicbrainz_artwork_urls(artist, album, timeout)
-            had_candidate_url = had_candidate_url or bool(mb_urls)
-            for url in mb_urls:
+            mb_candidates, musicbrainz_ok = _musicbrainz_artwork_urls(
+                artist, album, timeout, include_scores=True)
+            had_candidate_url = had_candidate_url or bool(mb_candidates)
+            for url, match_score in mb_candidates:
                 image_result = _read_artwork_image(url, timeout, min_bytes, max_bytes)
-                if image_result or _artwork_provider_disabled('musicbrainz'):
-                    fuzzy_musicbrainz_art = image_result is not None
+                if image_result:
+                    fuzzy_musicbrainz_art = True
+                    exact_musicbrainz_art = float(match_score) >= 0.96
+                    if exact_musicbrainz_art:
+                        print(f'[artwork][CAA] release-group quasi esatto verificato: '
+                              f'{artist} — {album} (score {float(match_score):.3f})', flush=True)
                     break
-        # Release-group covers are canonical rather than edition-specific. Fuzzy search
-        # results are weaker still. Neither is saved on its own: Apple and Deezer must
-        # agree on the artwork image. If their image agrees with CAA, use the higher-
-        # resolution catalog copy; if not, preserve only the independent catalog consensus.
-        if (group_level_art or fuzzy_musicbrainz_art) and image_result is not None:
+                if _artwork_provider_disabled('musicbrainz'):
+                    break
+        # Un RGID presente nei tag identifica direttamente il gruppo dell'album.
+        # Anche una ricerca quasi esatta (>=0,96) può usare il front CAA da sola.
+        # Per i candidati fuzzy resta obbligatoria la conferma visiva multi-catalogo.
+        if group_level_art and image_result is not None:
+            print(f'[artwork][CAA] front del release-group indicato nei tag: '
+                  f'{artist} — {album}', flush=True)
+        elif fuzzy_musicbrainz_art and not exact_musicbrainz_art and image_result is not None:
             caa_group_image = image_result
             catalog_image, catalogs_ok, had_catalog_candidates = _fetch_corroborated_catalog_artwork(
                 artist, album, timeout, min_bytes, max_bytes,
@@ -17733,14 +20294,15 @@ def run_missing_album_artwork(dry_run=False):
                     image_result = max((caa_group_image, catalog_image), key=lambda pair: len(pair[0]))
                 else:
                     image_result = catalog_image
-                    print(f'[artwork][verify] CAA release-group/fuzzy diverso dal consenso Apple+Deezer: '
+                    print(f'[artwork][verify] CAA release-group/fuzzy diverso dal consenso multi-catalogo: '
                           f'{artist} — {album}; uso soltanto il consenso cataloghi (dHash={distance}).',
                           file=sys.stderr, flush=True)
             else:
                 image_result = None
                 if had_catalog_candidates:
-                    print(f'[artwork][review] CAA release-group/fuzzy senza consenso visivo Apple+Deezer: '
-                          f'{artist} — {album}; cover non scaricata.', file=sys.stderr, flush=True)
+                    print(f'[artwork][review] CAA release-group/fuzzy senza consenso visivo multi-catalogo: '
+                          f'{artist} — {album}; cover non scaricata.',
+                          file=sys.stderr, flush=True)
         if image_result is None and not catalog_art_attempted:
             image_result, catalogs_ok, had_catalog_candidates = _fetch_corroborated_catalog_artwork(
                 artist, album, timeout, min_bytes, max_bytes,
@@ -17749,24 +20311,52 @@ def run_missing_album_artwork(dry_run=False):
             itunes_ok = deezer_ok = catalogs_ok
             had_candidate_url = had_candidate_url or had_catalog_candidates
             if had_catalog_candidates and image_result is None:
-                print(f'[artwork][review] Apple e Deezer non concordano sull’immagine: '
+                print(f'[artwork][review] I cataloghi indipendenti non concordano sull’immagine: '
                       f'{artist} — {album}; lascio l’album senza sostituzione automatica.',
                       file=sys.stderr, flush=True)
+
+        google_images_ok = True
+        google_had_candidates = False
+        if image_result is None and cfg.get('google_images', True):
+            google_suggestion, google_images_ok, google_had_candidates = _google_album_artwork_image(
+                artist, album, timeout, min_bytes, max_bytes)
+            if google_suggestion:
+                had_candidate_url = True
+                print(f'[artwork][review] Google Images ha proposto una cover per {artist} — {album}, '
+                      'ma non conta come secondo database e non viene salvata senza consenso visivo '
+                      'di almeno due cataloghi indipendenti.', file=sys.stderr, flush=True)
 
         if image_result is None:
             provider_incomplete = (_artwork_failures_since(network_snapshot) or
                                    _artwork_any_provider_disabled())
+            google_complete = (google_images_ok if cfg.get('google_images', True) else True)
             if (not provider_incomplete and musicbrainz_ok and itunes_ok and deezer_ok and
-                    retry_seconds and (not had_candidate_url or
+                    google_complete and retry_seconds and (not had_candidate_url or
                                        (had_candidate_url and itunes_ok and deezer_ok))):
                 # Cache only a complete, successful search with no transient provider error.
                 negative[item['key']] = now + retry_seconds
                 not_found += 1
+                album_outcomes.append((item, 'nessun risultato immagine valido; cache negativa temporanea'))
             elif provider_incomplete:
                 network_errors += 1
                 network_deferred += 1
+                album_outcomes.append((item, 'rinviato: errore temporaneo/cooldown provider'))
+                if _artwork_all_providers_disabled():
+                    # Keep this item as the next cursor position: its lookup was interrupted.
+                    deferred_items = selected[index:]
+                    if len(deferred_items) > 1:
+                        network_deferred += len(deferred_items) - 1
+                        for deferred_item in deferred_items[1:]:
+                            album_outcomes.append((deferred_item, 'rinviato: provider non disponibili prima della query'))
+                    break
+                album_last_cursor_key = item.get('cursor_key') or item['key']
             else:
                 network_errors += 1
+                if had_candidate_url or had_catalog_candidates:
+                    album_outcomes.append((item, 'in revisione: candidati trovati ma nessuna conferma sufficiente'))
+                else:
+                    album_outcomes.append((item, 'nessun risultato immagine valido dai provider'))
+                album_last_cursor_key = item.get('cursor_key') or item['key']
             continue
 
         data, ext = image_result
@@ -17776,6 +20366,8 @@ def run_missing_album_artwork(dry_run=False):
             try:
                 if existing.stat().st_size >= threshold:
                     healthy_existing += 1
+                    album_last_cursor_key = item.get('cursor_key') or item['key']
+                    album_outcomes.append((item, 'completato da cover locale aggiunta durante la ricerca'))
                     continue
             except OSError:
                 existing = None
@@ -17784,18 +20376,44 @@ def run_missing_album_artwork(dry_run=False):
                                      replace_existing=replace_existing)
         if target is None:
             save_errors += 1
+            album_outcomes.append((item, 'errore salvataggio cover'))
             print(f'[artwork] impossibile salvare/aggiornare cover per {artist} — {album}: {album_dir}',
                   file=sys.stderr)
             continue
         downloaded += 1
+        album_last_cursor_key = item.get('cursor_key') or item['key']
+        album_outcomes.append((item, f'scaricato: {target.name}'))
         negative.pop(item['key'], None)
         if cfg.get('embed_audio', True):
             embed_jobs[album_dir] = (target, item['tracks'])
-        progress.clear()
+        album_progress.clear()
         verb = 'aggiornata' if replace_existing else 'scaricata'
         print(f'[artwork] {verb}: {target} ({len(data) // 1024} KiB)', flush=True)
 
-    progress.close(complete=True)
+    album_progress.close(complete=True)
+
+    # Explicit per-album result log: every candidate receives exactly one visible outcome.
+    def _album_artwork_identity(item):
+        return str(Path(item['dir']))
+
+    selected_keys = {_album_artwork_identity(item) for item in selected}
+    for item in candidates:
+        if _album_artwork_identity(item) not in selected_keys:
+            album_outcomes.append((item, 'rinviato: limite massimo per esecuzione'))
+    successful_album_dirs = set()
+    for item, status in album_outcomes:
+        complete = status.startswith(('scaricato:', 'completato da cover locale'))
+        if complete:
+            successful_album_dirs.add(_album_artwork_identity(item))
+            label = 'completato'
+        else:
+            label = 'in attesa'
+        print(f'[artwork][album][{label}] {item["artist"]} — {item["album"]}: {status}',
+              flush=True)
+    for item in negative_skipped_items:
+        print(f'[artwork][album][in attesa] {item["artist"]} — {item["album"]}: '
+              f'cache negativa fino a {datetime.fromtimestamp(item["retry_at"]).isoformat(timespec="seconds")}',
+              flush=True)
 
     embedded = already_embedded = unsupported = embed_errors = 0
     if cfg.get('embed_audio', True):
@@ -17813,16 +20431,159 @@ def run_missing_album_artwork(dry_run=False):
                       file=sys.stderr)
         embed_progress.close(complete=True)
 
+    # Artist artwork is stored as artist.* in the artist directory, exactly where
+    # Navidrome's default ArtistArtPriority looks first. It is not embedded in tracks.
+    artist_downloaded = artist_attempted = artist_not_found = artist_network_deferred = 0
+    artist_save_errors = 0
+    artist_outcomes = []
+    artist_last_cursor_key = str(cache.get('artist_pending_cursor') or '')
+    if artist_selected:
+        artist_progress = _ProgressBar('download artwork artisti', len(artist_selected),
+                                       'artisti', stream=sys.stdout, subphase=True)
+        for artist_index, target in enumerate(artist_selected, 1):
+            artist_progress.update(artist_index)
+            artist_dir = target['dir']
+            existing = target.get('existing')
+            # Do not overwrite artwork added during the run or an image above threshold.
+            live_existing = _artist_folder_cover(
+                artist_dir, artwork_paths_by_dir.get(artist_dir, ()))
+            if live_existing:
+                try:
+                    if live_existing.stat().st_size >= threshold:
+                        artist_last_cursor_key = target['key']
+                        artist_outcomes.append((target, 'gia presente: artist.* sano'))
+                        continue
+                    existing = live_existing
+                except OSError:
+                    existing = None
+            deezer_available = not _artwork_provider_disabled('deezer')
+            google_available = (cfg.get('google_images', True) and
+                                not _artwork_provider_disabled('google_images'))
+            if not deezer_available and not google_available:
+                deferred_targets = artist_selected[artist_index - 1:]
+                artist_network_deferred += len(deferred_targets)
+                for deferred_target in deferred_targets:
+                    artist_outcomes.append((deferred_target, 'rinviato: Deezer e Google Images non disponibili'))
+                if deferred_targets:
+                    # Providers were unavailable before any request in this tail; rotate
+                    # the unqueried batch so later bilingual artists are not starved.
+                    artist_last_cursor_key = deferred_targets[-1]['key']
+                break
+            artist_attempted += 1
+            # Advance on every queried artist, including a retryable failure. This is a
+            # round-robin cursor: failed artists are revisited after the rest of the queue.
+            artist_last_cursor_key = target['key']
+            network_snapshot = _artwork_failure_snapshot()
+            image_result = None
+            provider_complete = True
+            had_candidates = False
+            for search_name in target['search_names']:
+                if not _artwork_provider_disabled('deezer'):
+                    urls, ok = _deezer_artist_artwork_urls(search_name, timeout)
+                    provider_complete = provider_complete and ok
+                    had_candidates = had_candidates or bool(urls)
+                    for image_url in urls:
+                        candidate = _read_artwork_image(
+                            image_url, timeout, min_bytes, max_bytes, provider_hint='deezer')
+                        if candidate and _image_matches_artwork_shape(
+                                candidate[0], int(cfg.get('min_google_artist_dimension', 300)),
+                                0.58, 1.9, timeout=min(timeout, 15)):
+                            image_result = candidate
+                            break
+                if image_result is None and cfg.get('google_images', True) and not _artwork_provider_disabled('google_images'):
+                    candidate, google_ok, google_candidates = _google_artist_artwork_image(
+                        search_name, timeout, min_bytes, max_bytes)
+                    provider_complete = provider_complete and google_ok
+                    had_candidates = had_candidates or google_candidates
+                    if candidate:
+                        image_result = candidate
+                if image_result:
+                    print(f"[artwork][artist] immagine trovata per {target['artist']} "
+                          f"usando {search_name!r}", flush=True)
+                    break
+                if (_artwork_provider_disabled('deezer') and
+                        (not cfg.get('google_images', True) or _artwork_provider_disabled('google_images'))):
+                    break
+
+            if image_result is None:
+                artist_provider_incomplete = (
+                    _artwork_failures_since(network_snapshot) or
+                    _artwork_provider_disabled('deezer') or
+                    (cfg.get('google_images', True) and _artwork_provider_disabled('google_images')))
+                if artist_provider_incomplete:
+                    artist_network_deferred += 1
+                    artist_outcomes.append((target, 'rinviato: errore rete/provider, non cacheato'))
+                    if (_artwork_provider_disabled('deezer') and
+                            (not cfg.get('google_images', True) or _artwork_provider_disabled('google_images'))):
+                        deferred_targets = artist_selected[artist_index:]
+                        for deferred_target in deferred_targets:
+                            if deferred_target['key'] == target['key']:
+                                continue
+                            artist_network_deferred += 1
+                            artist_outcomes.append((deferred_target, 'rinviato: provider non disponibili prima della query'))
+                        break
+                elif provider_complete and not had_candidates and int(cfg.get('retry_days', 14)) > 0:
+                    artist_negative[target['key']] = now + int(cfg.get('retry_days', 14)) * 86400
+                    artist_not_found += 1
+                    artist_outcomes.append((target, 'nessun risultato artista valido; cache negativa temporanea'))
+                else:
+                    artist_network_deferred += 1
+                    artist_outcomes.append((target, 'nessuna immagine verificata; resta riprovabile'))
+                continue
+
+            data, ext = image_result
+            # Artist portrait must be reasonably sized and readable before atomic save.
+            dimensions = _artwork_image_dimensions(data, timeout=min(timeout, 15))
+            if not dimensions or min(dimensions) < int(cfg.get('min_google_artist_dimension', 300)):
+                artist_network_deferred += 1
+                artist_outcomes.append((target, 'immagine trovata ma dimensioni non valide; riprovabile'))
+                artist_last_cursor_key = target['key']
+                continue
+            artist_target = _save_artwork_cover(artist_dir, 'artist', data, ext,
+                                                replace_existing=existing)
+            if artist_target is None:
+                artist_save_errors += 1
+                artist_outcomes.append((target, 'immagine trovata ma errore di salvataggio'))
+                print(f'[artwork] impossibile salvare artist.* per {target["artist"]}: {artist_dir}',
+                      file=sys.stderr)
+                continue
+            artist_downloaded += 1
+            artist_last_cursor_key = target['key']
+            artist_outcomes.append((target, f'scaricato: {artist_target.name}'))
+            artist_negative.pop(target['key'], None)
+            artwork_paths_by_dir.setdefault(artist_dir, []).append(artist_target)
+            print(f'[artwork][artist] scaricata: {artist_target} '
+                  f'({dimensions[0]}x{dimensions[1]}, {len(data) // 1024} KiB)', flush=True)
+        artist_progress.close(complete=True)
+
+    artist_selected_keys = {target['key'] for target in artist_selected}
+    for target in artist_pending:
+        if target['key'] not in artist_selected_keys:
+            artist_outcomes.append((target, 'rinviato: limite massimo per esecuzione'))
+    for target, status in artist_outcomes:
+        if status.startswith(('scaricato:', 'gia presente:')):
+            continue
+        print(f'[artwork][artist][in attesa] {target["artist"]} — {target["dir"]}: {status}; '
+              f'ricerca successiva: {" -> ".join(target["search_names"])}', flush=True)
+    for target, retry_at in artist_negative_skipped_items:
+        print(f'[artwork][artist][in attesa] {target["artist"]} — {target["dir"]}: '
+              f'cache negativa fino a {datetime.fromtimestamp(retry_at).isoformat(timespec="seconds")}; '
+              f'ricerca successiva: {" -> ".join(target["search_names"])}', flush=True)
+
     # Limita la crescita della cache ed elimina voci ormai scadute.
     negative = {key: int(until) for key, until in negative.items() if int(until or 0) > now}
-    cache['version'] = 6
-    if selected:
-        cache['pending_cursor'] = selected[-1]['key']
+    artist_negative = {key: int(until) for key, until in artist_negative.items()
+                       if int(until or 0) > now}
+    cache['version'] = 10
+    if album_last_cursor_key:
+        cache['pending_cursor'] = album_last_cursor_key
+    if artist_last_cursor_key:
+        cache['artist_pending_cursor'] = artist_last_cursor_key
     cache['not_found'] = negative
     cache['verified'] = verified_cache
+    cache['artist_not_found'] = artist_negative
     _artwork_cache_save(cache)
-    remaining = max(0, len(candidates) - len(selected) + negative_skipped +
-                    network_errors + not_found + network_deferred)
+    remaining = max(0, len(candidates) - len(successful_album_dirs) + negative_skipped)
     print(f'[artwork] risultato: {downloaded} cover scaricate/aggiornate | {extracted} estratte da file audio | '
           f'{embedded} tracce aggiornate | {already_embedded} gia\' con cover sana | '
           f'{unsupported} non supportate | errori embedding={embed_errors} | '
@@ -17832,11 +20593,21 @@ def run_missing_album_artwork(dry_run=False):
               f'(cache={verification_skipped_cache}, review={verification_review}, sostituite={verification_replaced}, '
               f'rinviate={verification_network_deferred}) | '
               f'candidati per run future={remaining}', flush=True)
-    return {'downloaded': downloaded, 'extracted': extracted, 'embedded': embedded,
+    print(f'[artwork][artist] risultato: {artist_downloaded} immagini scaricate | '
+          f'riutilizzate da cartelle alias={artist_reused} | cartelle in coda={len(artist_pending)} | '
+          f'query reali={artist_attempted} | non trovate/cache={artist_negative_skipped + artist_not_found} | '
+          f'rinviate per rete={artist_network_deferred} | errori salvataggio={artist_save_errors}',
+          flush=True)
+    return {'downloaded': downloaded, 'artist_downloaded': artist_downloaded,
+            'artist_missing': len(artist_pending) + artist_negative_skipped,
+            'extracted': extracted, 'embedded': embedded,
             'embed_errors': embed_errors, 'unsupported': unsupported,
             'missing': len(candidates) + negative_skipped, 'attempted': attempted,
             'network_errors': network_errors, 'not_found': not_found,
             'network_deferred': network_deferred, 'save_errors': save_errors,
+            'artist_attempted': artist_attempted, 'artist_not_found': artist_not_found,
+            'artist_network_deferred': artist_network_deferred,
+            'artist_reused': artist_reused, 'artist_save_errors': artist_save_errors,
             'verification_checked': verification_checked, 'verification_review': verification_review,
             'verification_replaced': verification_replaced}
 
@@ -19557,6 +22328,7 @@ def _lidarr_norm(value):
     return re.sub(r'\s+', ' ', value).strip()
 
 
+@lru_cache(maxsize=65536)
 def _lidarr_artist_identity_key(value):
     """Case/punctuation-insensitive artist key that keeps meaningful diacritics."""
     value = unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
@@ -19651,6 +22423,7 @@ def _lidarr_choose_release(candidates, spotify_date='', date_getter=None):
     return chosen, f'release piu vecchia disponibile ({selected_date})'
 
 
+@lru_cache(maxsize=32768)
 def _lidarr_artist_name_similarity(left, right):
     """Conservative similarity score for a catalogue-assisted artist-name lookup."""
     a, b = _lidarr_norm(left), _lidarr_norm(right)
@@ -20250,11 +23023,12 @@ def _lidarr_global_album_by_foreign_id(foreign_album_id, db_path=None):
 # text-search service has known upstream 5xx problems; this sync therefore resolves
 # exact album groups through MusicBrainz and submits stable MBIDs to Lidarr.
 LIDARR_MB_CACHE = CACHE_DIR / 'lidarr_sync_musicbrainz_cache.json'
-LIDARR_MB_CACHE_VERSION = 4
+LIDARR_MB_CACHE_VERSION = 6
 LIDARR_MB_CACHE_TTL_DAYS = 30
-LIDARR_MB_NOTFOUND_TTL_DAYS = 7
+LIDARR_MB_CATALOG_TTL_DAYS = 7
+LIDARR_MB_NOTFOUND_TTL_DAYS = 1
 LIDARR_MB_GROUP_LIMIT = 1000
-_LIDARR_MB_LAST = [0.0]
+_LIDARR_MB_LAST = _MB_LAST
 _LIDARR_MB_STATE = {'consecutive_failures': 0, 'disabled': False, 'last_error': ''}
 _LIDARR_MB_FAIL_LIMIT = 3
 _LIDARR_METADATA_ADD_STATE = {'blocked': False, 'reason': ''}
@@ -20308,22 +23082,32 @@ def _lidarr_mb_cache_load():
     if not isinstance(data, dict):
         data = {}
     version = data.get('version')
-    if version in {1, 2, 3}:
-        # Preserve already-expensive artist searches/discographies. Alias detail lookup
-        # is now a separate MBID-keyed cache and will be fetched only when an album has a
-        # confirmed primary-artist mismatch.
+    if version in {1, 2, 3, 4, 5}:
+        # Preserve the expensive existing searches/discographies. Spotify URL links are
+        # a new independent cache and can be populated lazily without invalidating old data.
         return {'version': LIDARR_MB_CACHE_VERSION,
                 'artist_search': data.get('artist_search') or {},
                 'artist_catalog': data.get('artist_catalog') or {},
                 'artist_aliases': data.get('artist_aliases') or {},
-                'release_group_search': data.get('release_group_search') or {}}
+                'release_group_search': data.get('release_group_search') or {},
+                'release_group_credit_search': data.get('release_group_credit_search') or {},
+                # v5 cached URL relationships with the previous include parameter; discard
+                # them so the corrected release/release-group relationship lookup runs now.
+                'spotify_album_urls': ({} if version == 5 else
+                                       data.get('spotify_album_urls') or {}),
+                'spotify_artist_urls': data.get('spotify_artist_urls') or {}}
     if version != LIDARR_MB_CACHE_VERSION:
         return {'version': LIDARR_MB_CACHE_VERSION, 'artist_search': {},
-                'artist_catalog': {}, 'artist_aliases': {}, 'release_group_search': {}}
+                'artist_catalog': {}, 'artist_aliases': {}, 'release_group_search': {},
+                'release_group_credit_search': {}, 'spotify_album_urls': {},
+                'spotify_artist_urls': {}}
     data.setdefault('artist_search', {})
     data.setdefault('artist_catalog', {})
     data.setdefault('artist_aliases', {})
     data.setdefault('release_group_search', {})
+    data.setdefault('release_group_credit_search', {})
+    data.setdefault('spotify_album_urls', {})
+    data.setdefault('spotify_artist_urls', {})
     return data
 
 
@@ -20349,49 +23133,49 @@ def _lidarr_mb_cache_fresh(entry, ttl_days):
 
 
 def _lidarr_mb_get(path, **params):
-    """MusicBrainz GET con rate-limit globale (1 req/s), retry limitati e circuit breaker.
-
-    Gli errori transitori non vengono mai scritti nella cache come risultati vuoti.
-    """
+    """MusicBrainz GET: usa il limiter globale; un 429/503 rinvia il resolver Lidarr."""
     if _LIDARR_MB_STATE['disabled']:
         raise LidarrMusicBrainzUnavailable(
-            'MusicBrainz temporaneamente sospeso dopo errori ripetuti; riprovare alla prossima run')
+            'MusicBrainz temporaneamente sospeso dopo errori precedenti; i match SQLite restano attivi')
     base = str(MB_BASE or 'https://musicbrainz.org/ws/2/').rstrip('/') + '/'
     url = base + path.lstrip('/') + '?' + urllib.parse.urlencode({'fmt': 'json', **params})
     req = urllib.request.Request(url, headers=MB_USER_AGENT)
     last_error = None
-    for attempt in range(3):
-        wait = _MB_MIN_INTERVAL - (time.time() - _LIDARR_MB_LAST[0])
-        if wait > 0:
-            time.sleep(wait)
+    for attempt in range(2):
         try:
-            with urllib.request.urlopen(req, timeout=25) as response:
-                data = json.loads(response.read().decode('utf-8'))
-            _LIDARR_MB_LAST[0] = time.time()
-            _LIDARR_MB_STATE['consecutive_failures'] = 0
-            _LIDARR_MB_STATE['last_error'] = ''
+            payload = _musicbrainz_request_bytes(req, timeout=25, max_bytes=8_000_000)
+            data = json.loads(payload.decode('utf-8', errors='replace'))
+            _LIDARR_MB_STATE.update({'consecutive_failures': 0, 'last_error': ''})
             return data
-        except urllib.error.HTTPError as e:
-            _LIDARR_MB_LAST[0] = time.time()
-            if e.code == 404:
-                _LIDARR_MB_STATE['consecutive_failures'] = 0
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                _LIDARR_MB_STATE.update({'consecutive_failures': 0, 'last_error': ''})
                 return None
-            last_error = e
-            transient = e.code in (429, 500, 502, 503, 504)
-            if not transient:
-                raise
-        except (urllib.error.URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as e:
-            _LIDARR_MB_LAST[0] = time.time()
-            last_error = e
-        if attempt < 2:
-            time.sleep((2, 6)[attempt])
+            last_error = exc
+            if exc.code in (429, 503):
+                _LIDARR_MB_STATE.update({
+                    'consecutive_failures': _LIDARR_MB_FAIL_LIMIT,
+                    'disabled': True,
+                    'last_error': str(exc)[:240],
+                })
+                print('[warn] MusicBrainz ha risposto HTTP ' + str(exc.code) +
+                      ': sospendo soltanto le ricerche Lidarr per questa run; continuo con il catalogo SQLite.',
+                      file=sys.stderr, flush=True)
+                raise LidarrMusicBrainzUnavailable(str(exc))
+            if exc.code not in (500, 502, 504) or attempt >= 1:
+                break
+        except (urllib.error.URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt >= 1:
+                break
+        if attempt < 1:
+            time.sleep(2)
     _LIDARR_MB_STATE['consecutive_failures'] += 1
     _LIDARR_MB_STATE['last_error'] = str(last_error or 'errore sconosciuto')[:240]
     if _LIDARR_MB_STATE['consecutive_failures'] >= _LIDARR_MB_FAIL_LIMIT:
         _LIDARR_MB_STATE['disabled'] = True
-        print('[warn] MusicBrainz non risponde dopo retry: circuito aperto; '
-              'le identita\' non risolte restano in sospeso e saranno riprovate alla prossima run.',
-              file=sys.stderr)
+        print('[warn] circuito MusicBrainz Lidarr aperto: i match SQLite continueranno; '
+              'gli album non risolvibili saranno rinviati.', file=sys.stderr, flush=True)
     raise LidarrMusicBrainzUnavailable(str(last_error or 'MusicBrainz non raggiungibile'))
 
 
@@ -20611,14 +23395,16 @@ def _lidarr_mb_search_artist(name, cache, alias_map=None, album_title=None):
 
 
 def _lidarr_mb_artist_catalog(artist, cache):
-    """Scarica una volta i release-group di un artista; cache positiva a 30 giorni."""
+    """Scarica una volta i release-group di un artista; cache positiva a 7 giorni."""
     mbid = str((artist or {}).get('id') or '').strip()
     if not mbid:
         return [], 'MBID artista mancante'
     catalogs = cache.setdefault('artist_catalog', {})
     cached = catalogs.get(mbid.casefold())
+    # A 30-day discography cache can hide newly-added MusicBrainz releases for weeks.
+    # Refresh the catalogue weekly; retry truncated/negative catalogues after one day.
     cached_ttl = (LIDARR_MB_NOTFOUND_TTL_DAYS if cached and cached.get('truncated')
-                  else LIDARR_MB_CACHE_TTL_DAYS)
+                  else LIDARR_MB_CATALOG_TTL_DAYS)
     if _lidarr_mb_cache_fresh(cached, cached_ttl):
         return cached.get('release_groups') or [], None
 
@@ -20770,6 +23556,329 @@ def _lidarr_group_artist_credits(group):
             })
     return out
 
+
+def _lidarr_spotify_album_url(value):
+    """Convert an Exportify Spotify album URI/URL into a canonical MusicBrainz URL key."""
+    raw = str(value or '').strip()
+    match = re.search(r'(?:spotify:album:|open\.spotify\.com/album/)([A-Za-z0-9]+)', raw,
+                      flags=re.I)
+    if not match:
+        return ''
+    album_id = match.group(1)
+    # Spotify IDs are base62 strings. Requiring a useful length avoids treating arbitrary
+    # text/track URIs as album IDs while keeping future ID formats tolerant.
+    if len(album_id) < 10 or len(album_id) > 64:
+        return ''
+    return f'https://open.spotify.com/album/{album_id}'
+
+
+def _lidarr_spotify_artist_urls(value):
+    """Extract canonical Spotify artist URLs from URI(s), URL(s), or comma-separated cells."""
+    raw = str(value or '').strip()
+    found = []
+    pattern = r'(?:spotify:artist:|open\.spotify\.com/(?:intl-[a-z]{2}/)?artist/)([A-Za-z0-9]{10,64})'
+    for match in re.finditer(pattern, raw, flags=re.I):
+        artist_id = match.group(1)
+        url = f'https://open.spotify.com/artist/{artist_id}'
+        if url not in found:
+            found.append(url)
+    return found
+
+
+def _lidarr_mb_spotify_artist_ids(source_credits, cache):
+    """Resolve Spotify album-artist URI(s) to canonical MusicBrainz artist MBIDs."""
+    bucket = cache.setdefault('spotify_artist_urls', {})
+    artist_ids = []
+    seen_ids = set()
+    for credit in source_credits or []:
+        if not isinstance(credit, dict):
+            continue
+        for resource in _lidarr_spotify_artist_urls(credit.get('uris')):
+            spotify_id = resource.rsplit('/', 1)[-1]
+            cached = bucket.get(spotify_id)
+            ttl = (LIDARR_MB_CACHE_TTL_DAYS if cached and cached.get('artist_ids')
+                   else LIDARR_MB_NOTFOUND_TTL_DAYS)
+            if _lidarr_mb_cache_fresh(cached, ttl):
+                current_ids = cached.get('artist_ids') or []
+            else:
+                try:
+                    response = _lidarr_mb_get('url', resource=resource, inc='artist-rels')
+                except LidarrMusicBrainzUnavailable:
+                    raise
+                except urllib.error.HTTPError as exc:
+                    print(f'[warn] MusicBrainz URL lookup rifiutato per Spotify artist {spotify_id} '
+                          f'(HTTP {exc.code}); continuo con ricerca nome artista.', file=sys.stderr)
+                    continue
+                url_entities = []
+                if isinstance(response, dict):
+                    if isinstance(response.get('url'), dict):
+                        url_entities.append(response['url'])
+                    if isinstance(response.get('url-list'), list):
+                        url_entities.extend(item for item in response['url-list'] if isinstance(item, dict))
+                    if isinstance(response.get('urls'), list):
+                        url_entities.extend(item for item in response['urls'] if isinstance(item, dict))
+                    if not url_entities and isinstance(response.get('relations'), list):
+                        url_entities.append(response)
+                elif isinstance(response, list):
+                    url_entities.extend(item for item in response if isinstance(item, dict))
+                current_ids = []
+                for entity in url_entities:
+                    for relation in entity.get('relations') or []:
+                        if not isinstance(relation, dict):
+                            continue
+                        artist = relation.get('artist')
+                        if not isinstance(artist, dict):
+                            target = relation.get('target')
+                            artist = target if isinstance(target, dict) and target.get('id') else None
+                        artist_mbid = str((artist or {}).get('id') or '').strip()
+                        if artist_mbid and artist_mbid not in current_ids:
+                            current_ids.append(artist_mbid)
+                bucket[spotify_id] = {
+                    'artist_ids': current_ids,
+                    'status': 'ok' if current_ids else 'not_found',
+                    'checked_at': datetime.now(timezone.utc).isoformat(),
+                }
+            for artist_mbid in current_ids:
+                key = artist_mbid.casefold()
+                if key not in seen_ids:
+                    seen_ids.add(key)
+                    artist_ids.append(artist_mbid)
+    return artist_ids
+
+
+def _lidarr_mb_spotify_album_groups(entry, cache):
+    """Resolve Spotify album IDs through their exact MusicBrainz URL relationships.
+
+    MusicBrainz stores Spotify links on a release or release-group. This route can find a
+    group even when the artist-name search or cached artist discography misses it. Results
+    are still validated against Spotify's album title and album-artist credit before use.
+    """
+    resource = _lidarr_spotify_album_url((entry or {}).get('album_uri'))
+    if not resource:
+        return [], ''
+    album_id = resource.rsplit('/', 1)[-1]
+    bucket = cache.setdefault('spotify_album_urls', {})
+    cached = bucket.get(album_id)
+    cached_ttl = (LIDARR_MB_CACHE_TTL_DAYS if cached and cached.get('groups')
+                  else LIDARR_MB_NOTFOUND_TTL_DAYS)
+    if _lidarr_mb_cache_fresh(cached, cached_ttl):
+        return [item for item in (cached.get('groups') or []) if isinstance(item, dict)], ''
+
+    try:
+        response = _lidarr_mb_get('url', resource=resource, inc='release-rels+release-group-rels')
+    except LidarrMusicBrainzUnavailable:
+        # Do not cache transient API errors as a negative relationship lookup.
+        raise
+    except urllib.error.HTTPError as exc:
+        print(f'[warn] MusicBrainz URL lookup rifiutato per Spotify album {album_id} '
+              f'(HTTP {exc.code}); continuo con ricerca titolo/artista.', file=sys.stderr)
+        return [], ''
+
+    url_entities = []
+    if isinstance(response, dict):
+        if isinstance(response.get('url'), dict):
+            url_entities.append(response['url'])
+        if isinstance(response.get('url-list'), list):
+            url_entities.extend(item for item in response['url-list'] if isinstance(item, dict))
+        if isinstance(response.get('urls'), list):
+            url_entities.extend(item for item in response['urls'] if isinstance(item, dict))
+        if not url_entities and isinstance(response.get('relations'), list):
+            url_entities.append(response)
+    elif isinstance(response, list):
+        url_entities.extend(item for item in response if isinstance(item, dict))
+
+    group_ids = set()
+    release_ids = set()
+    for url_entity in url_entities:
+        for relation in url_entity.get('relations') or []:
+            if not isinstance(relation, dict):
+                continue
+            release_group = relation.get('release-group') or relation.get('release_group')
+            release = relation.get('release')
+            if isinstance(release_group, dict) and release_group.get('id'):
+                group_ids.add(str(release_group['id']))
+            if isinstance(release, dict) and release.get('id'):
+                nested_group = release.get('release-group') or release.get('release_group')
+                if isinstance(nested_group, dict) and nested_group.get('id'):
+                    group_ids.add(str(nested_group['id']))
+                else:
+                    release_ids.add(str(release['id']))
+
+    # A Spotify link is commonly attached to a concrete release. Follow it to its group;
+    # then fetch the group credit in one canonical lookup if the relationship was sparse.
+    for release_id in sorted(release_ids):
+        try:
+            release_data = _lidarr_mb_get(f'release/{release_id}',
+                                           inc='release-groups+artist-credits') or {}
+        except LidarrMusicBrainzUnavailable:
+            raise
+        except urllib.error.HTTPError:
+            continue
+        group = (release_data.get('release-group') or release_data.get('release_group')
+                 if isinstance(release_data, dict) else None)
+        if isinstance(group, dict) and group.get('id'):
+            group_ids.add(str(group['id']))
+
+    groups = []
+    for group_id in sorted(group_ids):
+        try:
+            group_data = _lidarr_mb_get(f'release-group/{group_id}', inc='artist-credits') or {}
+        except LidarrMusicBrainzUnavailable:
+            raise
+        except urllib.error.HTTPError:
+            continue
+        if isinstance(group_data, dict) and group_data.get('id'):
+            groups.append(group_data)
+
+    bucket[album_id] = {
+        'groups': groups,
+        'status': 'ok' if groups else 'not_found',
+        'checked_at': datetime.now(timezone.utc).isoformat(),
+    }
+    return groups, ''
+
+
+def _lidarr_resolve_spotify_album_link(entry, cache, alias_map=None, alias_groups=None):
+    """Resolve Spotify artist/album URLs to a validated MusicBrainz release-group.
+
+    Spotify Album Artist URIs are the cheaper first route: resolve each artist once,
+    cache the MBID, and reuse that artist's release-group catalogue for all its albums.
+    The exact Spotify album URL is queried only when the artist catalogue has no exact
+    title/credit match. Every accepted result still requires the local album title and
+    a matching MusicBrainz artist credit.
+    """
+    album_title = str((entry or {}).get('album') or '').strip()
+    if not album_title:
+        return None, ''
+
+    source_credits = list(((entry or {}).get('album_artist_sources') or {}).values())
+    if not source_credits:
+        source_credits = [{'name': name, 'uris': ''}
+                          for name in ((entry or {}).get('album_artists') or [])]
+    if not source_credits and (entry or {}).get('artist'):
+        source_credits = [{'name': entry.get('artist'), 'uris': ''}]
+    source_names = [str(item.get('name') or '').strip() for item in source_credits
+                    if isinstance(item, dict) and str(item.get('name') or '').strip()]
+    if any(_lidarr_norm(name) in {'various artists', 'various artist', 'artisti vari'}
+           for name in source_names):
+        return None, 'compilation/Various Artists: non si aggiunge come artista singolo'
+
+    source_artist_ids = []
+    try:
+        source_artist_ids = _lidarr_mb_spotify_artist_ids(source_credits, cache)
+    except LidarrMusicBrainzUnavailable:
+        # The normal name-search fallback may still succeed after a transient URL failure.
+        source_artist_ids = []
+
+    def validated_groups(groups):
+        accepted = []
+        various = False
+        for group in groups or []:
+            if not isinstance(group, dict) or not _lidarr_album_titles_match(
+                    album_title, group.get('title')):
+                continue
+            credits = _lidarr_group_artist_credits(group)
+            if any(_lidarr_norm(credit.get('name') or credit.get('credited_name'))
+                   in {'various artists', 'various artist', 'artisti vari'} for credit in credits):
+                various = True
+                continue
+            matched = [credit for credit in credits if (
+                str(credit.get('id') or '').casefold() in
+                    {value.casefold() for value in source_artist_ids}
+                or any(_lidarr_artist_equivalent(
+                    source_name, credit.get('credited_name') or credit.get('name'),
+                    alias_map or {}, alias_groups or []) for source_name in source_names)
+            )]
+            if matched:
+                candidate = dict(group)
+                candidate['_e2m_matched_credits'] = matched
+                accepted.append(candidate)
+        return accepted, various
+
+    # First: resolve the album-artist Spotify URI(s) once, then use the artist's MB
+    # discography. This avoids repeated per-album URL requests for prolific artists.
+    artist_catalog_groups = []
+    for artist_id in source_artist_ids:
+        source_name = next((str(item.get('name') or '').strip() for item in source_credits
+                            if isinstance(item, dict) and item.get('name')), '')
+        try:
+            catalog, catalog_reason = _lidarr_mb_artist_catalog(
+                {'id': artist_id, 'name': source_name or artist_id}, cache)
+        except LidarrMusicBrainzUnavailable as exc:
+            return None, f'MusicBrainz catalogo da Spotify artist URI temporaneamente non disponibile ({exc})'
+        if catalog_reason:
+            continue
+        for group in catalog or []:
+            credits = _lidarr_group_artist_credits(group)
+            if (str(group.get('id') or '').strip() and
+                    _lidarr_album_titles_match(album_title, group.get('title')) and
+                    any(str(credit.get('id') or '').casefold() == artist_id.casefold()
+                        for credit in credits)):
+                artist_catalog_groups.append(group)
+        has_verified_catalog_match = any(
+            _lidarr_album_titles_match(album_title, group.get('title')) and
+            any(str(credit.get('id') or '').casefold() == artist_id.casefold()
+                for credit in _lidarr_group_artist_credits(group))
+            for group in catalog or [] if isinstance(group, dict))
+        if not has_verified_catalog_match:
+            # Bypass a stale/truncated browse or a same-title homonym in the cached
+            # discography when Spotify supplied an exact artist MBID. The targeted query's
+            # local title and credit checks remain strict.
+            targeted = _lidarr_mb_search_release_groups([artist_id], album_title, cache)
+            for group in targeted:
+                if str(group.get('id') or '').strip() and not any(
+                        str(old.get('id') or '').casefold() == str(group.get('id') or '').casefold()
+                        for old in artist_catalog_groups):
+                    artist_catalog_groups.append(group)
+
+    validated, various_artist_group = validated_groups(artist_catalog_groups)
+
+    # Second: exact Spotify album URL relationship. It is an alternate path for releases
+    # with no Spotify artist relationship or when the artist browse did not expose the group.
+    if not validated and _lidarr_spotify_album_url((entry or {}).get('album_uri')):
+        try:
+            album_groups, _reason = _lidarr_mb_spotify_album_groups(entry, cache)
+        except LidarrMusicBrainzUnavailable as exc:
+            return None, f'MusicBrainz Spotify album URL lookup temporaneamente non disponibile ({exc})'
+        album_validated, album_various = validated_groups(album_groups)
+        validated.extend(album_validated)
+        various_artist_group = various_artist_group or album_various
+
+    if not validated:
+        if various_artist_group:
+            return None, 'Spotify URL/catalogo collegato a release-group Various Artists; Lidarr non lo aggiunge per design'
+        return None, ''
+
+    # Deduplicate the same release-group found by both Spotify artist and album URLs.
+    unique = {}
+    for group in validated:
+        unique.setdefault(str(group.get('id') or '').casefold(), group)
+    chosen, selection = _lidarr_choose_release(
+        list(unique.values()), str((entry or {}).get('release_date') or ''),
+        date_getter=lambda item: item.get('first-release-date') or '')
+    if not chosen:
+        return None, ''
+    matched_credits = chosen.get('_e2m_matched_credits') or []
+    primary = next((credit for credit in matched_credits
+                    if credit.get('id') and (credit.get('name') or credit.get('credited_name'))), None)
+    group_id = str(chosen.get('id') or '').strip()
+    if not primary or not group_id:
+        return None, ''
+    artist_id = str(primary.get('id') or '').strip()
+    artist_name = str(primary.get('name') or primary.get('credited_name') or '').strip()
+    if not artist_id or not artist_name:
+        return None, ''
+    print(f'[i] Spotify URI risolta direttamente su MusicBrainz: '
+          f'{(entry or {}).get("artist") or artist_name} - {album_title} -> '
+          f'{artist_name} / {chosen.get("title") or album_title} ({selection})')
+    return {
+        'artist': {'artistName': artist_name, 'foreignArtistId': artist_id},
+        'foreignAlbumId': group_id,
+        'title': str(chosen.get('title') or album_title),
+        'first_release_date': str(chosen.get('first-release-date') or ''),
+        'spotify_release_date': str((entry or {}).get('release_date') or ''),
+        'spotify_url_match': True,
+    }, None
 
 
 def _lidarr_mb_search_release_groups_by_credit(entry, cache, alias_map=None, alias_groups=None,
@@ -20984,6 +24093,15 @@ def _lidarr_sync_album_candidates(entry, alias_map, alias_groups, mb_cache):
     if any(_lidarr_norm(x.get('name')) in {'various artists', 'various artist', 'artisti vari'}
            for x in source_credits):
         return None, 'compilation/Various Artists: non si aggiunge come artista singolo'
+
+    # Prefer the exact Spotify album relationship when MusicBrainz has one. This bypasses
+    # false negatives from artist spelling variants and stale artist-discography caches.
+    spotify_candidate, spotify_reason = _lidarr_resolve_spotify_album_link(
+        entry, mb_cache, alias_map, alias_groups)
+    if spotify_candidate:
+        return spotify_candidate, None
+    if spotify_reason and 'Various Artists' in spotify_reason:
+        return None, spotify_reason
 
     resolved_artists = []
     unresolved = []
@@ -21432,6 +24550,62 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
               file=sys.stderr)
         return False
 
+    # Mostra i filtri effettivi: il Metadata Profile può nascondere Single/EP/Live/
+    # Compilation anche quando il resolver ha trovato il release-group su MusicBrainz.
+    try:
+        if 'metadata_profiles' not in locals() or not isinstance(metadata_profiles, list):
+            metadata_profiles = _lidarr_request('GET', '/api/v1/metadataprofile',
+                                                url=url, api_key=api_key)
+        selected_profile = next((profile for profile in (metadata_profiles or [])
+                                 if int(profile.get('id') or 0) == metadata_id), None)
+    except Exception as exc:
+        selected_profile = None
+        print(f'[warn] Metadata Profile Lidarr ID {metadata_id} non verificabile: {exc}',
+              file=sys.stderr)
+    if isinstance(selected_profile, dict):
+        print(f'[i] Metadata Profile effettivo: {selected_profile.get("name") or metadata_id} '
+              f'(ID {metadata_id})')
+
+        def _allowed_profile_values(field, value_field):
+            values = selected_profile.get(field)
+            if not isinstance(values, list):
+                return None
+            enabled = []
+            for item in values:
+                if isinstance(item, dict):
+                    allowed = item.get('allowed')
+                    value = item.get(value_field)
+                    if isinstance(value, dict):
+                        value = value.get('value') or value.get('name') or value.get('label')
+                    if allowed is True and value:
+                        enabled.append(str(value))
+                elif isinstance(item, str):
+                    enabled.append(item)
+            return enabled
+
+        primary_enabled = _allowed_profile_values('primaryAlbumTypes', 'albumType')
+        secondary_enabled = _allowed_profile_values('secondaryAlbumTypes', 'albumType')
+        statuses_enabled = _allowed_profile_values('releaseStatuses', 'releaseStatus')
+        if primary_enabled is not None:
+            print('[i] tipi primari abilitati: ' + (', '.join(primary_enabled) or '(nessuno)'))
+            primary_folded = {value.casefold() for value in primary_enabled}
+            if primary_folded and primary_folded <= {'album', 'studio album'}:
+                print('[warn] il Metadata Profile consente solo album standard: Single, EP, Broadcast '
+                      'e Other possono restare invisibili/non monitorabili in Lidarr.', file=sys.stderr)
+        if secondary_enabled is not None:
+            print('[i] tipi secondari abilitati: ' + (', '.join(secondary_enabled) or '(nessuno)'))
+            secondary_folded = {value.casefold() for value in secondary_enabled}
+            if secondary_folded and secondary_folded <= {'studio'}:
+                print('[warn] il Metadata Profile esclude i secondari non-Studio: per includere '
+                      'Compilation, Live, Remix, Soundtrack o Mixtape abilitali nel profilo.',
+                      file=sys.stderr)
+        if statuses_enabled is not None:
+            print('[i] release status abilitati: ' + (', '.join(statuses_enabled) or '(nessuno)'))
+            status_folded = {value.casefold() for value in statuses_enabled}
+            if status_folded and status_folded <= {'official'}:
+                print('[i] filtro Metadata Profile: sono abilitate soltanto release Official; '
+                      'Promotion/Bootleg o pseudo-release possono restare esclusi.')
+
     # Il catalogo locale di Lidarr viene letto direttamente dal database host-side.
     # Le GET globali /artist e /album sono intenzionalmente evitate: la prima calcola
     # statistiche globali anche con filtro MBID, la seconda materializza tutti gli album
@@ -21488,7 +24662,8 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
     # Le tracce mancanti e gli album salvati sono sorgenti distinte: le seconde non
     # vengono trasformate in finte tracce, ma entrano nello stesso resolver album.
     album_entries = {}
-    for key in (missing_rows or {}):
+    playlist_track_keys = set(LIDARR_PLAYLIST_ALBUMS) | set(LIDARR_ALBUM_MISMATCHES) |                           set(missing_rows or {})
+    for key in sorted(playlist_track_keys, key=lambda item: tuple(str(x or '').casefold() for x in item)):
         try:
             track_artist, album_name, track_title = key
         except (TypeError, ValueError):
@@ -21502,12 +24677,27 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
         metadata_items = (list(metadata_bucket.values()) if metadata_bucket else
                           [{'album_artist': track_artist, 'album_uri': '',
                             'release_date': '', 'album_artist_uri': ''}])
+        is_missing = key in (missing_rows or {})
+        is_playlist_album = key in LIDARR_PLAYLIST_ALBUMS
+        is_mismatch = key in LIDARR_ALBUM_MISMATCHES
         for meta in metadata_items:
-            _lidarr_add_spotify_album_entry(
-                album_entries, album_name, meta.get('album_artist') or track_artist,
-                album_uri=meta.get('album_uri'), release_date=meta.get('release_date'),
-                album_artist_uri=meta.get('album_artist_uri'), track_title=track_title,
-                track_artist=track_artist, source='playlist missing tracks')
+            common = {
+                'album_uri': meta.get('album_uri'),
+                'release_date': meta.get('release_date'),
+                'album_artist_uri': meta.get('album_artist_uri'),
+            }
+            if is_playlist_album:
+                _lidarr_add_spotify_album_entry(
+                    album_entries, album_name, meta.get('album_artist') or track_artist,
+                    track_artist=track_artist, source='playlist albums', **common)
+            if is_missing:
+                _lidarr_add_spotify_album_entry(
+                    album_entries, album_name, meta.get('album_artist') or track_artist,
+                    track_title=track_title, source='playlist missing tracks', **common)
+            if is_mismatch:
+                _lidarr_add_spotify_album_entry(
+                    album_entries, album_name, meta.get('album_artist') or track_artist,
+                    source='playlist album mismatch', **common)
 
     for saved in (saved_albums or []):
         if isinstance(saved, dict):
@@ -21519,27 +24709,34 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
     if not album_entries:
         print('[i] Lidarr sync: nessun album nelle playlist mancanti o in saved_albums.csv.')
         return {'albums': 0, 'artists_added': 0, 'monitored': 0, 'skipped': 0, 'errors': 0,
-                'album_sources': 0, 'saved_album_sources': 0, 'playlist_missing_album_sources': 0,
+                'album_sources': 0, 'saved_album_sources': 0, 'playlist_album_sources': 0,
+                'playlist_missing_album_sources': 0, 'playlist_mismatch_album_sources': 0,
                 'mbid_resolved': 0, 'spotify_resolved_entries': 0,
-                'unresolved_albums': [], 'duplicate_mbid_albums': [],
+                'unresolved_albums': [], 'deferred_albums': [], 'duplicate_mbid_albums': [],
                 'lidarr_action_failures': [], 'pending_catalog_albums': []}
 
     search_new = os.environ.get('LIDARR_SYNC_SEARCH', 'true').strip().casefold() not in {
         '0', 'false', 'no', 'off', 'disabled'}
     planned = []
     unresolved_albums = []
+    deferred_albums = []
     duplicate_mbid_albums = []
     skipped = 0
     mb_cache = _lidarr_mb_cache_load()
     _LIDARR_MB_STATE.update({'consecutive_failures': 0, 'disabled': False, 'last_error': ''})
     _LIDARR_METADATA_ADD_STATE.update({'blocked': False, 'reason': ''})
-    _LIDARR_MB_LAST[0] = 0.0
+    # _LIDARR_MB_LAST aliases the shared monotonic timer. Never reset it here:
+    # this phase may immediately follow another MusicBrainz consumer in the same run.
     entries_sorted = sorted(album_entries.values(),
                             key=lambda x: (x['artist'].casefold(), x['album'].casefold(), x['release_date']))
     mb_progress = _ProgressBar('Lidarr MusicBrainz album ID', len(entries_sorted), 'album', subphase=True)
     for index, entry in enumerate(entries_sorted, 1):
         mb_progress.update(index)
-        candidate, reason = _lidarr_sync_album_candidates(entry, alias_map, alias_groups, mb_cache)
+        try:
+            candidate, reason = _lidarr_sync_album_candidates(entry, alias_map, alias_groups, mb_cache)
+        except LidarrMusicBrainzUnavailable as exc:
+            candidate, reason = None, f'MusicBrainz temporaneamente non disponibile ({exc})'
+            _LIDARR_MB_STATE.update({'disabled': True, 'last_error': str(exc)[:240]})
         if not candidate and not _LIDARR_MB_STATE.get('disabled'):
             try:
                 credit_candidate = _lidarr_mb_search_release_groups_by_credit(
@@ -21564,7 +24761,7 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
                 reason = f"{reason}; fallback catalogo Lidarr: {local_reason}"
         if not candidate:
             skipped += 1
-            unresolved_albums.append({
+            record = {
                 'artist': str(entry.get('artist') or ''),
                 'album': str(entry.get('album') or ''),
                 'release_date': str(entry.get('release_date') or ''),
@@ -21573,26 +24770,16 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
                 'missing_tracks': len(entry.get('missing_tracks') or []),
                 'source_types': sorted(entry.get('source_types') or []),
                 'reason': str(reason or 'nessun candidato compatibile'),
-            })
-            print(f"[SKIP] {entry['artist']} - {entry['album']}: {reason}")
-            if _LIDARR_MB_STATE['disabled']:
-                remaining = len(entries_sorted) - index
-                if remaining:
-                    skipped += remaining
-                    for pending_entry in entries_sorted[index:]:
-                        unresolved_albums.append({
-                            'artist': str(pending_entry.get('artist') or ''),
-                            'album': str(pending_entry.get('album') or ''),
-                            'release_date': str(pending_entry.get('release_date') or ''),
-                            'album_uri': str(pending_entry.get('album_uri') or ''),
-                            'album_artists': list(pending_entry.get('album_artists') or []),
-                            'missing_tracks': len(pending_entry.get('missing_tracks') or []),
-                            'source_types': sorted(pending_entry.get('source_types') or []),
-                            'reason': 'non interrogato: circuito MusicBrainz aperto dopo errori ripetuti',
-                        })
-                    print(f'[warn] {remaining} album non interrogati: circuito MusicBrainz aperto; '
-                          'saranno riprovati alla prossima run.', file=sys.stderr)
-                break
+            }
+            if _LIDARR_MB_STATE.get('disabled'):
+                record['reason'] = (str(record['reason']) +
+                                    "; rinviato: MusicBrainz non disponibile, catalogo SQLite locale gia verificato")
+                deferred_albums.append(record)
+                print(f"[DEFER] {entry['artist']} - {entry['album']}: MusicBrainz non disponibile; "
+                      'nessun risultato locale esatto, verra riprovato alla prossima run.')
+            else:
+                unresolved_albums.append(record)
+                print(f"[SKIP] {entry['artist']} - {entry['album']}: {reason}")
             continue
         artist_resource = candidate.get('artist') or {}
         artist_name_resolved = str(artist_resource.get('artistName') or '').strip()
@@ -22254,13 +25441,19 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
     artists_processed = len(artists_by_key)
     saved_album_entries = sum('Spotify saved albums' in (x.get('source_types') or set())
                               for x in album_entries.values())
-    playlist_album_entries = sum('playlist missing tracks' in (x.get('source_types') or set())
+    playlist_album_entries = sum('playlist albums' in (x.get('source_types') or set())
                                  for x in album_entries.values())
+    playlist_missing_album_entries = sum('playlist missing tracks' in (x.get('source_types') or set())
+                                         for x in album_entries.values())
+    playlist_mismatch_album_entries = sum('playlist album mismatch' in (x.get('source_types') or set())
+                                          for x in album_entries.values())
     print(f'Lidarr sync: album Spotify distinti={len(album_entries)} '
-          f'(playlist-missing={playlist_album_entries}, saved-albums={saved_album_entries}) | '
+          f'(playlist={playlist_album_entries}, playlist-missing={playlist_missing_album_entries}, '
+          f'album-diverso-locale={playlist_mismatch_album_entries}, saved-albums={saved_album_entries}) | '
           f'release MBID/Lidarr risolte={len(planned)} | '
           f'voci Spotify risolte prima dedup={spotify_resolved_entries} | '
-          f'album senza match={len(unresolved_albums)} | voci Spotify su MBID gia risolto={len(duplicate_mbid_albums)} | '
+          f'album senza match={len(unresolved_albums)} | rinviati per MusicBrainz={len(deferred_albums)} | '
+          f'voci Spotify su MBID gia risolto={len(duplicate_mbid_albums)} | '
           f'artisti aggiunti={added_artists} | artisti aggiornati={updated_artists} | '
           f'album aggiunti={added_albums} | album gia presenti (POST saltato)={already_present_albums} | '
           f'album riusati per titolo esatto/MBID alternativo={same_title_album_matches} | '
@@ -22278,11 +25471,14 @@ def run_lidarr_sync(missing_rows, apply=False, url=None, api_key=None, music_roo
             'preserved_monitored': preserved_monitored,
             'searches_queued': searches_queued, 'album_sources': len(album_entries),
             'saved_album_sources': saved_album_entries,
-            'playlist_missing_album_sources': playlist_album_entries,
+            'playlist_album_sources': playlist_album_entries,
+            'playlist_missing_album_sources': playlist_missing_album_entries,
+            'playlist_mismatch_album_sources': playlist_mismatch_album_entries,
             'albums_already_present': already_present_albums,
             'album_lookups_deferred': lookup_deferred_albums,
             'mbid_resolved': len(planned), 'spotify_resolved_entries': spotify_resolved_entries,
             'unresolved_albums': unresolved_albums,
+            'deferred_albums': deferred_albums,
             'duplicate_mbid_albums': duplicate_mbid_albums,
             'lidarr_action_failures': lidarr_action_failures,
             'pending_catalog_albums': pending_catalog_albums,
@@ -22348,17 +25544,46 @@ def _lidarr_artist_for_local_album(album_title, albumartist_values, track_artist
         return None, 'nessun artista Lidarr associato al titolo'
 
     def preferred_lidarr_display(rows):
+        # Aggregate catalogue evidence across punctuation-only duplicate records.
+        # Explicit punctuation is meaningful (Fred again..); prefer it over a duplicate
+        # display from which another process has stripped punctuation.
         stats = {}
         for row in rows:
-            name = str(row.get('_artist_name') or '').strip()
-            if not name:
+            raw_name = str(row.get('_artist_name') or '').strip()
+            if not raw_name:
                 continue
-            state = stats.setdefault(name, [0, 0])
-            state[0] = max(state[0], int(row.get('_artist_catalog_size') or 0))
-            state[1] += 1
+            name = _lidarr_artist_display_cleanup(raw_name) or raw_name
+            key = _lidarr_artist_identity_key(name)
+            if not key:
+                continue
+            state = stats.setdefault(key, {
+                'display': name, 'catalog_size': 0, 'rows': 0,
+                'clean': int(raw_name == name), 'raw_length': len(raw_name),
+                'terminal_dots': _lidarr_artist_terminal_dots(name),
+                'punctuation': _lidarr_artist_display_punctuation(name),
+            })
+            state['catalog_size'] = max(
+                state['catalog_size'], int(row.get('_artist_catalog_size') or 0))
+            state['rows'] += 1
+            candidate_quality = (_lidarr_artist_display_punctuation(name),
+                                 _lidarr_artist_terminal_dots(name), int(raw_name == name),
+                                 -len(raw_name), name.casefold(), name)
+            current_quality = (state['punctuation'], state['terminal_dots'], state['clean'],
+                               -state['raw_length'], state['display'].casefold(), state['display'])
+            if candidate_quality > current_quality:
+                state['display'] = name
+                state['clean'] = int(raw_name == name)
+                state['raw_length'] = len(raw_name)
+                state['terminal_dots'] = _lidarr_artist_terminal_dots(name)
+                state['punctuation'] = _lidarr_artist_display_punctuation(name)
         if not stats:
             return None
-        return max(stats, key=lambda name: (stats[name][0], stats[name][1], name.casefold()))
+        # Choose spelling before record-count heuristics: a larger duplicate catalogue
+        # with stripped punctuation must not overwrite the official display.
+        chosen = max(stats.values(), key=lambda item: (
+            item['punctuation'], item['terminal_dots'], item['catalog_size'], item['rows'],
+            item['clean'], -item['raw_length'], item['display'].casefold(), item['display']))
+        return chosen['display']
 
     if len(by_name) == 1:
         rows = next(iter(by_name.values()))
@@ -22625,8 +25850,12 @@ def run_lidarr_artist_tag_repair(apply=False, base=None, url=None, api_key=None)
         _LIDARR_TAG_REPAIR_CATALOG = catalog
 
     artist_names = catalog.get('artists') or {}
-    trusted_artist_names = sorted({str(name).strip() for name in artist_names.values()
-                                   if str(name or '').strip()}, key=str.casefold)
+    # Collapse display-only punctuation variants before the trusted-name pass.
+    trusted_artist_names = sorted({
+        _lidarr_artist_display_cleanup(name)
+        for name in artist_names.values() if str(name or '').strip()
+        and _lidarr_artist_display_cleanup(name)
+    }, key=str.casefold)
     records = []
     artist_album_counts = Counter()
     exact_index, title_index, mbid_index = {}, {}, {}
@@ -22757,6 +25986,9 @@ def run_lidarr_artist_tag_repair(apply=False, base=None, url=None, api_key=None)
         if authoritative_album_artist:
             chosen_artist = authoritative_album_artist
             match_reason += '+MusicBrainz solo release-group'
+        # MusicBrainz can carry the same stray terminal punctuation as a duplicate
+        # Lidarr display; converge every tag source to one canonical spelling.
+        chosen_artist = _lidarr_artist_display_cleanup(chosen_artist) or chosen_artist
         matched += 1
         album_artist_sources = [value for value in albumartist_values if str(value or '').strip()]
         if folder_artist:
@@ -22859,10 +26091,8 @@ def _run_lidarr_artist_tag_phases(args, apply_lidarr):
         # Make exact Lidarr display names atomic for this bilingual pass only; CJK
         # translation and NAME_FIXES still run after the Lidarr spelling is established.
         previous_trusted_names = _LIDARR_TRUSTED_ARTIST_NAMES
-        _LIDARR_TRUSTED_ARTIST_NAMES = {
-            _lidarr_trusted_artist_key(name): str(name).strip()
-            for name in (tag_result.get('trusted_artist_names') or []) if str(name or '').strip()
-        }
+        _LIDARR_TRUSTED_ARTIST_NAMES = _lidarr_trusted_artist_map(
+            tag_result.get('trusted_artist_names') or [])
         _phase_plan_reserve(1, 'Lidarr bilingual artist-tag repair')
         try:
             bilingual_result = run_phase('lidarr_artist_bilingual_tags', run_unify_artists,
@@ -22904,11 +26134,12 @@ def write_lidarr_unresolved_albums_report(result, append_existing=False):
     unique_mbids = max(0, int(data.get('mbid_resolved') or 0))
     resolved_entries = max(0, int(data.get('spotify_resolved_entries') or unique_mbids))
     unresolved = [x for x in (data.get('unresolved_albums') or []) if isinstance(x, dict)]
+    deferred = [x for x in (data.get('deferred_albums') or []) if isinstance(x, dict)]
     shared_mbid = [x for x in (data.get('duplicate_mbid_albums') or []) if isinstance(x, dict)]
     action_failures = [x for x in (data.get('lidarr_action_failures') or []) if isinstance(x, dict)]
     pending_catalog = [x for x in (data.get('pending_catalog_albums') or []) if isinstance(x, dict)]
     numeric_gap = max(0, sources - unique_mbids)
-    listed_gap = len(unresolved) + len(shared_mbid)
+    listed_gap = len(unresolved) + len(shared_mbid) + len(deferred)
 
     def _clean(value, fallback='n/d'):
         value = str(value or fallback).replace('\r', ' ').replace('\n', ' ').strip()
@@ -22926,9 +26157,12 @@ def write_lidarr_unresolved_albums_report(result, append_existing=False):
             f'differenza: {numeric_gap}',
             f'# voci Spotify risolte prima della deduplicazione: {resolved_entries} | '
             f'voci elencate nella differenza: {listed_gap} '
-            f'(senza match: {len(unresolved)}; MBID condiviso: {len(shared_mbid)})',
+            f'(senza match: {len(unresolved)}; MBID condiviso: {len(shared_mbid)}; '
+            f'rinviati MusicBrainz: {len(deferred)})',
             '# Le voci su MBID condiviso non richiedono una seconda aggiunta: spiegano la differenza '
             'tra il numero di album Spotify e gli MBID unici.',
+            '# Gli album rinviati per un errore temporaneo MusicBrainz non sono mancati definitivi: '
+            'sono separati e vanno ritentati alla prossima esecuzione.',
             '# Le sezioni successive su errori e catalogo pendente sono diagnostiche e possono riferirsi '
             'a voci gia elencate sopra: non sommarle alla differenza.',
         ])
@@ -22960,6 +26194,17 @@ def write_lidarr_unresolved_albums_report(result, append_existing=False):
                          f'fonte: {source_text} | motivo: {reason}{_uri(item.get("album_uri"))}')
     else:
         lines.append('(nessun album senza match)')
+
+    lines.extend(['', f'=== ALBUM RINVIATI: MUSICBRAINZ TEMPORANEAMENTE NON DISPONIBILE ({len(deferred)}) ===',
+                  "# Il catalogo SQLite Lidarr e' stato controllato; il resolver esterno era in cooldown."])
+    if deferred:
+        for item in sorted(deferred, key=lambda x: (
+                _clean(x.get('artist'), '').casefold(), _clean(x.get('album'), '').casefold())):
+            lines.append(f'{_clean(item.get("artist"), "(artista sconosciuto)")} - '
+                         f'{_clean(item.get("album"), "(album sconosciuto)")} | '
+                         f'motivo: {_clean(item.get("reason"))}{_uri(item.get("album_uri"))}')
+    else:
+        lines.append('(nessun album rinviato)')
 
     lines.extend(['', f'=== VOCI SPOTIFY GIA COPERTE DA MBID CONDIVISO ({len(shared_mbid)}) ===',
                   '# Sono voci Spotify distinte che puntano allo stesso release-group MBID di un altro album.'])
@@ -23010,12 +26255,15 @@ def write_lidarr_unresolved_albums_report(result, append_existing=False):
     lines.append(_LIDARR_UNRESOLVED_REPORT_END)
     section = '\n'.join(lines).rstrip() + '\n'
 
-    if append_existing:
-        try:
-            previous = out.read_text(encoding='utf-8', errors='replace') if out.exists() else ''
-        except OSError as exc:
-            print(f'[warn] report mancanti preesistente non leggibile: {exc}', file=sys.stderr)
-            previous = ''
+    try:
+        previous = out.read_text(encoding='utf-8', errors='replace') if out.exists() else ''
+    except OSError as exc:
+        print(f'[warn] report mancanti preesistente non leggibile: {exc}', file=sys.stderr)
+        previous = ''
+    # Anche una sync Lidarr standalone deve preservare le altre sezioni giornaliere,
+    # in particolare il report degli album salvati Spotify senza match Navidrome.
+    preserve_other_sections = bool(append_existing or _SAVED_ALBUM_UNMATCHED_START in previous)
+    if preserve_other_sections:
         if _LIDARR_UNRESOLVED_REPORT_START in previous and _LIDARR_UNRESOLVED_REPORT_END in previous:
             start = previous.find(_LIDARR_UNRESOLVED_REPORT_START)
             end = previous.find(_LIDARR_UNRESOLVED_REPORT_END, start)
@@ -23036,9 +26284,10 @@ def write_lidarr_unresolved_albums_report(result, append_existing=False):
         except OSError:
             pass
         raise
-    print(f'[i] report album Lidarr: {len(unresolved)} senza match + {len(shared_mbid)} MBID condivisi; '
-          f'{len(action_failures)} aggiunte/verifiche fallite o rinviate; differenza numerica={numeric_gap} -> {out}')
-    return {'path': str(out), 'unresolved': len(unresolved),
+    print(f'[i] report album Lidarr: {len(unresolved)} senza match + {len(shared_mbid)} MBID condivisi + '
+          f'{len(deferred)} rinviati MusicBrainz; {len(action_failures)} aggiunte/verifiche fallite; '
+          f'differenza numerica={numeric_gap} -> {out}')
+    return {'path': str(out), 'unresolved': len(unresolved), 'deferred': len(deferred),
             'shared_mbid_entries': len(shared_mbid), 'numeric_gap': numeric_gap,
             'action_failures': len(action_failures), 'pending_catalog': len(pending_catalog)}
 
@@ -23072,7 +26321,8 @@ def run_lidarr_folder_fix(apply=False, url=None, api_key=None, music_root=None, 
     for name in actual:
         by_norm.setdefault(_lidarr_norm(name), name)
     alias_map, groups = _lidarr_alias_data()
-    fixed = failed = ok = noop = 0
+    fixed = failed = ok = noop = missing_local = 0
+    missing_examples = []
     reserved = set()
     # Non assegnare una cartella gia' usata da un artista con un path valido.
     for artist in artists:
@@ -23088,32 +26338,47 @@ def run_lidarr_folder_fix(apply=False, url=None, api_key=None, music_root=None, 
         if path and os.path.isdir(_lidarr_path_to_host(path, host_root, container_root)):
             continue
         base = os.path.basename(path.rstrip('/'))
-        nb = _lidarr_norm(base)
         artist_name = str(artist.get('artistName') or artist.get('name') or artist.get('id'))
-        if not nb:
-            print(f'NO-MATCH: {artist_name} (path vuoto/non confrontabile: {path})')
-            failed += 1
-            continue
-        candidates = [nb]
-        if nb in alias_map:
-            candidates.append(alias_map[nb])
-        for group in groups:
-            if nb in group:
-                candidates.extend(sorted(group - {nb}))
+        seed_keys = [_lidarr_norm(x) for x in (base, artist_name) if _lidarr_norm(x)]
+        candidates = []
+        for seed in seed_keys:
+            candidates.append(seed)
+            if seed in alias_map:
+                candidates.append(alias_map[seed])
+            for group in groups:
+                if seed in group:
+                    candidates.extend(sorted(group - {seed}))
+        candidates = list(dict.fromkeys(candidates))
         hit = None
-        for cand in dict.fromkeys(candidates):
+        reserved_hit = None
+        for cand in candidates:
             candidate = by_norm.get(cand)
-            if candidate and _lidarr_norm(candidate) not in reserved:
-                hit = candidate
-                break
+            if not candidate:
+                continue
+            if _lidarr_norm(candidate) in reserved:
+                reserved_hit = candidate
+                continue
+            hit = candidate
+            break
         if not hit:
-            available = [k for k, v in by_norm.items() if k not in reserved]
-            close = difflib.get_close_matches(nb, available, n=1, cutoff=0.8)
-            if close:
-                hit = by_norm[close[0]]
+            available = [(key, name) for key, name in by_norm.items() if key not in reserved]
+            scored = []
+            for key, name in available:
+                score = max((difflib.SequenceMatcher(None, seed, key).ratio()
+                             for seed in seed_keys), default=0.0)
+                if score >= 0.94 and min(len(key), *(len(x) for x in seed_keys)) >= 4:
+                    scored.append((score, key, name))
+            scored.sort(reverse=True)
+            if scored and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.06):
+                hit = scored[0][2]
         if not hit:
-            print(f'NO-MATCH: {artist_name} (atteso: {base})')
-            failed += 1
+            if reserved_hit:
+                print(f'[warn] cartella candidata gia assegnata: {artist_name} -> {reserved_hit}')
+                failed += 1
+            else:
+                missing_local += 1
+                if len(missing_examples) < 12:
+                    missing_examples.append(f'{artist_name} (path Lidarr: {path or "n/d"})')
             continue
         hit_norm = _lidarr_norm(hit)
         if hit_norm in reserved:
@@ -23163,7 +26428,14 @@ def run_lidarr_folder_fix(apply=False, url=None, api_key=None, music_root=None, 
         print('\nCartelle su disco senza artista in Lidarr (da aggiungere a mano):')
         for name in orphans:
             print(f'  - {name}')
-    print(f'\nGia a posto: {ok} | correzioni {"applicate" if apply else "previste"}: {fixed} | senza corrispondenza/errori: {failed}')
+    print(f'\nGia a posto: {ok} | correzioni {"applicate" if apply else "previste"}: {fixed} | '
+          f'cartelle locali assenti (artisti comunque nel DB Lidarr): {missing_local} | '
+          f'errori/ambiguita reali: {failed}')
+    if missing_local:
+        print("[i] questi NO-MATCH non indicano artisti assenti da Lidarr: non e' stata trovata "
+              'una cartella artista direttamente sotto la root musicale. Esempi:')
+        for example in missing_examples:
+            print(f'  - {example}')
     if apply and fixed:
         if _lidarr_request('POST', '/api/v1/command/', {'name': 'RescanFolders'}, url=url, api_key=api_key) is not None:
             print('RescanFolders avviato.')
@@ -24205,19 +27477,23 @@ def _run(args):
             MISSING_ARTWORK_CONFIG.get('scan_after_download', True))
         artwork_changed = bool(
             isinstance(art_result, dict) and
-            (art_result.get('downloaded', 0) + art_result.get('extracted', 0) +
-             art_result.get('embedded', 0)) > 0)
+            (art_result.get('downloaded', 0) + art_result.get('artist_downloaded', 0) +
+             art_result.get('extracted', 0) + art_result.get('embedded', 0)) > 0)
         if artwork_scan_planned and artwork_changed:
             _phase_plan_reserve(1, 'scan Navidrome dopo modifiche artwork')
-            run_phase('navidrome_scan_after_artwork', run_navidrome_scan,
-                      full_scan=False, prune_refs=False)
+            if (art_result.get('downloaded', 0) + art_result.get('artist_downloaded', 0) +
+                    art_result.get('extracted', 0)) > 0:
+                run_phase('navidrome_scan_after_artwork', run_navidrome_scan_after_artwork)
+            else:
+                run_phase('navidrome_scan_after_artwork', run_navidrome_scan,
+                          full_scan=False, prune_refs=False)
     _rebase_phase_progress_total(_remaining_proxy_phase_budget(args), 'artwork/scan finale')
     # I proxy Spotify fanno parte di --all: prima aggiorniamo l'elenco automatico degli album
     # non presenti nel mercato configurato, poi convertiamo manual + auto_albums. Senza --apply
     # entrambe le fasi sono preview; un errore Spotify non blocca la manutenzione principale.
     if args.all and SPOTIFY_LOCAL_PROXY_CONFIG.get('enabled', True):
         apply_proxy = args.apply and not args.dry_run
-        if os.environ.get('SPOTIFY_CLIENT_ID') and os.environ.get('SPOTIFY_CLIENT_SECRET'):
+        if SPOTIFY_LOCAL_PROXY_CONFIG.get('auto_sync', True):
             proxy_sync = run_phase(
                 'sync_spotify_proxy_config', run_sync_spotify_proxy_config,
                 dry_run=not apply_proxy, apply=apply_proxy,
@@ -24227,9 +27503,8 @@ def _run(args):
                 print('[warn] scansione catalogo Spotify incompleta; auto_albums esistenti conservati. '
                       'I proxy manuali vengono comunque elaborati.', file=sys.stderr, flush=True)
         else:
-            print('[i] sync_spotify_proxy_config saltata: SPOTIFY_CLIENT_ID/SECRET mancanti; '
-                  'auto_albums esistenti preservati. La build dei proxy manuali continua.',
-                  file=sys.stderr, flush=True)
+            print('[i] SPOTIFY_LOCAL_PROXY.auto_sync=false: aggiornamento automatico auto_albums saltato.',
+                  flush=True)
         proxy_build = run_phase(
             'build_spotify_local_proxies', run_build_spotify_proxies,
             dry_run=not apply_proxy, library_root=args.library_root)
