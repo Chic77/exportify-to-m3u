@@ -1,21 +1,35 @@
 # Exportify to M3U
 
-`exportify_to_m3u.py` importa gli export CSV di Spotify/Exportify, genera playlist M3U per Navidrome e svolge manutenzione della libreria musicale. Gestisce anche metadati bilingui, copertine, diagnosi dei brani mancanti e sincronizzazione degli album con Lidarr.
+`exportify_to_m3u.py` converte gli export Spotify/Exportify in playlist M3U per Navidrome e fornisce comandi per manutenzione dei tag, artwork, diagnosi, Lidarr e proxy Spotify.
 
-**Versione documentata: v0.151.** Per tutte le opzioni aggiornate e per lo storico completo delle modifiche, lo script resta la fonte autorevole:
+**Versione corrente: v0.153.** Il README descrive installazione, struttura, configurazione e procedure operative. Le opzioni complete sono generate dallo script:
 
 ```bash
 python3 exportify_to_m3u.py --help
 python3 exportify_to_m3u.py --version
 python3 exportify_to_m3u.py --changelog
+python3 exportify_to_m3u.py --init-env
 ```
 
 ## 1. Avvio rapido
 
-Esegui i comandi dalla directory che contiene `exportify_to_m3u.py`, `env` (o `.env`) ed `exportify_names.json`:
+Esegui i comandi dalla directory che contiene `exportify_to_m3u.py`, `env.example` ed `exportify_names.json`:
 
 ```bash
+sudo apt install python3-venv ffmpeg flac
 cd ~/homelab/scripts
+python3 -m venv .venv
+.venv/bin/pip install pykakasi hangul-romanize numpy mutagen
+python3 exportify_to_m3u.py --init-env
+nano env
+chmod 600 env
+```
+
+`--init-env` copia `env.example` in `env` e assegna permessi privati `0600`. Modifica almeno `ND_USER`, `ND_PASS` e i percorsi host. Se `env` o `.env` esiste già, il comando non lo sovrascrive. In alternativa puoi copiare manualmente `cp env.example env`.
+
+Dopo aver configurato percorsi e credenziali, prova la pipeline:
+
+```bash
 python3 exportify_to_m3u.py --all --dry-run
 ```
 
@@ -139,23 +153,23 @@ Gli album irrisolti da Lidarr e quelli deduplicati su uno stesso MBID vengono sa
 La fase artwork distingue due compiti:
 
 1. Recuperare una copertina quando manca oppure quando quella locale è più piccola della soglia (32 KiB predefiniti). Prima controlla le immagini già incorporate nelle tracce; se non trova una cover valida consulta i cataloghi online.
-2. Verificare le copertine locali già sane. La verifica confronta l'immagine locale con il front approvato della release esatta nel Cover Art Archive e con immagini da cataloghi indipendenti. Una sostituzione di una cover locale già sana richiede una release MusicBrainz esatta e accordo visivo tra almeno due fonti artwork indipendenti; un risultato ambiguo viene segnalato per revisione, non sovrascritto. Per una cover mancante, da v0.144 Apple/iTunes, Deezer, TheAudioDB e Wikimedia Commons possono proporre immagini: viene accettata una cover soltanto se almeno due cataloghi restituiscono immagini con hash percettivo entro la soglia configurata. I risultati Google Images restano suggerimenti di revisione, non una seconda fonte catalogo.
+2. Verificare le copertine locali già sane. La verifica confronta l'immagine locale con il front approvato della release esatta nel Cover Art Archive e con immagini da cataloghi indipendenti. Una sostituzione di una cover locale già sana richiede una release MusicBrainz esatta e accordo visivo tra almeno due fonti artwork indipendenti; un risultato ambiguo viene segnalato per revisione, non sovrascritto. Per una cover mancante, Apple/iTunes, Deezer, TheAudioDB e Wikimedia Commons possono proporre immagini: viene accettata una cover soltanto se almeno due cataloghi restituiscono immagini con hash percettivo entro la soglia configurata. I risultati Google Images restano suggerimenti di revisione, non una seconda fonte catalogo.
 
-**Da v0.126 la verifica delle copertine sane non è limitata a 50 album:** `MISSING_ARTWORK_MAX_VERIFICATIONS_PER_RUN=0` (predefinito) significa tutti gli album candidati nella run. Le verifiche già valide nella cache vengono saltate finché il fingerprint della cover e la finestra di cache non scadono. Un valore positivo imposta un tetto per run. Questo limite è distinto da `MISSING_ARTWORK_MAX_PER_RUN`, che limita soltanto le ricerche/download di nuove copertine (250 predefinito; `0` = senza limite).
+**La verifica delle copertine sane non è limitata a 50 album:** `MISSING_ARTWORK_MAX_VERIFICATIONS_PER_RUN=0` (predefinito) significa tutti gli album candidati nella run. Le verifiche già valide nella cache vengono saltate finché il fingerprint della cover e la finestra di cache non scadono. Un valore positivo imposta un tetto per run. Questo limite è distinto da `MISSING_ARTWORK_MAX_PER_RUN`, che limita soltanto le ricerche/download di nuove copertine (250 predefinito; `0` = senza limite).
 
-La fase può essere disattivata con `MISSING_ARTWORK_ENABLED=false` oppure saltata per una singola run con `--no-artwork-download`. La preview è inclusa in `--all --dry-run`. Da v0.128 le cover folder già sane vengono anche controllate per l'embedding: vengono aggiunte solo alle tracce che non hanno già una cover embedded sopra soglia.
+La fase può essere disattivata con `MISSING_ARTWORK_ENABLED=false` oppure saltata per una singola run con `--no-artwork-download`. La preview è inclusa in `--all --dry-run`. Le cover folder già sane vengono anche controllate per l'embedding: vengono aggiunte solo alle tracce che non hanno già una cover embedded sopra soglia.
 
 Le fonti online hanno circuit breaker indipendenti per MusicBrainz, Cover Art Archive, Apple/iTunes, Deezer, TheAudioDB, Wikimedia Commons e Google Images. Un `503` o una connessione rifiutata non interrompe gli altri cataloghi; gli errori temporanei non vengono inseriti nella cache `not_found`. TheAudioDB usa il key pubblico di test e viene interrogato al massimo una volta ogni 2,1 secondi. Se i cataloghi non sono sufficienti a formare una coppia visivamente concorde, l'album resta senza cover automatica e viene riprovato secondo la cache/cursore.
 
-Da v0.129, quando i cataloghi non trovano una cover valida, `MISSING_ARTWORK_GOOGLE_IMAGES=true` (predefinito) cerca su Google Images con `album_name album cover` e, come seconda query, `artist album_name album cover`. Google è un fallback, non la fonte principale: vengono rifiutati thumbnail, URL non HTTPS/pubblici, immagini non valide, file troppo piccoli e copertine con proporzioni non plausibili. La ricerca parte solo per album con cover mancante o sotto soglia.
+Quando i cataloghi non trovano una cover valida, `MISSING_ARTWORK_GOOGLE_IMAGES=true` (predefinito) cerca su Google Images con `album_name album cover` e, come seconda query, `artist album_name album cover`. Google è un fallback, non la fonte principale: vengono rifiutati thumbnail, URL non HTTPS/pubblici, immagini non valide, file troppo piccoli e copertine con proporzioni non plausibili. La ricerca parte solo per album con cover mancante o sotto soglia.
 
-La stessa fase cerca le immagini artista mancanti. `MISSING_ARTWORK_ARTIST_ENABLED=true` abilita il recupero (nome corretto da v0.130); `MISSING_ARTWORK_MAX_ARTIST_PER_RUN=250` limita il numero di artisti per esecuzione (`0` = tutti; il cursore si aggiorna solo sugli elementi completati); `MISSING_ARTWORK_RETRY_DAYS=14` controlla la cache dei nomi senza risultati e dei cataloghi incompleti. Per le cartelle bilingui viene provato prima il nome inglese tra parentesi, `NAME_TRANSLATIONS` o la traduzione automatica; il nome originale è l’unico fallback successivo. Ogni identità viene cercata su Deezer e poi su Google Images prima di passare alla successiva. Le immagini album devono essere almeno `MISSING_ARTWORK_MIN_GOOGLE_ALBUM_DIMENSION=400` px sul lato corto; per gli artisti la soglia è `MISSING_ARTWORK_MIN_GOOGLE_ARTIST_DIMENSION=300`. L'immagine artista viene salvata come `artist.jpg`, `artist.png` o `artist.webp` nella cartella artista: Navidrome riconosce il prefisso `artist.*` nella priorità artwork locale predefinita (`ArtistArtPriority=artist.*, album/artist.*, external`). Dopo lo scan, dalla v0.131 lo script rimette automaticamente in coda con la CLI Navidrome gli artisti e gli album ancora senza artwork, così il server rilegge i nuovi file locali.
+La stessa fase cerca le immagini artista mancanti. `MISSING_ARTWORK_ARTIST_ENABLED=true` abilita il recupero ; `MISSING_ARTWORK_MAX_ARTIST_PER_RUN=250` limita il numero di artisti per esecuzione (`0` = tutti; il cursore si aggiorna solo sugli elementi completati); `MISSING_ARTWORK_RETRY_DAYS=14` controlla la cache dei nomi senza risultati e dei cataloghi incompleti. Per le cartelle bilingui viene provato prima il nome inglese tra parentesi, `NAME_TRANSLATIONS` o la traduzione automatica; il nome originale è l’unico fallback successivo. Ogni identità viene cercata su Deezer e poi su Google Images prima di passare alla successiva. Le immagini album devono essere almeno `MISSING_ARTWORK_MIN_GOOGLE_ALBUM_DIMENSION=400` px sul lato corto; per gli artisti la soglia è `MISSING_ARTWORK_MIN_GOOGLE_ARTIST_DIMENSION=300`. L'immagine artista viene salvata come `artist.jpg`, `artist.png` o `artist.webp` nella cartella artista: Navidrome riconosce il prefisso `artist.*` nella priorità artwork locale predefinita (`ArtistArtPriority=artist.*, album/artist.*, external`). Dopo lo scan, lo script rimette automaticamente in coda con la CLI Navidrome gli artisti e gli album ancora senza artwork, così il server rilegge i nuovi file locali.
 
 ## 7. Metadati, artista sconosciuto e nomi bilingui
 
 La normalizzazione dei tag mantiene distinti i crediti del singolo brano (`ARTIST` / `ARTISTS`) e quelli dell'album (`ALBUMARTIST` / `ALBUMARTISTS`). La correzione di `[Unknown Artist]` usa i crediti coerenti delle tracce e il contesto dell'album; non trasforma automaticamente una compilation o una collaborazione ambigua in un album di un solo artista.
 
-Per i FLAC la pulizia considera anche le varianti legacy dei commenti Vorbis (`ALBUMARTIST`, `ALBUM_ARTIST`, `ALBUMARTISTS`, `ALBUM_ARTISTS`) e le occorrenze ripetute. Quando rimuove un placeholder, conserva i crediti aggiuntivi reali e non sovrascrive i nomi degli artisti delle singole tracce. La correzione è integrata nelle fasi `album_unify` e `fix_unknown_artists` della pipeline completa. Da v0.128 il controllo raw avviene anche quando ffprobe mostra già un valore apparentemente valido: questo intercetta commenti ripetuti `ALBUM_ARTIST=[Unknown Artist]` che altrimenti rimangono nascosti. Quando `ARTIST` contiene il placeholder, i crediti multipli conservati in `ARTISTS` vengono usati come sorgente di riparazione; i crediti reali non vengono eliminati.
+Per i FLAC la pulizia considera anche le varianti legacy dei commenti Vorbis (`ALBUMARTIST`, `ALBUM_ARTIST`, `ALBUMARTISTS`, `ALBUM_ARTISTS`) e le occorrenze ripetute. Quando rimuove un placeholder, conserva i crediti aggiuntivi reali e non sovrascrive i nomi degli artisti delle singole tracce. La correzione è integrata nelle fasi `album_unify` e `fix_unknown_artists` della pipeline completa. Il controllo raw avviene anche quando ffprobe mostra già un valore apparentemente valido: questo intercetta commenti ripetuti `ALBUM_ARTIST=[Unknown Artist]` che altrimenti rimangono nascosti. Quando `ARTIST` contiene il placeholder, i crediti multipli conservati in `ARTISTS` vengono usati come sorgente di riparazione; i crediti reali non vengono eliminati.
 
 I nomi CJK, Hangul e cirillici possono essere conservati in forma bilingue. Per il russo lo script prova ora la traduzione inglese semantica con lo stesso controllo di confidenza usato per kanji/Hangul; se il provider non traduce, restituisce solo una traslitterazione fonetica, che resta il fallback. Le regole curate di `NAME_TRANSLATIONS` e `NAME_FIXES` hanno sempre precedenza. Per l'artwork, quando esiste una forma bilingue, la parte inglese viene cercata prima della grafia originale.
 
@@ -192,7 +206,7 @@ Per dedupe, senza `--hard-delete` i file confermati vengono spostati nel cestino
 
 ## 9. Fasi e contatore
 
-Le fasi condizionali (per esempio scan Navidrome, report Lidarr o attività artwork) vengono aggiunte o rimosse dal piano quando la pipeline scopre quali rami verranno davvero eseguiti. Per questo il totale pianificato può cambiare durante la run. Da v0.126 l'intestazione e la barra mostrano il numero progressivo esatto (`#1`, `#2`, …), anziché un rapporto `X/Y` con denominatore mobile. Il riepilogo finale stampa `Fasi eseguite: N` e una riga temporale per ogni fase completata; il totale finale è quindi verificabile e non dipende dalle stime iniziali.
+Le fasi condizionali (per esempio scan Navidrome, report Lidarr o attività artwork) vengono aggiunte o rimosse dal piano quando la pipeline scopre quali rami verranno davvero eseguiti. Per questo il totale pianificato può cambiare durante la run. L'intestazione e la barra mostrano il numero progressivo esatto (`#1`, `#2`, …), anziché un rapporto `X/Y` con denominatore mobile. Il riepilogo finale stampa `Fasi eseguite: N` e una riga temporale per ogni fase completata; il totale finale è quindi verificabile e non dipende dalle stime iniziali.
 
 ## 10. Log, report e cache
 
@@ -208,9 +222,10 @@ Le cache evitano richieste ripetute e scansioni non necessarie. Usa `--rebuild-c
 
 ## 11. Configurazione
 
-I due file hanno scopi diversi:
+I file di configurazione hanno scopi distinti:
 
-- **`env` / `.env`**: credenziali, percorsi host/container, URL dei servizi e parametri operativi. Le variabili già esportate nel processo hanno precedenza. Il file `ND_ENV_FILE`, se impostato, viene letto per primo; poi lo script cerca `.env` e `env` accanto a sé e nei percorsi legacy.
+- **`env` / `.env`**: configurazione privata con credenziali, percorsi host/container, URL dei servizi e parametri operativi. Le variabili già esportate nel processo hanno precedenza. `ND_ENV_FILE`, se impostato, viene letto per primo; altrimenti lo script cerca `.env` e `env` accanto a sé e nei percorsi legacy.
+- **`env.example`**: template pubblico, senza credenziali. Va mantenuto nel repository e copiato in `env` con `--init-env` (oppure `cp env.example env`). Lo script non genera una configurazione in automatico durante il normale primo avvio.
 - **`exportify_names.json`**: configurazione persistente utente in formato JSONC (supporta commenti `//` e `/* ... */`). Contiene alias, correzioni dei nomi, associazioni utenti/Spotify e regole playlist/proxy.
 
 Mantieni `env` privato e con permessi restrittivi:
@@ -218,6 +233,8 @@ Mantieni `env` privato e con permessi restrittivi:
 ```bash
 chmod 600 env
 ```
+
+Nel `.gitignore` del repository assicurati di escludere almeno `env`, `.env`, `.exportify_sessions/`, `spotify_cookies/` e `.venv/`. **Committa `env.example`, mai il tuo `env` o `.env` reale.**
 
 Non inserire credenziali in `exportify_names.json`, README, log condivisi o repository. Le variabili più importanti sono:
 
@@ -230,7 +247,7 @@ Non inserire credenziali in `exportify_names.json`, README, log condivisi o repo
 | Traduzione automatica CJK/Hangul/cirillico | `AUTO_NAME_TRANSLATION_ENABLED`, `AUTO_NAME_TRANSLATION_MIN_CONFIDENCE`, `AUTO_NAME_TRANSLATION_MAX_NEW_PER_RUN`, `AUTO_NAME_TRANSLATION_CACHE_DAYS`, `AUTO_NAME_TRANSLATION_TIMEOUT` |
 | Prestazioni | `EXPORTIFY_PROBE_WORKERS`, `EXPORTIFY_WAVEFORM_WORKERS`, `EXPORTIFY_FLAC_PROBE_TIMEOUT`, `EXPORTIFY_FLAC_COMPRESSION_LEVEL` |
 
-Il file `env` distribuito con la tua installazione contiene commenti per le singole variabili e i valori accettati. Un override di percorso vuoto mantiene il default calcolato dallo script; per cron preferisci percorsi assoluti.
+`env.example` documenta le variabili con commenti. Gli override di percorso vuoti mantengono il default calcolato dallo script; per cron preferisci percorsi assoluti. Se non usi il layout predefinito `/mnt/red1/homelab`, imposta `E2M_STORAGE_MOUNT` e/o `E2M_HOMELAB_ROOT` nel tuo `env`.
 
 ### Percorso del database Navidrome
 
@@ -269,11 +286,11 @@ Le regole hanno scopi distinti: `ARTIST_CANONICAL_NAMES` decide la grafia tag, `
 - Prima di una manutenzione estesa usa `--dry-run` e leggi il log. `--all --apply` abilita più operazioni insieme, inclusi dedupe, Lidarr e proxy Spotify.
 - Se una traccia presente risulta mancante, usa `--explain` con artista, album e titolo esattamente come compaiono nel CSV.
 - Se Lidarr non risolve un album, controlla il Metadata Profile, il report degli irrisolti e la corrispondenza tra root host e container. Non forzare un match ambiguo solo per ridurre il numero di mancanti.
-- Se `star_liked` segnala una password Navidrome rifiutata (nel log v0.135 era `octochic`), aggiorna `ND_PASS_<UTENTE>` nel file `env`/`.env` con la password effettiva di quell'account: lo script non può correggere una credenziale remota. Un utente senza password configurata viene saltato e segnalato.
+- Se `star_liked` segnala una password Navidrome rifiutata, aggiorna `ND_PASS_<UTENTE>` nel file `env`/`.env` con la password effettiva di quell'account. Un utente senza password configurata viene saltato e segnalato.
 - Se la riparazione tag segnala un file audio non più disponibile, il percorso è diventato obsoleto fra indicizzazione e scrittura (per esempio perché un'altra fase l'ha spostato/eliminato): viene saltato e contato separatamente, senza far fallire la fase per un file già assente.
 - Le cartelle in `SLKSD_FAILED_FOLDER` richiedono revisione/import manuale. Il completamento di `DownloadedAlbumsScan` non garantisce che Lidarr abbia importato automaticamente ogni cartella in `failed_imports`.
 - `SPOTIFY_LOCAL_PROXY.auto_sync=true` (predefinito) aggiorna `auto_albums` dentro `--all --apply`; configura `SPOTIFY_CLIENT_ID` e `SPOTIFY_CLIENT_SECRET` per le query non presenti in cache. Con `auto_sync=false` la scansione automatica viene saltata, ma i proxy manuali continuano a essere elaborati.
 - Se Exportify non scarica, controlla `--fetch-status` e `--fetch-check`; per vedere il browser usa `--fetch-headed`.
 - I messaggi `[ERRORE]`, `[warn]`, `[review]` e `[SKIP]` nel log spiegano le operazioni non completate o sospese.
 
-La cronologia dettagliata delle release è mantenuta nel blocco `CHANGELOG` dello script: `python3 exportify_to_m3u.py --changelog`.
+Il comando `python3 exportify_to_m3u.py --changelog` stampa lo storico delle versioni in ordine cronologico, dalla prima beta alla versione corrente.
