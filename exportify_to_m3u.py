@@ -57,7 +57,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
     e. scrive logs/e2m_mancanti_<GG-MM-AAAA>.txt (totali, per utente, playlist e album piu'
        carenti, elenco completo in fondo). X/Y = brani TROVATI/totale con la % dei
        trovati, e 'N brani rimasti' = quelli ancora da trovare
-    f. fasi sui tag: date_heal -> romaji_tags -> artist_names -> album_unify -> fix_date_tags
+    f. fasi sui tag: date_heal -> album_type_sync -> romaji_tags -> artist_names -> album_unify -> fix_date_tags
     g. integra il report di copertura libreria direttamente in logs/e2m_mancanti_<GG-MM-AAAA>.txt
     h. scan FULL di Navidrome
   Se invece passi una o piu' fasi di manutenzione (vedi 5), la parte playlist NON parte,
@@ -196,6 +196,7 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
   --version             stampa la versione.
   --help                mostra l'elenco dettagliato e aggiornato delle opzioni.
   --changelog           stampa tutto il changelog incorporato nello script.
+  --init-env            crea env da env.example (non sovrascrive una configurazione esistente).
 
   --- Utenti ------------------------------------------------------------------
   --users a,b           (anche --user, ripetibile) limita le fasi PER-UTENTE agli utenti
@@ -409,23 +410,1421 @@ Navidrome (disattivabile con --no-scan, e saltato con --dry-run).
 ==============================================================================
 CHANGELOG
 
-Novita' 0.151 (date originali Radiohead offline-safe + gloss bilingui con iniziali corrette):
-  - La run v0.150 ha mostrato il difetto residuo: dopo il circuit breaker MusicBrainz, 1.084 album
-    restavano irrisolti; album_unify conservava quindi RELEASEDATE=2009 (e Amnesiac=2021) perché
-    mancava ORIGINALDATE. Aggiunti fallback esatti e verificabili per i titoli originali Radiohead:
-    Pablo Honey 1993, The Bends 1995, OK Computer 1997, Hail to the Thief 2003, Amnesiac 2001,
-    In Rainbows e Disk 2 2007. Sono applicati prima della rete in date_heal e anche in album_unify,
-    quindi funzionano con MusicBrainz offline e non possono essere sovrascritti da un reissue tag.
-  - Le altre release continuano a richiedere MusicBrainz o un consenso ORIGINALDATE attendibile:
-    non viene generalizzato l'anno di cartella/DATE/RELEASEDATE come originale, perché può essere
-    una ristampa. La cache date_heal passa a v6 e i fallback esatti sono cacheabili come fonte valida.
-  - Se YEAR esiste già ed è discordante, date_heal lo aggiorna insieme a DATE/ORIGINALDATE/RELEASEDATE.
-  - Il casing del gloss latino bilingue viene ora normalizzato anche quando proviene da una riga
-    Navidrome/Lidarr già esistente o da NAME_TRANSLATIONS/NAME_FIXES: ogni token tutto minuscolo
-    riceve l'iniziale maiuscola. Token mixed-case e acronimi già maiuscoli restano invariati.
-  - Rimosso il bypass che preservava intenzionalmente il gloss di catalogo in minuscolo: era il
-    motivo per cui la precedente capitalizzazione riguardava soltanto alcuni nomi generati.
+Novita' beta-3.20 (ottimizzazioni + bugfix):
+  - cache di ffprobe persistente + letture parallele: le fasi notturne non
+    rileggono piu' tutta la libreria a ogni esecuzione
+  - cache dell'indice in ~/.cache (non /tmp: su Debian 13 e' tmpfs, si svuota a
+    ogni riavvio), compatta, con firma che vede anche rinomine/spostamenti
+  - matching: risultati memoizzati, fuzzy con prefiltro di lunghezza (identico
+    a difflib), ordine DETERMINISTICO nei pareggi (prima dipendeva da PYTHONHASHSEED)
+  - fix: hangul-romanize (Transliter vuole la regola), NAME_FIXES applicate anche
+    ai tag, album multi-disco, dry-run davvero a secco, clean_empty non cancella
+    piu' cartelle di soli .aiff/.ape/.wv/.dsf, ping-pong notturno di ALBUMARTIST
+    fra romaji_tags e album_unify, DATE/ORIGINALDATE doppi in date_heal,
+    --explain che andava in crash, correlate() None, JSON config rotto = stop
+Novita' beta-3.21 (dai log reali del 13/10):
+  - album_unify: la riparazione dei tag mancanti (spotyFLAC) dava KeyError 'title' su
+    OGNI FLAC (funzionava solo per mp3/m4a); titolo ricostruito meglio
+  - stop alle riscritture notturne che non convergono: .m4a (ffmpeg non salva
+    albumartist/originaldate/MBID), FLAC con ORIGINALDATE (unify rimetteva DATE e
+    fix_date_tags lo toglieva), .opus/.ogg (tag illeggibili)
+  - ALBUMARTIST riscritto col nome 'sanificato' della cartella solo per cartelle asiatiche
+  - .missing.txt delle playlist 'invariate' ora aggiornato; nuovo --missing [FILE]
+Novita' beta-3.22:
+  - UN SOLO LOG per esecuzione (logs/exportify_<data>_<ora>.log): prima ogni fase
+    scriveva un file suo e il log 'principale' non conteneva le fasi
+  - logs/mancanti_<AAAA-MM-GG>.txt: elenco unico delle tracce mancanti, a ogni run
+  - nuova fase artist_names: lo stesso artista CJK/coreano non compare piu' con 3 nomi
+    (latino / kanji / 'kanji (latino)') su Navidrome; ripara anche gli mp3 con
+    ALBUMARTIST doppio (TPE2 + TXXX scritto da write_ffmpeg)
+  - nuova fase --mp3-vs-flac: via l'mp3 se la stessa traccia esiste in FLAC
+  - bugfix: cache indice non invalidata dalle modifiche a exportify_names.json;
+    metaflac senza --no-utf8-convert (tag giapponesi rovinati con locale C/cron);
+    _flac_tags case-sensitive; _move_to_trash lasciava il .lrc con --hard-delete
+Novita' beta-3.23 (multi-utente Navidrome - prima tappa):
+  - ZIP PER UTENTE: ogni zip Exportify va legato a un utente Navidrome. Il nome del
+    file DEVE iniziare col nome utente (es. chic_spotify_playlists.zip). Se non lo fa,
+    si prende l'ID Spotify piu' frequente nella colonna "Added By" dei CSV nello zip e
+    lo si cerca in exportify_names.json -> "SPOTIFY_USERS": {"id": "utente"}. Se manca:
+    da terminale chiede l'utente e salva il legame nel JSON; da cron salta lo zip
+    con l'errore e la riga da aggiungere. Senza --zip legge tutti i *.zip di ZIP_DIR.
+  - CSV in EXPORTIFY_DIR/<utente>/. m3u in PLAYLIST_DIR/<utente>/ per gli utenti che
+    NON sono DEFAULT_USER (lui tiene il layout storico in PLAYLIST_DIR/: nessuna
+    migrazione, nessuna playlist duplicata). Sync-state dei non-default: "<utente>::<nome>".
+  - --users a,b: limita le fasi PER-UTENTE (playlist, fix-owners, dedupe-playlists,
+    star-liked). Senza --users (anche con --all --apply) vale per TUTTI gli utenti.
+    Le fasi sulla libreria condivisa (dedupe release/tracce, mp3-vs-flac, ...) non
+    dipendono dall'utente e non sono filtrate.
+  - --fix-owners assegna per PERCORSO dell'm3u (cartella utente); non tocca piu' le
+    playlist create a mano nell'UI (path vuoto) e rispetta --dry-run.
+  - nuova fase --dedupe-playlists: stesso nome ESATTO + stesso proprietario -> tiene la
+    piu' recente (updated_at), cancella le altre dal DB Navidrome. Dry-run salvo --apply.
+  - --star-liked per utente: password in ND_PASS_<UTENTE> (per l'utente ND_USER: ND_PASS).
+    Stella i brani di 'liked', gli album di 'saved albums' e gli artisti presenti in entrambe.
+Novita' beta-3.25 - download automatico degli zip da Exportify (tutto in questo script):
+  Exportify gira solo nel browser (nessun URL da scaricare con curl): con --fetch lo
+  script pilota Chromium headless (Playwright), riusa la sessione Spotify salvata per
+  utente (.exportify_sessions/<utente>.json), clicca "Export All" e salva lo zip come
+  ZIP_DIR/<utente>_spotify_playlists.zip. Non serve Spotify Premium (si usa l'app
+  Exportify pubblica). Playwright e' richiesto SOLO da queste opzioni:
+      .venv/bin/pip install playwright && .venv/bin/playwright install chromium
+      (Debian: anche  sudo .venv/bin/playwright install-deps chromium)
+  1) una volta per utente, su una macchina con schermo:  --fetch-login UTENTE
+     (login su Spotify + autorizza Exportify; salva la sessione. Senza schermo: fallo sul
+     PC e copia il .json in .exportify_sessions/ sul server)
+  2) --fetch            scarica gli zip e poi elabora (cron: --fetch, o --fetch --all --apply)
+     --fetch-only       scarica gli zip e basta
+     --fetch-list       mostra sessioni e zip presenti
+     --users a,b        limita a questi utenti; --fetch-headed mostra il browser (debug)
+  - sessione scaduta (Spotify richiede di nuovo il login): l'utente e' segnalato con
+    l'errore e si prosegue con gli zip gia' presenti (con --fetch-only: codice di uscita 2)
+  - export interrotto (meno della meta' dei CSV dell'ultimo zip buono): il vecchio zip
+    resta, il nuovo va in <nome>.zip.suspect (fuori dal pattern *.zip)
+  - se l'interfaccia di Exportify cambia: screenshot + HTML in logs/ (pulsanti cercati
+    per testo, inglese e italiano); EXPORTIFY_URL cambia l'indirizzo
+  - --fetch e' saltato con --dry-run
+Novita' beta-3.26 - login Exportify piu' robusto:
+  - il browser del login nasconde i segnali di automazione (flag --enable-automation,
+    navigator.webdriver) e usa Google Chrome se installato, altrimenti Chromium
+  - chiudere il browser a meta' login non produce piu' un traceback
+  - se Spotify scambia comunque il browser per un bot (captcha impossibili, "something
+    went wrong"): fare il login nel PROPRIO browser, esportare i cookie di spotify.com
+    (estensione "Cookie-Editor" -> Export -> JSON, oppure cookies.txt Netscape) e importarli:
+        --fetch-login UTENTE --fetch-cookies FILE
+    Servono almeno i cookie di login (sp_dc); lo script verifica la sessione subito.
+    Consiglio: login in una finestra PRIVATA, esporta, chiudi la finestra SENZA fare logout.
+Novita' beta-3.27 - logs/e2m_mancanti_<GG-MM-AAAA>.txt piu' ricco (l'elenco completo resta IN FONDO):
+  - totale: X/Y tracce uniche mancanti e percentuale (Y = brani unici letti dai CSV)
+  - per utente: mancanti/totale e %, e quante canzoni mancano a quali utenti ("3 canzoni
+    mancanti a elena", "1 canzone mancante a chic, stello"); solo con piu' utenti nella run
+  - le playlist con piu' canzoni mancanti (X/Y, %)
+  - i 10 album da scaricare, per numero di canzoni mancanti (X/Y = mancanti / brani di
+    quell'album presenti nelle playlist; non si conosce la tracklist completa dell'album)
+  - nell'elenco completo le playlist portano il prefisso "utente:" se gli utenti sono piu' di uno
+Novita' beta-3.28 - controllo della sessione Exportify e cartella dei cookie:
+  - --fetch-cookies cerca il file anche in spotify_cookies/ (accanto allo script e nella
+    cartella corrente); senza nome (--fetch-cookies da solo) prende il file piu' recente
+    in spotify_cookies/ il cui nome inizia con l'utente (chic*.json / chic*.txt)
+  - --fetch-check: verifica in headless se le sessioni salvate sono ancora valide (codice
+    di uscita 2 se una e' scaduta: ideale per cron, es. "... --fetch-check || notifica")
+  - --fetch-list mostra anche tra quanti giorni scade il cookie di login (sp_dc) e l'eta'
+    di ogni zip; --fetch avvisa se sp_dc scade entro 14 giorni
+  - con --fetch, se uno zip e' piu' vecchio di ZIP_STALE_DAYS (3) giorni compare un avviso
+    [!]: copre ogni causa (sessione scaduta, interfaccia cambiata, Exportify non risponde)
+  - la riga "estratti N CSV" dice quanto e' vecchio lo zip
+Novita' beta-3.29:
+  - estraendo uno zip, i CSV dell'utente che NON sono nel nuovo zip (playlist cancellate o
+    rinominate su Spotify) vengono cancellati: la cartella exportify/<utente>/ rispecchia
+    sempre l'ultimo export (--clean e' ora superfluo). Vale solo per gli utenti il cui zip
+    e' stato davvero estratto in questa run; con --no-unzip non si tocca nulla
+  - SKIP_PLAYLISTS (JSON) e --skip/--only confrontano i nomi in modo tollerante: minuscole,
+    NFKC e ogni sequenza di caratteri non alfanumerici (spazi, '_', punteggiatura, emoji)
+    vale uno spazio. Cosi' "entra?" combacia con entra_.csv e "Stello + chic<emoji>" con
+    "Stello _ chic_.csv" (prima non combaciavano, e le loro tracce finivano nei mancanti)
+  - una voce di SKIP_PLAYLISTS puo' avere '*' come jolly ("daylist*" = tutte quelle che
+    iniziano con daylist; le daylist di Spotify si chiamano "daylist • ...")
+  - a fine selezione: quante playlist sono state ignorate e quali voci di SKIP_PLAYLISTS non
+    corrispondono a nessun CSV (utile per accorgersi di nomi scritti male)
+  - le playlist ignorate non vengono elaborate, quindi non compaiono in logs/e2m_mancanti_*.txt
+Novita' beta-3.30:
+  - --fix-collab-artists: album collab che Navidrome mostra come "JPEGMAFIA • JPEGMAFIA &
+    Danny Brown" invece di "JPEGMAFIA • Danny Brown". Navidrome unisce con " • " i VALORI
+    del tag ALBUMARTIST: se nei FLAC ce n'e' uno che contiene gia' l'altro ("A" e "A & B")
+    il nome esce doppio. La fase cerca nel DB gli album con quello schema (album_artist con
+    " • " e un valore che ripete un componente di un altro), legge i tag veri dei file e
+    riscrive ALBUMARTIST (e ALBUMARTISTS, se c'e') con i soli componenti ["A", "B"] in tutti
+    i file dell'album. Dry-run salvo --apply; --album/--artist restringono. Solo FLAC (gli
+    altri formati sono elencati). Dopo --apply serve uno scan di Navidrome (lo fa la run).
+    Percorsi: media_file.path e' quello DENTRO il container; la fase lo riporta sul host
+    (ND_MUSIC_ROOT=/music se serve; di solito lo riconosce da sola)
+  - --check-albums (vecchie versioni: album_incompleti_<data>.txt): confronta ogni album del DB con
+    la tracklist di MusicBrainz; nelle versioni attuali il report intero e' in fondo a
+    logs/e2m_mancanti_<GG-MM-AAAA>.txt. Include tracce mancanti (X/Y, %), quali tracce e l'elenco
+    "Artista - Album - Titolo" da riscaricare. Usa MUSICBRAINZ_ALBUMID del DB
+    (release esatta); senza, cerca per artista+album (--mb-no-search = solo gli album
+    taggati). 1 richiesta/secondo come chiede MusicBrainz, cache in .mb_albums_cache.json:
+    la prima run su una libreria grande e' lunga (si puo' interrompere e riprendere),
+    le successive sono quasi istantanee. Solo lettura: non tocca file ne' DB
+Novita' beta-4.0 - versione maggiore: pipeline multi-utente completa e guida integrata.
+  Riassume le novita' 3.22-3.30 qui sotto: zip e playlist per utente (--users), download
+  automatico degli zip da Exportify (--fetch*), dedupe delle playlist, report mancanti
+  con statistiche, controllo album incompleti su MusicBrainz, correzione dei collab.
+  - aggiunta questa guida in testa al file (uso, nuovo utente, comandi, configurazione)
+  - corretto --help: la descrizione di --max-dur-diff (contiene un '%') non veniva
+    mostrata e stampava un dizionario Python
+Novita' beta-4.1:
+  - corretto --fix-collab-artists: con la gestione multi-libreria Navidrome salva in media_file.path
+    percorsi RELATIVI alla libreria (JPEGMAFIA/ALBUM (2023)/x.flac) e la fase li cercava saltando la
+    prima cartella: diceva "file non trovati sul disco" e non riscriveva niente
+  - gli ZIP Exportify vengono salvati in arr-config/spotify_csv su Red1; i vecchi ZIP nelle
+    cartelle legacy sono importati soltanto se validi e non vengono piu' usati come destinazione
+    Exportify; con --dry-run non si sposta niente ma si leggono comunque)
+  - dopo un'estrazione riuscita i CSV 'storici' direttamente in EXPORTIFY_DIR (vecchio layout)
+    vengono cancellati (prima restavano e davano solo un avviso)
+  - --all accende da solo --fetch se esistono sessioni Exportify salvate: il cron
+    "--all --apply" non riscaricava gli zip e usava quelli del giorno prima
+  - nome del log: logs/e2m_<opzione1>+<opzione2>+..._<AAAAMMGG>_<HHMMSS>.log (opzioni senza
+    '--'; senza opzioni "playlists")
+Novita' beta-4.2:
+  - e2m_mancanti_*.txt: X/Y ora e' TROVATI/totale con la % dei trovati, piu' "N brani rimasti" (quelli
+    ancora da trovare), ovunque: totale, per utente, playlist e album. Il resto non cambia
+  - corretto date_heal / MusicBrainz: un errore TEMPORANEO (503, 429, timeout) veniva salvato in cache
+    come "nessun dato" e quel release-group non veniva mai piu' ricontrollato (nel log del 18/10: 2
+    casi). Ora gli errori temporanei non si memorizzano e _mb_json riprova 3 volte con pausa; al primo
+    avvio le voci "nessun dato" gia' salvate si tolgono e vengono richieste di nuovo (una volta sola,
+    puo' allungare di qualche minuto la prima notte). Se MusicBrainz e' fuori servizio, dopo 5 richieste
+    fallite di fila si smette di insistere per il resto della run (senza questo limite le attese dei
+    tentativi allungherebbero la notte di ore); --check-albums si ferma dopo 3 album in errore e salva
+    cache e report
+  - corretto romaji_tags: se la lettura inizia con una cifra o un simbolo ("17歳" -> "17sai") il valore
+    non veniva riconosciuto come gia' romanizzato e a ogni notte si aggiungeva un'altra parentesi
+    ("17歳 (17sai) (17sai (17sai))"). Ora lo riconosce e, per sicurezza, non scrive mai un valore che
+    una seconda applicazione cambierebbe ancora
+  - report SKIP_PLAYLISTS: "entra?" e "entra" (stessa chiave) risultavano "senza corrispondenza": ora
+    sono accreditate tutte le voci che combaciano; senza CSV esaminati il riepilogo non compare
+  - --check-albums: abbinamento in due passate (prima titoli identici, poi varianti), "Intro" e
+    "Intro (Reprise)" non si scambiano piu'
+  - cookie malformati (campi col tipo sbagliato) danno un errore leggibile e non un traceback; i link
+    simbolici rotti *.zip in ZIP_DIR non fanno piu' fallire la ricerca degli zip
+Novita' beta-4.3:
+  - import playlist: recupera durante --fetch nome Spotify originale (case, emoji, Unicode) e cover;
+    conserva i metadati per CSV e usa il nome esatto come basename M3U (slash -> ／, non puo' stare in un filename)
+  - importa la cover Spotify come sidecar accanto alla M3U, riconosciuto da Navidrome; aggiorna la cover
+    anche quando la playlist non deve essere riscritta; recupero artwork non riuscito non blocca l'import
+Novita' beta-4.4:
+  - --star-liked: accetta la playlist 'liked' (e 'liked songs'), stella le tracce; usa 'saved albums'
+    per stellare gli album e stella gli artisti presenti nelle due playlist; la scan Navidrome avviene
+    prima di questa fase, cosi' vengono lette le playlist appena aggiornate
+  - unzip: se ci sono piu' ZIP dello stesso utente, usa solo il piu' recente; i CSV rimasti fuori
+    dal nuovo export di quello stesso utente vengono rimossi
+Novita' beta-4.5 (revisione bug + pulizia):
+  - corretto un bug nel trasferimento di .playlist_meta.json: i nomi originali/cover dal ZIP ora vengono davvero salvati;
+  - unzip atomico per CSV: prima mette in staging tutti i file del nuovo ZIP, poi li sostituisce;
+    un archivio troncato non puo' cancellare i CSV precedenti o lasciare una pulizia incompleta
+  - rilevamento CSV non sensibile alle maiuscole dell'estensione (.csv/.CSV); eliminato il pre-clean
+    ridondante --clean (l'opzione resta compatibile, la pulizia avviene solo dopo estrazione riuscita)
+  - --star-liked legge una volta getStarred2 e salta anche le canzoni gia' preferite, non solo album/artisti
+  - scan Navidrome restituisce l'esito; una scan fallita non viene segnata come completata
+  - tolto il fallback a password Subsonic hard-coded: le credenziali vengono da ND_PASS / ND_PASS_<UTENTE>
+  - chiusa esplicitamente la risposta HTTP, uniformata la URL base senza slash finale
+  - rimossi helper/locali morti e aggiornato lo User-Agent artwork alla versione corrente
+Novita' beta-4.6 (CSV album e tempi di fase):
+  - riconosciuto saved_albums.csv come raccolta album e non come playlist di brani
+  - aggiunti timer e riepilogo finale delle durate delle fasi
+Novita' beta-4.7 (modalita' sync-only e timer):
+  - aggiunta la modalita' quotidiana leggera che salta dedupe, FLAC e manutenzione massiva dei tag
+  - tempi per fase e riepilogo totale; una fase interrotta non deve essere marcata come completata
+Novita' beta-4.8 (sync Navidrome piu' sicura):
+  - attesa che l'API Navidrome torni disponibile dopo un riavvio prima di applicare preferiti
+  - scan incrementale nella modalita' sync-only e gestione esplicita degli errori di scan
+Novita' beta-4.9 (fetch fresco e pulizia M3U per utente):
+  - FETCH_IGNORED_USERS in exportify_names.json esclude gli account dal fetch Exportify;
+  - quando il fetch riesce, l'estrazione usa solo lo ZIP appena scaricato per quell'utente,
+    ignorando gli altri ZIP della cartella spotify_csv;
+  - dopo una conversione riuscita vengono rimosse le M3U obsolete dell'utente non piu' coperte
+    dai CSV selezionati; CSV in errore sospendono la pulizia per sicurezza;
+  - pulisce anche dal DB Navidrome le playlist importate col path dei file rimossi (e righe collegate);
+  - fetch, pulizia M3U e pulizia DB sono fasi distinte e temporizzate;
+  - le cartelle M3U degli altri utenti sono protette anche col layout storico dell'utente default.
+Novita' beta-5.0 (normalizzazione dei nomi e preferiti):
+  - pulizia dei duplicati M3U con nomi equivalenti dopo normalizzazione di maiuscole, spazi e punteggiatura
+  - corrispondenza degli album salvati meno restrittiva per applicare le stelle alle edizioni compatibili
+Novita' beta-5.1 (penalita' delle versioni alternative):
+  - penalita' maggiori per titoli tra parentesi o qualificati come live/demo/instrumental/rehearsal
+  - conservato il vantaggio per una versione alternativa quando e' esplicitamente richiesta dal CSV
+  - aggiunta TANTI AUGURIII!! alla lista delle playlist da ignorare
+Novita' beta-5.2 (matching piu' semplice e scoring configurabile):
+  - riutilizzata la mappa TITLE_MATCH_PENALTIES caricata dalla configurazione anche per la penalita' parentesi;
+    il vecchio TITLE_MATCH_PARENTHESES_PENALTY viene ancora letto solo per compatibilita' con JSON v5.1
+  - lista dei qualificatori normalizzata/ordinata una sola volta e memorizzata in cache, invece di
+    ricostruire e ordinare gli stessi set per ogni candidato; cache invalidata dopo il caricamento config
+  - mantenuto il punteggio piu' alto per le versioni esplicitamente richieste (Live/Demo ecc.); i suffissi
+    alternativi non richiesti perdono contro il titolo pulito
+Novita' beta-5.3 (matching e copertine album):
+  - ampliata la penalita' configurabile per versioni alternative, includendo extended/expanded e
+    le etichette live, demo, instrumental e rehearsal; il titolo pulito e' favorito quando richiesto
+  - aggiunta la ricerca finale delle copertine album mancanti, con controlli per non sovrascrivere
+    artwork gia' presente e cache dei risultati negativi
+Novita' beta-0.54 (README e changelog CLI):
+  - aggiunto README.md con panoramica del progetto, funzionalita' e configurazione; le opzioni
+    dettagliate restano nell'help generato direttamente dallo script, che e' la fonte aggiornata
+  - aggiunto --changelog: stampa tutto questo changelog e termina senza avviare pipeline o creare log
+  - tutte le intestazioni dei rilasci precedenti sono marcate beta- per distinguerle dal rilascio corrente
+Novita' beta-0.55 (Spotify Local Files per album assenti dal catalogo):
+  - aggiunto --build-spotify-proxies: genera MP3 solo per gli album esplicitamente elencati in
+    SPOTIFY_LOCAL_PROXY.albums, mantenendo intatti i FLAC originali
+  - output configurabile fuori da MUSIC_ROOT per evitare doppioni in Navidrome; bitrate e dry-run
+    configurabili, tag artista/album/titolo e copertina embedded preservati quando supportata
+  - Exportify puo' esportare metadata da tracce locali in playlist Spotify (URI spotify:local:...);
+    il matcher usa i campi testuali per trovare il file lossless originale
+Novita' beta-0.56 (alias inglesi per titoli CJK e provenienza delle tracce mancanti):
+  - NAME_FIXES mantiene le maiuscole per i gloss leggibili; il matcher normalizza al confronto.
+    Le nuove traduzioni semantiche/forme inglesi ufficiali sono ora separate in NAME_TRANSLATIONS.
+  - aggiunte le varianti giapponesi ワールドイズユアーズ / ワールド イズ ユアーズ -> World Is Yours,
+    confermate per MASS OF THE FERMENTING DREGS; il matching usa l'alias per titolo E album.
+  - se romaji_tags trova un vecchio gloss che coincide esattamente con la lettura fonetica pykakasi,
+    lo sostituisce con il mapping inglese curato; non sovrascrive parentesi legittime come (Live).
+  - cache dell'indice incrementata per ricostruirla con le nuove regole di alias.
+  - la classifica 'ALBUM DA SCARICARE' in e2m_mancanti_*.txt mostra ora le playlist attive che originano
+    ogni raccomandazione album: gli album suggeriti non vengono confusi con nomi di playlist cancellate.
+Novita' beta-0.57 (traduzioni CJK prioritarie con fallback fonetico):
+  - aggiunto NAME_TRANSLATIONS per traduzioni inglesi curate e nomi inglesi ufficiali; ha priorita su
+    NAME_FIXES e sulla romanizzazione automatica. NAME_FIXES resta il livello di compatibilita per alias
+    manuali/romaji e pykakasi/Hangul viene usato solo quando non esiste una forma preferita.
+  - applicata la stessa priorita a matching di brani/artisti/album, manutenzione dei tag e proxy Spotify;
+    il lookup inverso normalizza anche le maiuscole per collegare la forma inglese alla chiave CJK.
+  - spostate nel JSON NAME_TRANSLATIONS le traduzioni/forme inglesi ufficiali gia' curate; le regole
+    generiche non presenti nelle tabelle continuano ad avere come fallback la lettura fonetica.
+  - invalidata la cache dell'indice (CACHE_VERSION 7) per rendere effettive le nuove regole.
+Novita' beta-0.58 (integrazione utilita' FLAC, Lidarr e ListenBrainz):
+  - integrate --fix-flac-safe: ripara i file .flac.flac solo se il duplicato e' valido, e pulisce
+    i .backup quando l'originale esiste; preview predefinita, modifiche solo con --apply.
+  - integrate --lidarr-folder-fix: riconcilia i path artisti Lidarr con le cartelle reali usando
+    normalizzazione, NAME_TRANSLATIONS/NAME_FIXES/ALIASES/ARTIST_GROUPS e fallback fuzzy; aggiorna
+    l'API e avvia RescanFolders solo dopo correzioni riuscite.
+  - integrate --lidarr-import-slskd: avvia DownloadedAlbumsScan, riallinea le cartelle e segnala
+    le sottocartelle in failed_imports; credenziali Lidarr da LIDARR_API_KEY, mai dal sorgente.
+  - integrate --lb-dedup UTENTE: trova ascolti ListenBrainz ripetuti entro 5 secondi, con retry,
+    checkpoint e segnalazione delle finestre saltate; e' preview per default, --lb-delete abilita
+    le cancellazioni e LISTENBRAINZ_TOKEN resta solo nell'ambiente/.env.
+  - mantenuto --fix-owners per-percorso e aggiunto --fix-all-playlist-owners per replicare il vecchio helper
+    che forza tutte le playlist, incluse quelle create nella UI, a un solo proprietario.
+Novita' beta-0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
+  - cache LRU per norm()/norm_bare(): riusa le normalizzazioni ripetute di artista, album e titolo;
+    le cache vengono invalidate subito dopo aver caricato le regole emoji dalla configurazione.
+  - romaji_tags: applica tutti i tag cambiati con una sola invocazione di metaflac per file FLAC,
+    invece di avviare un processo separato per ogni campo aggiornato.
+  - fix_date_tags: legge DATE/ORIGINALDATE dalla cache ffprobe condivisa e pre-carica in parallelo
+    i soli FLAC non in cache; scrive ORIGINALDATE e rimuove DATE con una sola invocazione metaflac.
+  - clean_empty: determina se ogni cartella contiene audio con un'unica passeggiata bottom-up,
+    evitando una scansione ricorsiva dell'intero sottoalbero per ogni cartella.
+  - README: aggiunta la procedura di profiling con profiling.sampling (Tachyon) su Python 3.15,
+    distinguendo il profilo wall-clock da quello CPU per riconoscere le attese su disco/rete.
+Novita' beta-0.60 (proxy Spotify MP3 piu' compatti):
+  - bitrate predefinito dei proxy Spotify abbassato da 192k a 64k, per ridurre lo spazio audio
+    a circa un terzo per la stessa durata; il bitrate resta configurabile tra 64k e 320k in
+    SPOTIFY_LOCAL_PROXY.bitrate. A 64k la qualita' e' bassa se si ascoltano i proxy direttamente.
+Novita' beta-0.61 (proxy automatici e traduzioni automatiche prudenti):
+  - aggiunto --sync-spotify-proxy-config: confronta gli album della libreria con il catalogo
+    Spotify tramite Search API, produce un report e una copia JSON proposta; il JSON attivo
+    cambia solo con --apply. Gli album ambigui e gli errori di rete non vengono auto-aggiunti.
+  - separati SPOTIFY_LOCAL_PROXY.albums (manuali) e auto_albums (catalogo): la scansione aggiorna
+    solo la lista automatica; il builder genera proxy per entrambe senza perdere gli override manuali.
+  - aggiunta una cache persistente del catalogo Spotify con TTL e retry 429/5xx per non ripetere
+    richieste a ogni run; market IT predefinito, configurabile.
+  - introdotto il livello di traduzione inglese automatica per CJK/Hangul dopo NAME_TRANSLATIONS
+    e NAME_FIXES e prima della lettura fonetica; solo risultati sopra la soglia euristica vengono
+    usati. I risultati vengono memorizzati in cache, senza trasformarli in traduzioni ufficiali.
+  - l'affidabilita' della traduzione automatica e' una stima euristica (il provider Google pubblico
+    non restituisce una probabilita' calibrata); sotto soglia resta la lettura fonetica.
+  - catalog_cache_days=0 disabilita il riuso della cache Spotify; qualunque --proxy-limit resta
+    additivo e preserva gli auto_albums esistenti, anche quando tutti gli album entrano nel batch.
+  - gli errori imprevisti delle utility proxy ora restituiscono un codice di uscita non-zero;
+    prima dell'applicazione viene controllato che il JSON non sia stato modificato durante la scansione.
+Novita' beta-0.62 (cache FLAC16 sicura e dedupe piu' efficiente):
+  - flac_16bit ora memorizza anche i FLAC gia' efficienti: non rilancia ffprobe su quegli stessi
+    file a ogni run se mtime e dimensione non cambiano. La scansione usa il walker os.scandir.
+  - corretto un bug di sicurezza: --dry-run non rimuove piu' file .backup e non modifica la cache
+    FLAC16; mostra invece quali backup verrebbero rimossi.
+  - dedupe_tracks pre-carica i tag di tutti i candidati in una singola fase parallela, invece di
+    salvare la cache ffprobe ripetutamente per ogni album: riduce I/O e scritture quadratiche.
+  - la correlazione waveform riusa somme cumulative per calcolare le norme delle finestre; mantiene
+    la ricerca di offset e velocita' senza cambiare le soglie di deduplicazione.
+  - rimosso un insieme old_auto_keys inutilizzato nella scansione proxy e resi piu' espliciti gli
+    errori API Spotify quando il proprietario dell'app deve avere Premium in Development Mode.
+Novita' beta-0.63 (tracciamento dei preferiti per i proxy Spotify e profiling Python 3.15):
+  - dopo la generazione dei proxy legge getStarred2 di Navidrome, abbina i brani preferiti ai proxy
+    tramite percorso file e metadati, e mantiene .spotify_proxy_manifest.json, liked.m3u e
+    spotify_proxy_favorites.json. Gli errori API non cancellano la lista precedente.
+  - aggiunto --sync-proxy-favorites (preview predefinita; --apply scrive la lista locale) per
+    aggiornare i preferiti senza ricodificare gli MP3. Il manifest consente di collegare i proxy
+    ai sorgenti anche nelle run successive.
+  - documentato il limite Spotify: la Web API non aggiunge file locali a playlist o Liked Songs;
+    liked.m3u e' un elenco locale pronto per consultazione/importazione manuale, non una playlist
+    Spotify nativa. Nessun falso stato di completamento viene dichiarato.
+  - aggiunte le istruzioni per Python 3.15.2 e profiling.sampling (Tachyon). Il runtime di questo
+    ambiente non e' stato aggiornabile perche' i download DNS sono bloccati; nessuna flame graph
+    reale viene dichiarata come prodotta.
+Novita' beta-0.64 (ottimizzazioni verificate sul profilo Tachyon reale):
+  - flush_probe_cache non esegue piu' una os.path.exists su ogni chiave della cache dopo ogni fase.
+    Le voci obsolete vengono eliminate in modo lazy quando un percorso richiesto non esiste; la
+    cache non viene usata per un file prima di aver verificato stat, quindi i dati obsoleti non
+    possono produrre tag di un file mancante. Rimosso il controllo O(numero file) su storage lento.
+  - download_missing_album_artwork raccoglie i nomi delle cover gia' durante la passeggiata delle
+    directory, evitando una scandir separata per ogni album; controlla la cache negativa prima di
+    avviare ffprobe per l'artwork incorporato.
+  - le nuove traduzioni automatiche vengono salvate in batch a fine fase, non riscrivendo l'intero
+    JSON cache dopo ogni singolo nome; il salvataggio resta atomico e avviene anche dopo errori/interruzioni
+    gestite da run_phase.
+  - modifiche mirate basate su logs/e2m_sync-only+dry-run+no-scan_20261026_231303.log e sul flame graph
+    Tachyon: il profilo ha mostrato ~109 s nel controllo esistenza della cache ffprobe, altri ~23 s in
+    un successivo flush, ~75 s nelle verifiche ffprobe dell'artwork, ~29 s nelle scansioni cartella-cover
+    e ~69 s nelle traduzioni HTTP.
+    I tempi sono stime a campionamento e dipendono dallo storage/rete.
+Novita' beta-0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
+  - artwork: lo stato delle cover embedded viene salvato nella cache ffprobe insieme a tag/durata;
+    per le cache preesistenti viene aggiunto al primo controllo. La verifica si ferma appena una
+    delle prime tracce contiene una cover, invece di eseguire sempre fino a tre ffprobe per album.
+  - traduzione automatica: dopo un errore del provider Google pubblico si attiva un circuit breaker
+    persistente per 6 ore (configurabile con AUTO_NAME_TRANSLATION_FAILURE_COOLDOWN_HOURS in env/.env). Le
+    traduzioni gia' cacheate continuano a funzionare; i nuovi nomi usano la fonetica senza altri timeout.
+  - correlazione waveform: controlla prima offset zero e poi gli offset grossolani in ordine di
+    distanza, così le copie gia' allineate possono superare la soglia senza percorrere tutta la griglia.
+    Le ricerche complete (incl. --compare) conservano la griglia e il massimo diagnostico precedenti.
+  - il profiling del 27/10/2026 mostra che la cache ffprobe non e' piu' hotspot dominante; restano
+    ~92 s in controlli artwork embedded, ~85 s nella traduzione HTTPS e ~69 s nei tie-break waveform.
+    Queste durate sono stime a campionamento; la nuova riduzione end-to-end va verificata sul server.
+Novita' beta-0.66 (riparazione album frammentati e artisti CJK duplicati):
+  - album_base non elimina piu' indiscriminatamente ogni parentesi e la parola "live" interna al titolo.
+    Ora rimuove qualificatori di edizione solo quando sono marcatori/ suffissi, preserva titoli
+    significativi come "Blackbox Live Recorder" e tratta il gloss romaji CJK come alias.
+  - album_unify aggiunge un passaggio cross-folder: raggruppa titoli identici/alias e piccoli
+    frammenti supportati da titoli traccia o numerazione contigua, armonizza ALBUM/ALBUMARTIST,
+    rimuove ID album discordanti e propaga ID univoci mancanti (Animals, Finger Dancin', Saudade, ecc.).
+  - date_heal controlla MUSICBRAINZ_ALBUMID sull'intero album logico, inclusi sottodischi e tutti
+    i formati. Se un'unica cartella contiene ID album contrastanti, non sceglie arbitrariamente la
+    maggioranza: rimuove quegli ID, conservando un release-group ID solo se e' univoco. Invalida le
+    cache dopo le scritture per impedire ad album_unify di ripristinare tag vecchi.
+  - artist_names esamina anche tracce che si trovano in cartelle latine/compilation: ogni valore ARTIST/
+    ALBUMARTIST CJK diventa la forma bilingue preferita in tag FLAC multipli e non-FLAC. I valori
+    duplicati che collassano nella stessa forma vengono deduplicati, poi lo scan Navidrome aggiorna il DB.
+  - aggiunti --diagnose-album-splits (DB read-only) e --repair-album-groups (preview predefinita):
+    report con album.id/MBID/track count/path e artisti CJK doppi; la riparazione unifica tag fra cartelle,
+    rimuove MBID discordanti in tutti i formati e canonizza i valori ARTIST/ALBUMARTIST CJK ovunque.
+Novita' beta-0.67 (integrazione album repair in --all e correzioni artisti):
+  - --all produce automaticamente il report DB di diagnosi album prima delle modifiche e include
+    le riparazioni album nella pipeline; --all --apply esegue le scritture. I candidati fuzzy restano
+    nel report e non vengono piu' uniti automaticamente, anche quando un frammento e' piccolo.
+  - Aggiunta la correzione degli ARTIST='[Unknown Artist]' quando l'album fornisce un unico artista
+    attendibile: preferisce ALBUMARTIST, altrimenti un artista non sconosciuto condiviso dalle tracce;
+    gli album compilation ambigui restano intatti e sono segnalati per revisione.
+  - Aggiunta la separazione condizionata di tag artista separati da ';': si attiva solo se almeno un
+    componente corrisponde a un artista gia' presente nel DB Navidrome. FLAC riceve ARTISTS multi-valore;
+    gli altri formati ricevono il separatore standard '; ' per lo scanner Navidrome.
+  - La riparazione album completa esegue anche queste due correzioni; nell'uso --all riutilizza le fasi
+    date_heal/artist_names/album_unify gia' presenti per evitare di ripeterle inutilmente.
+  - La diagnostica mostra anche ALBUMVERSION/releasedate/release-group ID dal DB quando disponibili,
+    perché possono separare album con lo stesso titolo visibile. ALBUMVERSION viene resa coerente per
+    album logico; edizioni/versioni discordanti tra cartelle restano review-only e non si uniscono.
+Novita' beta-0.68 (diagnostica album piu' efficiente e scritture piu' robuste):
+  - --diagnose-album-splits genera le coppie candidate tramite un indice inverso degli artisti:
+    evita confronti fra album che non condividono alcuna identita' artista e riduce il lavoro
+    quadratico sull'intero catalogo; i controlli di similarita' e la regola fuzzy review-only
+    restano invariati.
+  - le riscritture dei tag non-FLAC ripristinano il file originale se la sostituzione finale del
+    file temporaneo fallisce, evitando che un errore I/O lasci il brano mancante dal path atteso.
+  - la riparazione dei tag artista separati da ';' combina in modo deterministico i campi alias
+    presenti nei metadata non-FLAC, deduplicando i componenti e impedendo che un campo successivo
+    sovrascriva silenziosamente il risultato del primo.
+  - la cache MusicBrainz aggiornata durante una riparazione in anteprima viene salvata come cache
+    ausiliaria: il dry-run non modifica tag o file audio, ma evita di ripetere le stesse richieste.
+  - la correzione di [Unknown Artist] non usa piu' una semplice maggioranza di ARTIST per
+    indovinare l'artista nelle compilation: un ALBUMARTIST generico/conflittuale blocca il fallback;
+    se ALBUMARTIST manca, tutti gli artisti noti delle tracce devono concordare.
+  - la riparazione aggrega gli errori di scrittura delle fasi MBID-sanity, artist_names e album_unify;
+    non segnala piu' successo se una di queste passate ha avuto errori.
+  - l'inferenza degli artisti controlla tutti i campi alias disponibili (artist/artists e albumartist/album_artist/albumartists);
+    metadati discordanti sullo stesso file bloccano l'inferenza invece di scegliere il primo campo.
+Novita' beta-0.69 (riparazione artisti, contatore fasi e verifica MusicBrainz):
+  - i tag ARTIST/ARTISTS/ALBUMARTIST/ALBUMARTISTS riconoscono anche la virgola come separatore,
+    ma solo quando almeno due componenti sono confermati dal catalogo Navidrome; nomi propri
+    come 'Tyler, The Creator' vengono ricomposti e non spezzati.
+  - la normalizzazione artisti armonizza le forme CJK pure e bilingui fra i campi singoli/plurali,
+    scegliendo una grafia canonica per evitare duplicati 'kanji' / 'kanji (traduzione)'.
+  - UNKNOWN-ARTIST usa prima l'album artist coerente, poi il nome cartella attendibile, quindi
+    una maggioranza di artisti traccia solo se chiara e non esplicitamente una compilation.
+  - ogni fase mostra il numero progressivo e il totale previsto; il riepilogo finale continua a
+    mostrare le durate misurate.
+  - --all controlla gli album che hanno MUSICBRAINZ_ALBUMID, elenca i brani mancanti in fondo a
+    logs/e2m_mancanti_<GG-MM-AAAA>.txt e include li' il report MusicBrainz completo (nessun file album_incompleti separato).
+  - dopo lo scan Navidrome confronta lo stato degli album prima/dopo, stampa i nuovi album e le
+    voci cambiate/accorpate, riapplica le fasi tag solo ai file degli album interessati e chiude
+    con uno scan incrementale. Il confronto usa i path dei brani, non solo gli ID DB volatili.
+Novita' beta-0.70 (progress bar terminale per scansioni e fasi lunghe):
+  - le fasi con un insieme di elementi misurabile usano una barra dinamica su una sola riga:
+    contatore corrente/totale, indicatore visuale, percentuale stimata ed elementi rimanenti.
+    Su terminale interattivo la riga viene aggiornata con carriage return; nei log non interattivi
+    vengono emessi solo aggiornamenti periodici per non riempire i log con una riga per elemento.
+  - sostituiti i contatori a righe multiple per scansione libreria, matching playlist, prefetch ffprobe,
+    romaji_tags, album_unify, dedupe tracce/release, normalizzazione artisti, MP3-vs-FLAC, scan Navidrome,
+    check MusicBrainz, confronto catalogo Spotify, download artwork e fix-flac-safe.
+  - aggiunti contatori anche a repair collaborazioni/album artist, repair ownership e dedupe playlist,
+    clean-empty e conversione FLAC; le barre avanzano con item controllati, percentuale e rimanenti.
+  - su TTY la barra usa carriage return e sovrascrive la riga attiva; nei log non interattivi conserva solo
+    checkpoint periodici. Messaggi di errore e modifiche effettivamente applicate restano log separati.
+Novita' beta-0.71 (skip playlist per utente e report consolidati):
+  - SKIP_PLAYLISTS ora e' un oggetto per utente: le esclusioni attuali appartengono solo a chic;
+    --skip resta invece un override globale per la singola esecuzione. Accetta ancora la vecchia
+    lista JSON assegnandola a DEFAULT_USER con avviso di compatibilita'.
+  - rimosso PLAYLIST_PREFIXES: il nome della playlist viene rispettato come arriva da Spotify;
+    rinomina le playlist direttamente in Spotify invece di trasformarle durante l'import.
+  - i report completi album_db_diagnostics e album_cross_folder_review sono incorporati nel log
+    principale e2m, con marcatori di inizio/fine; i file separati vengono eliminati dopo l'incorporazione.
+  - il controllo MusicBrainz scrive l'intero report, incluse tracce mancanti e album non trovati,
+    in fondo a e2m_mancanti_<GG-MM-AAAA>.txt; non crea piu' nuovi album_incompleti_<data>.txt separati.
+  - UNKNOWN-ARTIST prova anche ARTISTS per la singola traccia e un suffisso artista attendibile
+    nel nome file (es. 'Titolo - Artista') prima di arrendersi per un album multi-artista.
+  - i FLAC il cui export dei tag fallisce vengono esclusi dal fallback non-FLAC, evitando una
+    seconda riscrittura impropria; l'errore resta esplicito nel log per riparare/verificare il file.
+  - star_liked restituisce esito fallito se almeno un utente ha un errore API, anziche' mostrare
+    la fase come completata quando il log contiene [ERRORE].
+Novita' beta-0.72 (ottimizzazione artist split, report persistenti e log piu' chiari):
+  - split_known_artist_tags prefiltra i file con i tag ffprobe e invoca metaflac solo sui candidati
+    reali, evitando migliaia di processi per file senza separatori utili.
+  - aggiunti artists/albumartists alla cache ffprobe e incrementata la versione della cache per
+    evitare di riutilizzare voci prive dei campi plurali.
+  - un export tag FLAC non leggibile viene segnalato come WARN e saltato; non blocca il repair
+    dell'intera libreria. Gli errori di scrittura restano ERROR e fanno fallire la fase.
+  - la sezione completa MusicBrainz di e2m_mancanti_<GG-MM-AAAA>.txt viene preservata quando il report
+    playlist viene rigenerato piu' tardi nella giornata; il controllo album aggiorna il blocco.
+  - README aggiornato e configurazione SKIP_PLAYLISTS documentata per utente; PLAYLIST_PREFIXES
+    non e' piu' una funzione/configurazione attiva.
+Novita' beta-0.73 (MP3 ID3 convergenti, exit status e report robusti):
+  - MP3: la pulizia dell'alias TXXX albumartist usa mutagen/ID3 invece di tentare di
+    cancellarlo con ffmpeg (che nei log continuava a lasciare il frame e riscrivere 168 file
+    a ogni run). Conserva gli altri frame ID3 e non ricodifica l'audio.
+  - run_phase registra le fasi con ritorno False, eccezioni o risultato con errori>0; la
+    pipeline completa continua per produrre tutti i report ma termina con exit code 1 se una
+    fase e' fallita, cosi' cron/monitoring non vedono una run fallita come successo.
+  - check-albums ritorna un esito coerente con gli errori MusicBrainz e sostituisce anche un
+    eventuale blocco MusicBrainz troncato in mancanti, senza duplicarlo.
+  - aggiornata la guida per mutagen e chiarito che album_incompleti e' un nome storico: il
+    report completo e' consolidato in e2m_mancanti_<GG-MM-AAAA>.txt.
+Novita' beta-0.74 (progress bar terminale e log consolidati):
+  - la progress bar ridisegna la stessa riga ogni 500 ms in terminale, non a soglie del 5%;
+    contatore e fase restano a sinistra, barra completa e percentuale sono allineate a destra.
+  - Tee rileva se la console e' interattiva e manda i redraw solo al terminale, senza inserire
+    caratteri CR nel log e2m. I log reindirizzati mantengono checkpoint temporizzati leggibili.
+  - album_db_diagnostics e album_cross_folder_review vengono incorporati nel log e2m e poi
+    cancellati come file autonomi; il report MusicBrainz resta incorporato in mancanti.
+Novita' beta-0.75 (normalizzazione artisti e riparazione album):
+  - barra terminale larga 50 caratteri esatti tra parentesi quadre, spinner animato ogni 100 ms
+    e ridisegno temporizzato della stessa riga; i log e2m non ricevono CR né sequenze ANSI.
+  - la normalizzazione artisti canonizza anche le varianti di punteggiatura (M_O_O_N/M.O.O.N),
+    preferisce il nome bilingue CJK già presente nel catalogo e divide collaborazioni con virgole
+    senza spaccare nomi propri con virgola quando il catalogo riconosce il nome completo.
+  - la riparazione di [Unknown Artist] interviene anche su ALBUMARTIST/ALBUM_ARTIST espliciti,
+    usando cartella e metadati delle tracce solo quando non indicano una compilation.
+  - album_unify ora aggiorna DATE anche sui FLAC senza ORIGINALDATE: un ORIGINALDATE trovato
+    su un'altra traccia non blocca più il campo DATE dell'intero album e non lascia split evitabili.
+  - dedupe_tracks ha un fallback conservativo per doppioni con titolo esatto, stesso numero traccia,
+    durata quasi identica e senza qualificatori live/demo/mix; le diverse incisioni restano protette.
+  - report album_db_diagnostics e album_cross_folder_review sono scritti direttamente nel log e2m,
+    senza creare file autonomi temporanei; il report MusicBrainz resta in mancanti.
+Novita' beta-0.76 (split artisti, deduplica e consolidamento album):
+  - barra fissa da 50 caratteri con spinner a due colonne (trattino lungo incluso), refresh ogni
+    100 ms; la fase/contatore resta a sinistra e spinner + barra + percentuale a destra.
+  - split esplicito e configurabile dei tag composti 'Afro Medusa,West Way' e
+    'Chiello,Powv_FSK', anche se Navidrome ha gia' indicizzato la stringa unita.
+  - canonizzazione stabile M_O_O_N/M.O.O.N e unificazione dei nomi CJK puri con la forma
+    bilingue in catalogo; le collaborazioni non si affidano piu' soltanto al catalogo preesistente.
+  - album_unify sceglie ORIGINALDATE soltanto quando l'anno dominante compare in almeno due
+    tracce e copre il 60% dei tag datati; rimuove ID MusicBrainz non uniformabili anche su M4A/MP4
+    e cancella ALBUMVERSION discordanti quando un titolo/artista esatti vengono consolidati.
+  - dedupe_tracks usa il fallback conservativo FLAC/lossy con titolo esatto e durata quasi uguale
+    anche quando manca un numero traccia; una nuova fase post-unificazione in --all trova doppioni
+    tra cartelle album diverse e li sposta nel cestino solo con --apply. Qualificatori e marcatori
+    espliciti di edizione restano protetti.
+  - corretto NameError in _unify_cross_album_dirs (mappa artisti non inizializzata); UNKNOWN-ALBUMARTIST
+    ignora i componenti placeholder in 'The Cure; Unknown Artist' solo quando resta un nome concreto.
+Novita' beta-0.77 (spinner regolare, alias canonici e date coerenti per album):
+  - spinner a ciclo regolare di quattro frame (/ -> ── -> \\ -> |), avanzamento con indice
+    monotono ogni 100 ms; niente salti legati al clock assoluto, mantenuta la casella a due colonne.
+  - la forma bilingue CJK riusa anche la capitalizzazione esatta della voce canonica gia' nel catalogo;
+    la title-case non crea piu' varianti artificiali come '高中正義 (Masayoshi Takanaka)' rispetto a
+    '高中正義 (masayoshi takanaka)'.
+  - M.O.O.N e' ora un alias canonico forte: il nome gia' presente nel DB non puo' reintrodurre
+    il punto finale in M.O.O.N. o ripristinare M_O_O_N. La grafia finale resta M.O.O.N.
+  - fix_date_tags calcola una data originale affidabile a livello di album logico (incluse cartelle CD1/CD2)
+    usando solo una maggioranza datata >=60% con almeno due tracce. Se esiste, uniforma ORIGINALDATE
+    sulle tracce FLAC dell'album e rimuove DATE discordanti; nel dry-run mostra ogni modifica proposta.
+  - quando ORIGINALDATE esiste, DATE viene rimosso anche se i due valori sono identici: elimina il doppio
+    campo in coerenza con la regola documentata e rende deterministica la data letta da Navidrome.
+  - il rapporto di verifica distingue i fix proposti dalla convergenza del DB: --dry-run non scrive tag
+    e non esegue la scansione Navidrome, quindi non puo' attestare che gli album siano gia' fusi nel DB.
+Novita' beta-0.78 (split artisti generico e barra sempre visibile):
+  - rimossa la dipendenza da ARTIST_SPLIT_OVERRIDES: le virgole senza spazio sono delimitatori
+    generici; le virgole con spazio vengono divise quando il catalogo conferma i componenti o
+    quando una componente coincide con una cartella-artista della traccia.
+  - corretta la causa principale: split_artists accettava prima il nome composto gia' presente
+    nel DB; il riparatore tag inoltre rifiutava collaborazioni se i singoli artisti non erano
+    gia' indicizzati. Ora separatori e contesto del path sono evidenze indipendenti; i nomi reali
+    noti come 'Tyler, The Creator' restano protetti.
+  - corretta una collisione del catalogo: norm() rimuove le parentesi quadre, per cui
+    'The Cure, [Unknown Artist]' collideva con 'The Cure' e la stringa corrotta poteva vincere
+    come grafia canonica. La mappa ignora righe artista che contengono componenti placeholder.
+  - la normalizzazione artisti riusa il contesto di cartella gia' calcolato per file, e quando
+    una lista confermata contiene un artista reale piu' [Unknown Artist], rimuove il placeholder.
+  - barra TTY fissata all'ultima riga fisica: il terminale scrolla nella regione superiore,
+    il ridisegno salva/ripristina il cursore e clear() non cancella piu' la barra prima di ogni
+    messaggio. Anche dopo un ridimensionamento verticale, il cursore di output viene riportato
+    nella regione di scroll prima di riprendere la stampa. I controlli ANSI restano esclusi dal log.
+  - rimossa un'implementazione duplicata di _split_artist_tag_if_known. Il vecchio campo JSON
+    ARTIST_SPLIT_OVERRIDES viene ignorato e segnalato come legacy, mai usato per decidere lo split.
+Novita' 0.79 (colori terminale):
+  - colori ANSI adattivi: titoli di fase in ciano/grassetto, contatori e spinner magenta,
+    barra con bordo ciano, avanzamento verde e parte residua grigio tenue; le percentuali
+    sono in ciano e diventano verdi al 100%.
+  - messaggi [i], [warn], [ERRORE], [dry] e gli esiti delle fasi hanno accenti coerenti.
+  - i colori sono soltanto per un terminale interattivo; NO_COLOR, CLICOLOR=0 e TERM=dumb
+    disabilitano la decorazione. I codici ANSI vengono sempre rimossi dai log e2m.
+  - la barra rimane fissata all'ultima riga, conserva i 50 caratteri interni e il refresh
+    dello spinner resta ogni 100 ms. I colori non influenzano allineamento o rilevamento wrap.
+Novita' 0.80 (spinner compatto, righe terminali atomiche e scansioni piu' rapide):
+  - spinner sostituito con frame Braille a singola colonna (⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏),
+    mantenendo il refresh a 100 ms e senza cambiare la larghezza interna della barra a 50 caratteri.
+  - Tee accumula i frammenti console fino al newline/flush e scrive ogni messaggio completo in un'unica
+    sezione critica: evita che il ticker si inserisca tra il testo di print() e il suo newline, causa
+    delle righe artwork fuse con la barra. Il log e2m continua a ricevere testo semplice.
+  - la scansione artwork aggiorna il denominatore con il numero effettivamente osservato se la cache
+    ffprobe sovrastima i file, così una scansione conclusa non resta al 99% per una stima obsoleta.
+  - _audio_files usa il walker os.scandir condiviso invece di Path.rglob ripetuto per ogni album;
+    riduce le scansioni ricorsive ridondanti nelle fasi di dedupe senza cambiare l'ordine dei file.
+  - dedupe_releases raggruppa prima i nomi delle cartelle e visita i file solo per titoli d'album ripetuti;
+    nel log allegato la fase impiegava 2m40 trovando zero gruppi. dedupe_tracks decodifica i fingerprint
+    di ogni gruppo in parallelo (EXPORTIFY_WAVEFORM_WORKERS, default 2, massimo 4), senza cambiare
+    la logica di correlazione o le regole di cancellazione.
+  - flac_16bit esegue i probe ffprobe in parallelo, con limite configurabile EXPORTIFY_FLAC_PROBE_TIMEOUT
+    (default 30 s, massimo 120) e conteggio esplicito dei timeout/errori; evita che probe sequenziali
+    lenti blocchino per decine di minuti la pipeline. La conversione e l'ordine di applicazione restano sequenziali.
+  - ffprobe seleziona esplicitamente il primo stream audio durante la lettura dei bit: una copertina
+    embedded esposta come stream video non puo' essere scambiata per lo stream audio.
+Novita' beta-0.81 (palette terminale configurabile da JSON):
+  - aggiunta la configurazione TERMINAL_COLORS: tutti i ruoli colore del terminale possono
+    essere modificati indipendentemente, inclusi stato delle fasi, messaggi, durata, label/counter
+    della barra, spinner, bordo, celle piene/vuote e percentuale al 100%.
+  - supportati nomi ANSI, #RRGGBB, 256:N e sgr:N;..., oltre a colori di sfondo e attributi bold,
+    dim, italic, underline e reverse. none rimuove l'accento di un singolo ruolo; enabled=false
+    spegne la palette. Il JSON distribuito usa un insieme iniziale più morbido e meno acceso.
+  - la configurazione dei colori e' validata all'avvio, con errori che indicano il ruolo difettoso;
+    i JSON vecchi senza TERMINAL_COLORS continuano a usare i colori predefiniti del codice.
+  - confermati il rispetto di NO_COLOR/CLICOLOR/TERM, il rilevamento TTY e i log e2m senza ANSI.
+Novita' beta-0.81 (palette terminale configurabile dal JSON):
+  - tutti gli accenti terminale sono configurabili in env/.env con TERMINAL_COLOR_<ROLE>:
+    titoli/fallimenti di fase, contatori, prefissi info/warning/error/dry-run/success, tempi,
+    label/contatore/unita' della barra, spinner, bordo, celle piene/vuote e percentuali.
+  - supporta nomi ANSI (es. blue, bright_cyan), colori truecolor #RRGGBB, indice 256-color
+    (256:81), SGR avanzato (sgr:1;38;5;81), sfondo e attributi bold/dim/italic/underline/reverse.
+    Il valore none disattiva il colore di quel ruolo; TERMINAL_COLORS.enabled=false disattiva tutto.
+  - i ruoli dettagliati hanno fallback sui ruoli base per mantenere compatibilita' con JSON vecchi;
+    NO_COLOR, CLICOLOR=0 e TERM=dumb continuano ad avere la precedenza. Il log e2m resta semplice.
+  - validazione rigorosa dei valori colore: un errore indica il nome del ruolo non valido e blocca
+    il caricamento della configurazione, evitando di avviare una run con palette inaspettata.
+Novita' 0.82 (shutdown pulito della barra e intestazioni fase uniformi):
+  - la barra pinned viene rimossa e la regione di scrolling ripristinata su completamento,
+    eccezioni, Ctrl+C, SIGTERM e SIGHUP; atexit fornisce un ulteriore fallback. SIGKILL e
+    terminazioni forzate non intercettabili restano, per definizione, non gestibili dal processo.
+  - le intestazioni fase usano ora `=== fase nome === X/Y`, con ruolo `phase` e ruolo `counter`
+    indipendenti; le chiusure usano `=== fine fase nome === durata` e riutilizzano esattamente
+    il ruolo `phase`, mentre la durata usa `duration`.
+  - aggiunti i prefissi `[info]` e `[review]`; `[i]` e `[INFO]` sono alias di `info`.
+  - la palette viene precaricata prima delle prime righe e della fase `load_user_config`, cosi'
+    anche banner iniziale, messaggio --all e prima intestazione rispettano subito il JSON.
+  - il JSON distribuito usa la palette personalizzata fornita dall'utente, con `review` amber.
+Novita' 0.83 (ruoli colore per riepiloghi e diagnostica):
+  - aggiunti cinque ruoli JSON indipendenti: waveform_compare, run_mode, release_summary,
+    total_label e total_duration; le righe waveform compare, modo e gruppi release sono
+    colorate come blocchi distinti, mentre TOTALE e il relativo tempo hanno colori separati.
+  - === riepilogo tempi === e === fine riepilogo tempi === usano phase; ogni nome fase nella
+    tabella tempi usa phase e ogni valore elapsed usa duration.
+  - === interrotta: ... === e [!] RUN INTERROTTA usano entrambi phase_failure.
+  - il JSON distribuito conserva la palette personalizzata aggiornata dall'utente, incluso
+    progress_unit verde #77FF94, e aggiunge i cinque ruoli con fallback coerenti.
+Novita' 0.84 (artisti album/traccia separati, alias CJK stabili e metadata write sicuri):
+  - corretta la causa per cui un tag artista vuoto veniva interpretato come [Unknown Artist]:
+    i tag mancanti sono ora distinti dai placeholder espliciti. Un ARTIST mancante viene
+    riempito solo da ARTISTS della stessa traccia o da un'identita' album certa e non-compilation.
+  - la riparazione Unknown Artist mantiene distinti ARTIST/ARTISTS della singola traccia e
+    ALBUMARTIST/ALBUMARTISTS dell'album; non copia la lista dei collaboratori di un album su ogni
+    traccia e non appiattisce compilation o crediti album conflittuali.
+  - la grafia bilingue CJK gia' presente nel catalogo Navidrome e' ora preferita anche in
+    artist_names, album_unify e nel consolidamento cross-folder. Gloss inglesi/romaji univoci
+    diventano alias di ricerca, senza sovrascrivere un artista latino autonomo con lo stesso nome.
+  - le cartelle album con nomi artista CJK/romaji equivalenti possono entrare nello stesso gruppo
+    cross-folder; l'ALBUMARTIST consolidato riutilizza la grafia bilingue del catalogo.
+  - i backup/temp metadata usano una cartella nascosta .e2m-meta-backups quando aggiungere
+    '.meta-backup' o '.tmp' supera NAME_MAX. Il cleanup ripristina backup lasciati da run interrotte
+    ed elimina quelli gia' committati; album_unify non si interrompe piu' su filename lunghi.
+  - M4A/MP4 usa Mutagen per modificare gli atomi tag su una copia temporanea, evitando il remux
+    ffmpeg che nel log 2026-10-30 falliva con exit 234; audio e artwork incorporato sono preservati.
+Novita' 0.85 (diagnostica album, progress log e riepiloghi per fase):
+  - il log principale usa logs/e2m_vVERSION_DD-MM-YYYY.log; esecuzioni ripetute nello stesso
+    giorno/versione vengono accodate con un separatore che riporta ora e opzioni.
+  - il report tracce mancanti, MusicBrainz e copertura libreria e' consolidato in un unico
+    logs/e2m_mancanti_DD-MM-YYYY.txt; non vengono piu' generati sidecar _report.txt.
+  - le barre TTY registrano checkpoint compatti al 0%, ogni 10% e al 100% nel log e2m;
+    ogni barra completata emette sempre una riga finale 100%, anche prima dello shutdown/unpin.
+  - la diagnostica album incorpora fino a due firme tag per ogni riga DB nei gruppi duplicati:
+    ARTIST/ARTISTS, ALBUMARTIST/ALBUMARTISTS, ALBUM, DATE/ORIGINALDATE, ALBUMVERSION e MBID.
+  - le fasi che restituiscono conteggi ma non stampano gia' un riepilogo ricevono una riga
+    [summary] automatica; le righe metriche multi-campo condividono il ruolo colore release_summary.
+  - aggiunto TERMINAL_COLORS.action_label per UNIFY, CROSS-ALBUM, ARTIST-TAG e gli altri
+    marcatori operativi in maiuscolo; [dry] e [dry-run] usano lo stesso ruolo dry.
+  - album_unify mantiene la sua barra conteggiabile; i checkpoint al 10% e il 100% ora sono
+    anche visibili nel log, oltre alla barra fissata nel terminale interattivo.
+Novita' 0.86 (riconciliazione album iterativa, artisti CJK, FLAC/M4A/MP3 e log coerenti):
+  - dopo la scan Navidrome, le correzioni mirate includono dedupe tracce nella cartella album e
+    tra frammenti album con identita' esatta; i passaggi vengono ripetuti finche' il DB converge,
+    con limite massimo di 20 cicli. I candidati fuzzy e le edizioni discordanti restano review-only.
+  - la mappa artisti Navidrome preferisce la forma bilingue CJK(gloss) anche per la chiave del
+    nome Kanji puro, quando esiste un solo candidato non ambiguo; gloss/romaji non sovrascrivono
+    artisti latini autonomi.
+  - `metaflac` non e' piu' un singolo punto di fallimento: in caso di errore i tag Vorbis richiesti
+    vengono aggiornati tramite Mutagen, senza toccare gli altri commenti; entrambi gli errori sono
+    riportati se falliscono anche i due metodi.
+  - `--mp3-vs-flac` applica la gerarchia FLAC > M4A > MP3, confrontando solo copie a qualita'
+    superiore nello stesso album e mantenendo durata/waveform e le protezioni conservative.
+  - tutte le uscite di log predefinite convergono in logs/; il ruolo
+    JSON `log_path` evidenzia i percorsi log con il cyan-azzurro gia' presente nella palette.
+  - la riga di completamento 100% usa la stessa composizione e gli stessi colori della barra pinned.
+Novita' 0.87 (log locali, ruoli operativi, riepiloghi e velocita'):
+  - tutti i log e i report e2m usano logs/ accanto a script e JSON; all'avvio la cartella
+    viene creata se manca, i vecchi file e2m_* vengono raccolti dai percorsi legacy noti e le
+    cartelle e2m/ vengono migrate ricorsivamente senza sovrascrivere file omonimi.
+  - waveform compare, modo APPLY e messaggi operativi (Navidrome stop/start, cestino duplicati)
+    condividono un nuovo ruolo purple `operation`; i riepiloghi numerici riconosciuti, anche con
+    un solo contatore, a due colonne o con valori separati da virgole, usano il giallo `release_summary`.
+  - il riepilogo proprietari playlist diventa `playlist riassegnate: N | esaminate: N`.
+  - date_heal controlla la cache prima delle richieste MusicBrainz: evita i sleep/richieste
+    ripetuti per gli album gia' verificati con la stessa firma cache.
+  - romaji_tags aggiorna MP3 con Mutagen/ID3 su copia temporanea, senza remux FFmpeg; M4A
+    riusa la scrittura diretta MP4 gia' presente. clean_empty riusa il suo os.walk per rilevare
+    anche i conflitti Syncthing e salta a monte le cartelle di metadati @eaDir/.stfolder, mantenendo la scansione delle
+    playlists per rilevare eventuali conflitti Syncthing e l'audio nelle altre cartelle nascoste.
+Novita' 0.88 (report mancanti consolidato, album artist alias e merge cross-folder):
+  - il report di copertura libreria (album assenti e presenti-ma-non-matchati) viene incorporato
+    in e2m_mancanti_DD-MM-YYYY.txt con marcatori, preservato quando il report playlist o MusicBrainz
+    viene rigenerato e aggiornato senza duplicati; _report.txt non viene piu' generato.
+  - durante album_unify vengono rimossi da ALBUMARTIST i componenti [Unknown Artist] ridondanti
+    e gli alias CJK duplicati solo quando un'altra forma equivalente e' effettivamente accreditata
+    nelle ARTIST delle tracce; le ARTIST delle canzoni non vengono modificate da questa pulizia.
+  - i separatori bullet nei crediti ALBUMARTIST vengono normalizzati a '; ' quando ogni componente
+    e' confermato dai crediti delle tracce.
+  - il consolidamento cross-folder usa l'identita' ALBUMARTIST dai tag come fonte primaria invece
+    del solo nome della cartella: frammenti sotto cartelle alias (es. Makaveli/2Pac) possono cosi'
+    essere riconosciuti come lo stesso artista e uniti solo con titolo esatto/alias noto. Fuzzy,
+    edizioni esplicite discordanti e gruppi artista ambigui restano esclusi.
+  - dopo la normalizzazione dei tag, la repair legge i gruppi di album duplicati esatti/alias noti
+    dal DB Navidrome e uniforma i tag a livello album tra tutti i file. Rimuove MBID/RGID
+    discordanti e ALBUMVERSION incongruenti solo quando mantengono separato un gruppo esatto;
+    se esiste un solo ID valido lo propaga alle tracce che ne sono prive. Una data
+    originale comune e attendibile viene uniformata. I crediti ARTIST/ARTISTS delle tracce non
+    vengono mai riscritti da questo passaggio.
+  - le riparazioni MP3 scrivono DATE/ORIGINALDATE, ALBUMVERSION e ID MusicBrainz direttamente
+    via Mutagen ID3 (TDRC/TDOR/TXXX), senza remux FFmpeg; i frame non correlati e l'audio sono
+    preservati. Nei cicli mirati, se un file appartiene a un gruppo duplicato, vengono riparati
+    tutti i file del gruppo e non soltanto il path che ha attivato il ciclo.
+Novita' 0.89 (display CJK bilingue, pulizia album artist e chiave album Navidrome):
+  - la canonicalizzazione conserva esattamente la forma CJK bilingue preferita gia' presente
+    nel catalogo Navidrome (kanji + romaji), senza ri-romanizzarla e sostituire un gloss curato
+    con una lettura fonetica generata o con una variante di maiuscole.
+  - la pulizia ALBUMARTIST confronta i componenti con ARTIST e ARTISTS di tutte le tracce;
+    collassa le varianti CJK equivalenti mantenendo la forma bilingue kanji (romaji) preferita,
+    rimuove [Unknown Artist] se esistono crediti reali e conserva gli altri co-artisti album-level.
+    ARTIST/ARTISTS delle tracce non vengono modificati.
+  - la riparazione dei gruppi album uniforma RELEASEDATE e riconcilia gli ID MusicBrainz
+    sia nei tag dei file sia nelle righe album del DB: ID discordanti nel DB vengono rimossi
+    anche quando i tag dei file sembrano gia' concordi.
+    DATE viene mantenuto distinto nei formati che supportano entrambi i campi; M4A/MP4 usa
+    l'unico atom nativo ©day come RELEASEDATE.
+  - aggiunta la lettura/scrittura RELEASEDATE per FLAC, MP3 (TDRL) e M4A/MP4; ffprobe normalizza
+    TDRL/©day a `date`, quindi il probe lo promuove a RELEASEDATE per evitare riscritture ripetute;
+    la cache dei gruppi e' versionata per forzare una nuova riparazione dei gruppi ancora separati.
+Novita' 0.90 (canonicalizzazione artisti esatta, split collaborazioni e album artist sconosciuti):
+  - aggiunto ARTIST_CANONICAL_NAMES, una mappa artista a chiave lossless che conserva
+    parentesi/romaji/gloss e impedisce alle chiavi NAME_FIXES normalizzate di collidere.
+  - lo split catalog-aware ricostruisce prima i nomi solo-artista piu' lunghi (Tyler, The Creator),
+    ma divide i crediti multi-artista anche se l'intera stringa concatenata e' gia' nel DB;
+    tollera componenti non riconosciuti e rimuove '&'/'and' iniziali dopo le virgole.
+  - le regole esatte valgono per ARTIST, ARTISTS, ALBUMARTIST e ALBUMARTISTS; le compilation
+    mantengono i collaboratori e i tag delle tracce non vengono appiattiti.
+  - aggiunti pin ALBUMARTIST The Cure per Disintegration e Three Imaginary Boys.
+Novita' 0.91 (Lidarr sync dei mancanti e storage Red1):
+  - aggiunge --lidarr-sync: ricalcola i mancanti da tutti i CSV attivi e raggruppa ogni album
+    distinto, non solo i primi 10 mostrati nel riepilogo di e2m_mancanti. La lookup deve
+    confermare titolo e artista in modo univoco; ambiguita'/compilation non vengono forzate.
+  - gli artisti nuovi sono aggiunti con la discografia non monitorata; vengono monitorati e
+    ricercati soltanto gli album presenti nei mancanti. Gli album gia' presenti ma non
+    monitorati vengono attivati; quelli monitorati con trackFileCount < trackCount ricevono
+    una nuova AlbumSearch al massimo ogni LIDARR_SYNC_RESEARCH_DAYS giorni (default 7).
+  - --all abilita la fase dopo il report mancanti; --all --apply aggiunge/monitora e accoda
+    le ricerche. --lidarr-sync standalone fa preview per default; usare --apply per scrivere.
+  - LIBRARY_ROOT, Playlists, exportify CSV/ZIP, database Navidrome, cestino dedupe, cache,
+    sessioni e cookie Exportify hanno default su /mnt/red1/homelab. Le vecchie cartelle ZIP
+    sono sorgenti legacy di migrazione, mai destinazioni. Nessun path musicale usa Toshiba.
+  - aggiunto docker-compose.yml con bind mount espliciti tutti sotto Red1; i segreti restano
+    nel .env. create_host_path=false evita di creare directory host vuote se un mount manca.
+  - blocca le operazioni se /mnt/red1 non e' montato, se una root configurata esce da Red1,
+    o se MUSICA non esiste. Non crea automaticamente la libreria: evita scritture sul disco
+    di sistema e protegge un eventuale tentativo di recupero dati.
 
+==============================================================================
+Novita' 0.92 (preflight Red1 e allineamento root Lidarr):
+  - verifica che LIDARR_MUSIC_ROOT risolva esattamente nella stessa directory host usata da E2M,
+    e che resti sotto il mount Red1; blocca configurazioni stale o una seconda libreria vuota.
+  - docker-compose-safe.sh verifica mountpoint Red1 e tutte le bind-source richieste prima di
+    avviare/creare/riavviare i servizi; non crea directory mancanti. stop/down restano disponibili
+    durante il recupero dei dati.
+Novita' 0.93 (correzione mountpoint Red1 case-sensitive):
+  - uniforma tutti i default, i controlli di mount, i percorsi persistenti e i riferimenti
+    operativi al mount effettivo dichiarato in /etc/fstab: /mnt/red1 (minuscolo).
+  - evita che il preflight cerchi /mnt/Red1, interpretandolo come directory distinta sul
+    filesystem root, quando il disco e' correttamente montato su /mnt/red1.
+Novita' 0.94 (correzione percorso standalone --lidarr-sync):
+  - risolve la selezione utenti subito dopo il caricamento della configurazione, prima dei
+    percorsi utility standalone. --lidarr-sync non raggiunge piu' collect_user_csvs con
+    la variabile sel non inizializzata (UnboundLocalError della v0.93).
+  - la stessa selezione canonica e' riutilizzata dal resto della pipeline, evitando assegnazioni
+    tardive o divergenti tra modalita' standalone e --all.
+Novita' 0.95 (ZIP Exportify e cookie usati da --lidarr-sync):
+  - --lidarr-sync non salta piu' l'estrazione: legge il piu' recente ZIP Exportify disponibile,
+    incluso quello nella vecchia cartella scripts/spotify_csv, e usa i CSV attivi dello ZIP.
+    La preview estrae in una directory temporanea e non modifica i CSV persistenti.
+  - quando esiste un cookie Cookie-Editor <utente>*.json ma manca la sessione Playwright,
+    --fetch e --all importano e verificano il cookie prima di esportare da Exportify; se il
+    login non riesce, resta disponibile lo ZIP locale gia' presente.
+  - la migrazione degli ZIP legacy sposta insieme anche il sidecar <nome>.meta.json, evitando
+    di perdere nomi e copertine originali delle playlist durante lo spostamento su Red1.
+  - saved_albums.csv viene escluso dal calcolo delle tracce mancanti di Lidarr: e' una raccolta
+    di album, non un CSV di playlist con titoli di brani.
+Novita' 0.96 (caricamento env per Lidarr):
+  - il loader legge sia .env sia il file senza punto 'env' accanto allo script; supporta anche
+    ~/homelab/scripts/env. Le variabili gia' impostate nell'ambiente hanno precedenza, mentre
+    una variabile vuota nell'ambiente non blocca il valore valido presente nel file.
+  - stampa soltanto il percorso del file env da cui ha caricato impostazioni, mai i valori segreti.
+  - il default Lidarr per lo script eseguito sull'host diventa http://127.0.0.1:8686, coerente
+    con la pubblicazione Docker 8686:8686; LIDARR_URL puo' comunque sovrascriverlo.
+Novita' 0.97 (Lidarr sync per Album Artist e MusicBrainz ID):
+  - il sync conserva Album Artist Name(s), Album URI e Album Release Date delle righe CSV mancanti;
+    raggruppa le tracce per identita' Spotify dell'album, evitando ricerche duplicate e featuring
+    trattati come artisti principali.
+  - risolve gli artisti su MusicBrainz con nome esatto, scarica/cachea i loro release-group e sceglie
+    solo un titolo esatto con credito artista compatibile; la data Spotify disambigua release-group
+    omonimi. Ambiguita', compilation e identita' non risolte restano in review.
+  - usa direttamente i MusicBrainz ID per le operazioni Lidarr, evitando la ricerca testuale upstream
+    che ha problemi noti; le aggiunte usano foreignArtistId e foreignAlbumId verificati.
+  - aggiunge cache persistente dei cataloghi artista/release-group, rate limit MusicBrainz a 1 richiesta/s,
+    retry limitati e circuit breaker. Gli errori temporanei non vengono mai memorizzati come assenza.
+Novita' 0.98 (monitoraggio selettivo degli album in Lidarr):
+  - corregge il POST /api/v1/album: Lidarr richiede l'oggetto Artist annidato; il solo artistId
+    produceva HTTP 400 e lasciava gli artisti aggiunti senza album monitorati (1005 errori nel log v0.97).
+  - crea l'insieme completo degli MBID album richiesti per artista e lo passa in albumsToMonitor;
+    l'artista resta monitored=true ma monitorNewItems=none.
+  - legge l'intera discografia presente in Lidarr e imposta monitored=true solo sugli album legati
+    a brani mancanti nelle playlist; tutti gli altri album di quegli artisti vengono disattivati.
+  - dopo il POST di un album forza il monitor con l'endpoint bulk Lidarr e accoda la ricerca solo dopo;
+    cosi' evita la race del post-add asincrono che poteva disattivare l'album appena aggiunto.
+  - usa il catalogo album locale Lidarr come fallback esatto per artisti/titoli non risolti da MusicBrainz;
+    le ambiguita' vengono rivalutate in v0.99 confrontando i cataloghi album.
+  - segnala gli MBID ancora assenti dal catalogo Lidarr, cosi' da poterli riprovare alla sync successiva.
+Novita' 0.99 (risoluzione release e artisti ambigui in Lidarr):
+  - quando MusicBrainz restituisce piu' release-group con lo stesso titolo, sceglie quella con la
+    data piu' vicina a Spotify; a parita' sceglie la piu' vecchia. Se Spotify/MB non hanno date
+    confrontabili, usa la release piu' vecchia disponibile (o il record Lidarr piu' vecchio).
+  - tratta le date parziali (solo anno/mese) in modo deterministico, confrontando il primo giorno
+    noto invece di considerare sovrapposto tutto l'intervallo dell'anno.
+  - per artisti omonimi o con nomi molto simili confronta il catalogo release-group di ogni candidato
+    con il titolo esatto dell'album; seleziona l'artista solo se il titolo compare in un solo catalogo.
+  - applica la stessa disambiguazione al catalogo locale Lidarr, anche quando piu' artisti locali
+    hanno nomi uguali/simili; non usa il solo punteggio fuzzy per scegliere un artista.
+  - aggiorna la cache MusicBrainz alla v2, mantenendo i cataloghi gia' scaricati e rinnovando gli
+    esiti negativi/ambigui che non contenevano l'elenco dei candidati.
+Novita' 0.100 (timeout API Lidarr e alias artisti multilingua):
+  - le richieste GET Lidarr hanno retry limitati sui timeout/errori temporanei; la lettura
+    completa degli artisti usa un timeout piu' ampio. Se il catalogo completo non risponde,
+    il sync prova la ricerca mirata per MBID (`/api/v1/artist?mbId=...`) degli artisti gia'
+    risolti, senza interrompere l'intera fase.
+  - quando la lista completa non e' disponibile, non aggiunge artisti non verificabili:
+    evita duplicati e rimanda la creazione degli artisti nuovi alla run successiva.
+  - la ricerca MusicBrainz considera esplicitamente nome artista, alias e sort-name; genera
+    anche una variante fonetica tramite i romanizzatori gia' installati (pykakasi/Hangul),
+    cosi' un nome Spotify in lettere latine puo' trovare un artista MB con nome principale
+    in kanji/kana/hangul e viceversa.
+  - un candidato trovato tramite alias/romanizzazione non viene scelto solo per il nome:
+    il titolo esatto dell'album deve comparire nel suo catalogo release-group e, in caso
+    di omonimi, in un solo catalogo. I nomi originali Spotify restano quelli mostrati in log;
+    le varianti servono soltanto alla ricerca.
+  - cache MusicBrainz aggiornata alla v3: mantiene i cataloghi gia' scaricati e invalida
+    gli esiti negativi/ambigui della ricerca artista, che non contemplavano alias e romanizzazione.
+Novita' 0.101 (sync Lidarr idempotente e gestione album gia' presenti):
+  - prima di ogni POST album non gia' presente nella discografia esegue un lookup esatto
+    GET /api/v1/album?foreignAlbumId=<MBID>; riconosce album gia' aggiunti ma non restituiti
+    dalla GET per artista e filtra localmente per MBID anche se l'API restituisce piu' album.
+  - se il lookup puntuale non risponde, sospende il POST per evitare duplicati; se Lidarr rifiuta
+    un POST come gia' esistente, ripete il lookup e recupera l'album senza contare un errore.
+  - passa images=[] nel POST album per evitare il vincolo NOT NULL su Albums.Images osservato
+    nel log v0.100 quando il metadata provider non fornisce immagini.
+  - il riepilogo distingue gli album aggiunti da quelli gia' presenti e i lookup rinviati.
+Novita' 0.102 (ottimizzazione Lidarr, circuit breaker e riduzione lavoro ripetuto):
+  - legge il catalogo album Lidarr completo con una singola GET /api/v1/album e lo indicizza
+    per artistId; riusa questa fotografia sia per disambiguare gli artisti sia per riconciliare
+    gli album, evitando centinaia di GET per artista e lookup puntuali ridondanti per MBID.
+    Se la lista completa non risponde, mantiene il fallback per artista e i controlli esatti.
+  - interrompe le POST di aggiunta artista/album quando Lidarr segnala che il provider esterno
+    api.lidarr.audio rifiuta la connessione; conta il lavoro rinviato, ma continua a monitorare
+    e disattivare gli album gia' presenti e non ripete decine di POST destinati a fallire.
+  - MusicBrainz: la cache viene scritta ogni 50 album invece che a ogni catalogo artista e ogni
+    10 album; il progress resta parziale se il circuito si apre, senza dichiarare falsamente 100%.
+  - artwork: un rifiuto di connessione apre un circuito per i provider remoti per il resto della
+    run; le copertine non verificate non entrano nella cache negativa e vengono rinviate.
+  - Exportify: un errore in Browser.close non maschera piu' un download gia' salvato o l'eccezione
+    originale; la chiusura fallita viene solo segnalata come warning.
+  - FLAC 16 bit: elimina il secondo ffprobe dopo il rename atomico, perche' il file temporaneo e'
+    gia' stato validato; compressione FLAC predefinita a livello 5 (configurabile 0-12) al posto
+    di 8, riducendo il tempo CPU con un possibile aumento contenuto della dimensione, senza perdita.
+  - TERMINAL_COLORS supporta alias tra ruoli; il JSON distribuito riusa gli stili identici senza
+    duplicare oggetti colore. Sono state rimosse tre funzioni helper interne non piu' usate.
+Novita' 0.103 (configurazione centralizzata e JSONC commentato):
+  - spostati in env/.env i ruoli TERMINAL_COLOR_*, TITLE_MATCH_PENALTY_*, MISSING_ARTWORK_*
+    e AUTO_NAME_TRANSLATION_*; env descrive ogni variabile con un commento.
+  - aggiunti override dei percorsi host per libreria, playlist, ZIP/CSV, config JSON, log,
+    database Navidrome, cache, sessioni e cookie Exportify.
+  - exportify_names.json accetta commenti // e /* ... */; i writer interni preservano
+    le annotazioni quando aggiornano Spotify_USERS o SPOTIFY_LOCAL_PROXY.
+  - rimosso UNIFY_FORCE: album_unify usa i tag, la cartella e il consenso delle tracce;
+    ricostruisce ALBUMARTIST vuoto/Unknown Artist solo con crediti primari coerenti.
+  - ARTIST_CANONICAL_NAMES resta distinta dalle mappe di traduzione/fix e dai gruppi alias.
+  - rimossi i gruppi Ye/Kanye e Parannoul/파란노을 duplicati e una chiave canonica con spazio Unicode duplicata.
+Novita' 0.104 (contatori e colori terminale):
+  - le progress bar mostrano il contatore della fase prima dello spinner; diventa verde al 100%.
+  - il totale delle fasi viene calcolato dopo il caricamento silenzioso della config, cosi' anche
+    la prima intestazione mostra il totale corretto; l'output viene riprodotto nell'ordine usuale.
+  - banner versione con nome script verde, versione ciano e timestamp viola; tutti i percorsi
+    filesystem nel terminale sono viola e il riepilogo Lidarr e' giallo.
+Novita' 0.105 (pianificazione fasi e stato login utenti):
+  - il contatore iniziale include gia' fetch Exportify ed estrazione ZIP per --lidarr-sync;
+    non passa piu' da 1/4 a 2/6 durante la stessa esecuzione.
+  - aggiunto --fetch-status: controlla tutti gli utenti Navidrome e distingue sessioni valide,
+    scadute, mancanti o non verificabili; segnala anche i cookie disponibili senza sessione.
+Novita' 0.106 (colori delle righe informative):
+  - le righe [i] non vengono piu' classificate come riepiloghi numerici solo perche' contengono
+    parole come "estratti" o "indicizzati" e una quantita'; resta blu soltanto [i], mentre
+    i percorsi filesystem incorporati nella riga mantengono il viola.
+Novita' 0.107 (merge multi-disco e fallback Lidarr/MusicBrainz):
+  - gruppi multi-disco riconosciuti solo quando stesso artista e titolo-base hanno almeno due
+    numeri disco distinti (1/2, Disc/Disk/CD); dopo la fusione ALBUM viene scritto senza suffisso.
+  - la riparazione DB Navidrome e la diagnostica riconoscono lo stesso caso; la scelta del titolo
+    non privilegia piu' il disco con piu' tracce (es. The Bends (2)).
+  - un lookup Lidarr /artist?mbId= valido che restituisce [] conferma che quell'MBID non e' ancora
+    presente: l'artista puo' essere aggiunto invece di essere saltato come non verificabile.
+  - se il catalogo MusicBrainz di un artista supera il limite browse, ricerca mirata release-group
+    per MBID artista + titolo, senza dover scaricare migliaia di gruppi o alzare il limite globale.
+  - matching titoli Lidarr usa anche alias/normalizzazione album gia' disponibili (edizioni come
+    Legacy Edition incluse); le date parziali vengono confrontate come intervalli.
+  - con la lista artisti completa non disponibile, verifica gli artisti gia' noti via MBID e
+    riusa la discografia per artista; usa lookup esatti per foreignAlbumId prima di qualsiasi POST.
+  - niente secondo timeout costoso sulle liste complete; circuito aggiunte aperto anche su 502/503/504
+    o POST con esito di trasporto incerto, per evitare raffiche e possibili duplicati.
+Novita' 0.108 (controllo multi-disco globale):
+  - la scansione dei dischi separati non dipende piu' dalle sole cartelle selezionate:
+    anche i passaggi mirati controllano tutta la libreria per coppie disco esplicite.
+  - il controllo globale in modalita' mirata limita le modifiche ai soli gruppi con numeri
+    disco distinti; non ri-unifica in massa altri album/alias non correlati.
+  - logga il numero di cartelle album esaminate dal controllo globale, così e' verificabile
+    che il passaggio copra l'intera libreria e non un singolo album di esempio.
+Novita' 0.109 (report album Lidarr non risolti e profilo discografia estesa):
+  - aggiunta la fase report_lidarr_unresolved_albums dopo --lidarr-sync --apply e --all --apply;
+    elenca ogni voce Spotify che non ha ottenuto un MBID univoco, con motivazione e dati utili.
+    In --lidarr-sync --apply il report giornaliero contiene soltanto questa lista; in --all --apply
+    la sezione viene aggiornata in coda al report tracce/MusicBrainz/copertura gia' esistente.
+  - il report separa gli album realmente senza match dalle voci Spotify diverse che puntano allo
+    stesso release-group MBID; cosi' 1794 - 1290 non viene scambiato per 504 album tutti assenti.
+  - LIDARR_METADATA_PROFILE_NAME/ID permette di assegnare un profilo Metadata personalizzato agli
+    artisti nuovi e aggiornare quello degli artisti esistenti, includendo mixtape, compilation,
+    live, soundtrack, remix e altri tipi se abilitati nel profilo Lidarr.
+  - il riepilogo Lidarr espone i match Spotify prima della deduplicazione, gli MBID unici, i veri
+    album senza match e le voci Spotify che condividono un MBID gia' risolto.
+  - il report include anche gli Spotify URI per gli album con MBID risolto ma aggiunta/verifica
+    Lidarr fallita o rinviata, e quelli ancora assenti dal catalogo a fine sync.
+  - corretto l'update degli artisti esistenti: la PUT invia davvero il nuovo metadataProfileId
+    selezionato, invece di riutilizzare il valore precedente.
+Novita' 0.110 (fallback MusicBrainz e recupero album gia presenti):
+  - aggiunta una seconda ricerca MusicBrainz combinata titolo + artist-credit. Usa i campi
+    releasegroup/release e artistname/creditname, poi verifica localmente titolo esatto/alias
+    e MBID dell'artista prima di accettare il candidato; recupera artisti che la ricerca
+    separata per nome o il browse della discografia non riuscivano a risolvere.
+  - la ricerca combinata usa anche le varianti alias/romaji e i titoli base senza annotazioni
+    di edizione, mantenendo separati i titoli non equivalenti e i credit Various Artists.
+  - se Lidarr contiene gia' un album dello stesso artista con titolo normalizzato identico,
+    ma un diverso release-group MBID, riusa il record esistente e lo monitora invece di
+    inviare un POST che Lidarr rifiutera' come AlbumExistsValidator; titoli Deluxe/Standard
+    diversi restano distinti e non vengono collassati da questo fallback.
+  - aggiunto il contatore degli album riutilizzati per titolo esatto con MBID diverso.
+Novita' 0.111 (correzione artisti dai metadati Lidarr):
+  - aggiunta la fase lidarr_artist_tag_repair in --lidarr-sync e --all: confronta ogni album
+    locale con il catalogo completo Lidarr e corregge ARTIST/ALBUMARTIST in base al nome
+    ufficiale dell'artista Lidarr; aggiorna ARTISTS/ALBUMARTISTS quando contengono
+    lo stesso singolo artista, senza cancellare featuring o crediti multipli.
+  - la corrispondenza usa prima il Release Group MBID, poi titolo album esatto e infine chiavi
+    titolo conservative che ignorano solo annotazioni di edizione/disco; gli omonimi fra artisti
+    diversi vengono risolti solo con prove esplicite e i casi ambigui restano invariati.
+  - la fase lavora su tutta la libreria; distingue piu' album nella stessa cartella artista
+    e unisce soltanto i suffissi espliciti Disc/Disk/CD N, preservando Deluxe/Remastered;
+    conserva i tag non artista e registra anteprima, album/file corretti, ambiguita' ed errori.
+  - dopo la sostituzione con il nome Lidarr, una fase mirata artist_names applica le forme
+    bilingui e le traduzioni configurate (NAME_TRANSLATIONS/NAME_FIXES) ai soli file cambiati;
+    segue una scan Navidrome incrementale se sono disponibili le credenziali e lo scan non e' disabilitato.
+Novita' 0.112 (catalogo Lidarr da SQLite e stop ai timeout globali):
+  - richiede il catalogo host-side lidarr.db accessibile in modalita' SQLite rigorosamente read-only;
+    supporta sia lo schema storico (ForeignArtistId/Name in Artists) sia quello recente
+    (join Artists.ArtistMetadataId -> ArtistMetadata), con mapping Album.ArtistMetadataId
+    sull'ID locale dell'artista. Il default e' <E2M_CONFIG_ROOT>/lidarr/lidarr.db; override LIDARR_DB_PATH.
+  - nel percorso lidarr_sync elimina le GET lista /api/v1/artist e /api/v1/album, anche
+    quando /album e' filtrata per artistId, albumIds o foreignAlbumId: il mapper delle liste
+    calcola comunque ArtistStatistics() per l'intera libreria e puo' scadere su librerie grandi.
+  - elimina anche il fallback GET /artist?mbId: quel filtro calcola statistiche globali prima
+    di filtrare. Se SQLite non e' leggibile, il sync si ferma prima delle aggiunte invece di
+    aspettare timeout ripetuti o rischiare POST duplicati.
+  - lo snapshot SQLite viene condiviso con lidarr_artist_tag_repair; gli album di un artista
+    nuovo e i controlli MBID anti-duplicato usano query SQLite mirate, non GET lista filtrate.
+    Resta soltanto GET /artist/{id} per aggiornare i dettagli di un singolo artista.
+  - replica da SQLite la query ufficiale Lidarr delle statistiche Tracks/AlbumReleases e legge
+    LastSearchTime direttamente da Albums: le ricerche di recupero degli album gia monitorati
+    mantengono il conteggio file e il cooldown di 7 giorni anche senza la vecchia GET globale.
+Novita' 0.113 (barra fissata per ogni fase):
+  - ogni run_phase crea una barra di fase dedicata, sempre visibile in TTY anche quando
+    la funzione non espone una propria percentuale; le barre interne mostrano il progresso
+    dettagliato senza sostituire/nascondere quella della fase.
+  - le barre annidate ora occupano righe fissate separate: fase in basso, sottofase sopra,
+    attivita' ffprobe ancora sopra. L'output ordinario scorre soltanto nella regione libera.
+  - il layout viene aggiornato quando si aprono/chiudono barre o cambia la dimensione del
+    terminale; Ctrl+C, SIGTERM e chiusure anomale liberano tutte le righe riservate.
+  - le barre di fase non aggiungono righe 100% artificiali nei log non interattivi; i log
+    continuano a contenere i checkpoint delle barre di lavoro reali.
+  - il calcolo della larghezza minima include il contatore fase, evitando wrap su terminali
+    stretti e mantenendo spinner/barra/percentuale sulla stessa riga.
+Novita' 0.114 (una barra per fase e tag artista Lidarr affidabili):
+  - ogni fase mostra una sola barra pinned per tutta la sua durata. Le barre interne di
+    artist_names, ffprobe, scansioni e sotto-attivita' sono soppresse durante run_phase:
+    non riservano righe, non stampano progressi separati e non sostituiscono la barra fase.
+    Le attivita' continuano normalmente; la barra fase resta animata e termina al 100%.
+  - i nomi artista canonici letti da Lidarr diventano identita' autorevoli durante la fase
+    bilingue successiva. Un nome ufficiale con virgola (es. Tyler, The Creator) resta un
+    singolo artista anche se Navidrome contiene ancora le voci separate Tyler / The Creator.
+    I vecchi tag gia' divisi con punto e virgola vengono ricomposti solo se i componenti
+    coincidono esattamente e nello stesso ordine con il nome completo presente in Lidarr.
+  - la riparazione Lidarr sostituisce integralmente i campi ALBUMARTIST/ALBUMARTISTS,
+    rimuovendo anche alias Vorbis legacy (ALBUM_ARTIST, ALBUM ARTIST, ecc.) che potevano
+    mantenere il vecchio artista accanto a quello corretto (issue #13/#15). Rimuove anche
+    i placeholder Unknown Artist dai crediti delle tracce quando Lidarr identifica l'artista.
+  - per MP3/MP4 vengono rimossi anche i frame/atomi album-artist legacy e plurali prima
+    di scrivere il nome Lidarr; le credenziali ARTIST/ARTISTS dei featuring restano intatte
+    quando non rappresentano semplicemente il vecchio artista principale.
+  - la fase di matching continua a confrontare titolo album e artista con il catalogo
+    Lidarr; non vengono divisi i nomi Lidarr ufficiali e non vengono rinominati gli album.
+Novita' 0.115 (proxy Spotify integrati e copertura Lidarr degli album salvati):
+  - --all include ora la scansione SPOTIFY_LOCAL_PROXY del catalogo Spotify e la generazione
+    degli MP3 locali, nell'ordine scansione -> aggiornamento auto_albums -> build. --apply
+    applica il JSON e crea i proxy; senza --apply entrambe le fasi restano in anteprima.
+    Un errore delle credenziali/API Spotify non interrompe le altre fasi: i proxy manuali
+    vengono comunque generati e gli album automatici non verificati restano invariati.
+  - Lidarr riceve anche gli album da saved_albums.csv, distinti dalle tracce mancanti delle
+    playlist; gli URI Spotify artista/album e la data vengono usati per risolvere i crediti.
+    Il report mostra la provenienza e il conteggio delle tracce mancanti resta separato.
+  - proxy Spotify compatti: default 32k mono; bitrate configurabile da 32k a 320k e canali
+    configurabili (1=mono, 2=stereo). Non vengono mai modificati i sorgenti FLAC.
+  - indicizzazione delle cartelle proxy eseguita in una sola passata, invece di riscannerle
+    per ogni criterio album; mantiene il fallback tag per i nomi cartella non standard.
+  - il manifest registra codec/bitrate/canali: un proxy creato in precedenza a 64k stereo viene
+    rigenerato quando la configurazione passa a 32k mono; le run successive saltano i file invariati.
+  - la lista auto_albums proposta dalla scansione viene passata subito al builder nella stessa
+    --all, anche in preview; non occorre attendere il run successivo per vedere i proxy proposti.
+Novita' 0.116 (recupero artwork MusicBrainz e embedding nei file audio):
+  - la fase recover_and_embed_album_artwork (ex download_missing_album_artwork) e' stata estesa: prima prova il release MBID e il
+    release-group MBID, poi cerca il gruppo esatto su MusicBrainz e usa Cover Art Archive;
+    iTunes e Deezer restano fallback. MusicBrainz/Cover Art Archive e' preferito a Google
+    Images perche' i risultati sono collegati a un album/credit specifico, non a immagini
+    generiche che possono appartenere a edizioni o artisti omonimi.
+  - ogni cover scaricata viene salvata nella cartella album come cover.* e incorporata nelle
+    tracce che ne sono sprovviste (FLAC, MP3, M4A/MP4, Ogg Vorbis, Opus e WAV). Le cover
+    gia' incorporate non vengono sovrascritte; le tracce non supportate o in errore sono
+    contate separatamente. Anche le cover esterne gia' presenti vengono usate per completare
+    l'embedding mancante.
+  - quando una traccia contiene gia' l'unica cover, questa viene estratta e propagata alle
+    altre tracce dell'album e alla cartella, senza una nuova ricerca web.
+  - incrementato il limite predefinito di album interrogati per run a 250; la cache negativa
+    viene aggiornata alla nuova versione, cosi' gli album non trovati con i vecchi provider
+    vengono riesaminati anche con la ricerca MusicBrainz. Retry negativo ridotto a 14 giorni.
+  - aggiunta MISSING_ARTWORK_EMBED_AUDIO (default true); --all continua a includere la fase
+    artwork e --no-artwork-download la salta come prima.
+Novita' 0.117 (embedding artwork senza Mutagen e contatore fasi coerente):
+  - il log v0.116 ha mostrato 2.132 errori embedding causati da `ModuleNotFoundError: mutagen`.
+    FLAC ora usa `metaflac` come fallback nativo; MP3 e M4A usano un remux ffmpeg con `-c copy`
+    (nessuna ricodifica audio). Mutagen resta il backend per Ogg/Opus/WAV quando disponibile.
+  - cover gia' presenti sane non vengono piu' toccate. Per default una cover sotto 32 KiB e'
+    considerata troppo piccola: solo album senza cover o con cover sotto soglia vengono cercati;
+    anche le immagini embedded piccole possono essere sostituite, quelle sane restano intatte.
+    La soglia e' configurabile con MISSING_ARTWORK_MIN_EXISTING_COVER_BYTES.
+  - se una traccia ha una cover embedded sana ma la cartella non ce l'ha (o ha una cover piccola),
+    la cover viene estratta con Mutagen o ffmpeg e propagata solo ai file mancanti/piccoli.
+  - il contatore iniziale prevede le scan pre/fallback e la scan eventuale dopo artwork; se una scan
+    condizionale non serve o una fase successiva viene saltata, la relativa voce viene rimossa dal totale.
+    Evita salti tardivi del denominatore e finali ingannevoli come 39/46.
+  - rimosse le righe artificiali `0/1 fase`: resta lo spinner della fase con il contatore globale.
+Novita' 0.118 (deduplicazione album-artist tramite identita' MusicBrainz e pulizia completa FLAC):
+  - la pulizia albumartist richiede un artista primario coerente su almeno il 75% delle tracce;
+    compilation e album con primaria ambigua non vengono mai fusi automaticamente.
+  - quando albumartist e tracce non concordano, risolve il nome primario in MusicBrainz e carica
+    gli alias ufficiali tramite MBID (`inc=aliases`). Gli alias sono applicati solo all'album e
+    all'identita' verificata: `Prodigy` e' riconosciuto come alias di `The Prodigy`, senza fondere
+    globalmente l'omonimo artista rap o altre entita'.
+  - cerca inoltre il release-group esatto per MBID artista + titolo album. Solo se tutti i release-
+    group esatti concordano su un unico MBID artista, elimina i nomi album-only non presenti nelle
+    tracce: cosi' vengono rimossi anche vecchi alias non registrati in MusicBrainz. Se il release-
+    group ha piu' artisti, le tracce hanno ospiti, le edizioni discordano o la ricerca fallisce,
+    i collaboratori non abbinati vengono conservati. I tag ARTIST/ARTISTS delle tracce non cambiano.
+  - sui FLAC vengono letti i commenti Vorbis grezzi solo per album con mismatch, inclusi valori
+    ripetuti e chiavi legacy (`ALBUM_ARTIST`, `ALBUMARTISTS`, ecc.). La scrittura rimuove tutte le
+    varianti e ricrea i campi singolare/plurale mantenendo separati i rispettivi crediti.
+  - la riparazione tag Lidarr usa la stessa prova MBID/release-group prima di scrivere il nome
+    canonico, evitando che il passaggio successivo reintroduca un alias gia' rimosso; ricontrolla
+    inoltre i commenti FLAC grezzi quando i campi visibili non corrispondono all'artista scelto.
+  - la cache MusicBrainz versione 4 conserva ricerche/cataloghi esistenti e memorizza alias per
+    MBID e ricerche release-group per album, riutilizzandoli tra le esecuzioni.
+Novita' 0.119 (deduplicazione intra-album estesa a slot disco/traccia e tutti i formati audio):
+  - la fase dedupe_tracks cerca ora i duplicati sia per titolo sia per posizione disco/traccia;
+    cosi' rileva anche copie dello stesso audio con tag titolo differenti o errati.
+  - il confronto per posizione e' consapevole dei multi-disco: CD1/01 e CD2/01 non vengono
+    confusi. Senza numero disco usa il percorso CD/Disc/Vinyl quando disponibile.
+  - i gruppi con titoli diversi vengono rimossi solo dopo conferma waveform; senza NumPy
+    resta attivo il fallback metadata molto conservativo e le coppie ambigue sono preservate.
+  - la scansione intra-album include tutti i formati indicizzati da Navidrome (FLAC, MP3,
+    M4A, WAV, APE, WV, AIFF, DSF, DFF, MPC, TTA, MKA, OGA, MP2, M4B e altri).
+  - probe cache v5: conserva anche i tag disco, evitando di confondere le tracce omonime
+    per numero tra CD diversi; la cache v4 viene lasciata intatta e non riutilizzata per errore.
+  - --all continua a eseguire la fase dedupe_tracks gia' prevista; ora passa anche
+    --library-root alla fase e il risultato viene spostato nel cestino dedupe standard.
+Novita' 0.120 (import slskd legacy e contatore fasi stabile):
+  - --all controlla la cartella host /mnt/red1/homelab/slskd/downloads e, se contiene
+    audio, invia a Lidarr DownloadedAlbumsScan usando il path container /downloads/slskd.
+  - la vecchia MUSICA/_slskd-old viene spostata fuori dalla libreria nello staging slskd
+    con un nome non sovrascrivente; failed_imports viene preservata separatamente.
+  - l'import attende il completamento del comando Lidarr prima di riallineare i path;
+    SLKSD_IMPORT_FOLDER e SLKSD_DOWNLOADS_HOST consentono override distinti host/container.
+  - il riepilogo tempi numera le fasi e colora in giallo il numero.
+  - il totale fasi e' fissato prima della prima intestazione e non cresce durante la run.
+Novita' 0.121 (ripristino display bilingue dopo riparazione Lidarr):
+  - un nome Lidarr solo in kanji non prevale piu' su una forma bilingue gia' presente
+    in Navidrome; la fase bilingue ripristina il gloss dopo la riscrittura dei tag Lidarr.
+  - i nomi CJK puri vengono collegati anche quando una cartella contiene spazi interni
+    non significativi (es. 高中 正義 / 高中正義), riutilizzando la forma canonica bilingue.
+  - ARTIST_CANONICAL_NAMES riconosce le varianti CJK con spazi accidentali senza
+    modificare le chiavi o i valori salvati nella configurazione.
+Novita' 0.122 (Lidarr folder-fix via SQLite, failover traduzione e progressi di fase):
+  - run_lidarr_folder_fix non chiama piu' il GET completo /api/v1/artist: legge artisti e path
+    dal database Lidarr in sola lettura; il GET API puntuale viene usato soltanto per il PUT
+    di un artista con cartella da correggere, evitando il timeout causato dalle statistiche globali.
+  - SLKSD_FAILED_FOLDER accetta sia un path host sia il vecchio path container /downloads/slskd/...;
+    il secondo viene tradotto nel corrispondente path host e la directory assente resta informativa.
+  - la traduzione automatica tenta anche il dominio alternativo translate.google.com e registra
+    il motivo effettivo del fallback, invece del solo RuntimeError generico.
+  - le progress bar interne alle fasi alimentano l'unica barra di fase pinned: le fasi con un
+    contatore reale mostrano di nuovo barra, percentuale e progresso, senza barre annidate.
+Novita' 0.123 (contatore sottofasi e una sola riga pinned):
+  - ogni fase mantiene una sola riga pinned; i progressi interni condividono quella riga e
+    non stampano piu' snapshot 100% separati o barre annidate.
+  - le fasi con sottoattivita' prevedibili mostrano X/Y in blu accanto al contatore fase;
+    ogni sottofase completata stampa `Sottofase X/Y completata` in giallo.
+  - il totale delle sottofasi viene pianificato prima dell'avvio; se il conteggio supera
+    il limite o non e' stimabile entro il budget, il contatore sottofase viene disattivato.
+  - i progressi tecnici ffprobe restano sulla riga pinned ma non creano sottofasi autonome.
+Novita' 0.124 (piano fasi ricalcolato, verifica artwork multi-catalogo e album artist ridondanti):
+  - il contatore principale viene ricalcolato ai confini dei rami dinamici (scan/Lidarr/artwork):
+    le riserve per riconciliazioni Navidrome non eseguite vengono tolte prima delle fasi residue;
+    prima dell'artwork e' gia' incluso lo scan opzionale, mentre dopo l'esito artwork restano solo
+    le fasi realmente previste. Il riepilogo tempi riallinea il totale al numero di fasi eseguite.
+  - le cover locali sane vengono verificate contro il front approvato della release esatta nel Cover Art Archive;
+    se la release esatta mostra una copertina diversa, la sostituzione richiede anche accordo visivo
+    multi-catalogo con il front CAA e metadata concordi di almeno due cataloghi tra Apple, Deezer e Spotify.
+    Le immagini Spotify non vengono scaricate o salvate; Spotify viene usato solo come riscontro metadata.
+  - se e' disponibile solo un release-group o manca l'MBID, la cover locale viene verificata contro
+    l'immagine concordata da multi-catalogo; il match fuzzy non autorizza mai una sovrascrittura.
+    I fallback TheAudioDB, Wikimedia Commons, Apple/iTunes e Deezer richiedono corrispondenza
+    prudente artista+album; una proposta album viene accettata solo con dHash concorde fra
+    almeno due provider indipendenti. Google Images resta un suggerimento di revisione.
+  - le verifiche coprono anche gli album senza MBID, a lotti di massimo 50/run; la cache v4 viene
+    invalidata per rifare le verifiche con le regole visive piu' severe (cache v5).
+  - cleanup albumartist: collassa componenti ridondanti come 'The Prodigy, Prodigy' solo quando
+    i tag ARTIST delle tracce dimostrano un unico artista dominante; completa anche ALBUMARTIST
+    placeholder/unknown con il credito principale verificato delle tracce.
+Novita' 0.125 (piano fasi dinamico esatto e pulizia del codice contatore):
+  - rimosse le 13 riserve fisse e le 10 sottofasi di riconciliazione precontate: ogni ciclo viene
+    prenotato solo dopo aver rilevato album realmente cambiati e rilascia le fasi saltate in caso
+    di errore; funziona anche con piu' cicli e con --all senza --lidarr-sync.
+  - scansioni Navidrome di fallback, diagnosi post-scan, star_liked, fasi artista Lidarr, pulizia
+    M3U/DB e scan dopo artwork vengono aggiunte al totale solo quando la relativa condizione e'
+    effettivamente vera; eliminate le riserve opzionali basate su stime.
+  - rimossi parametri/globali del contatore non usati e unificata la gestione delle riserve;
+    il totale iniziale contiene solo fasi deterministiche, i checkpoint aggiornano soltanto il residuo.
+  - la riconciliazione album mirata non viene eseguita in --sync-only, che resta una sincronizzazione.
+  - --flac-16bit viene riconosciuto come manutenzione standalone e non avvia per errore la sync playlist;
+    la stima --missing include fetch/unzip; Lidarr preview/apply conta il fetch solo se viene eseguito;
+    --sync-proxy-favorites usa run_phase come le altre utility.
+  - la condizione di import slskd viene fotografata una volta e riutilizzata da piano ed esecuzione,
+    evitando divergenze se Soularr sposta file mentre la pipeline parte.
+  - rimossi gli helper privati non piu' chiamati _has_local_album_art e _lidarr_query; condivisi i
+    conteggi manutenzione/artwork/proxy tra planner ed esecuzione per evitare divergenze future.
+Novita' 0.126 (artwork completo, artisti cirillici, Lidarr conservativo e matching soundtrack):
+  - la verifica delle cover sane non ha piu' un tetto predefinito di 50 album: 0 significa tutti;
+    inizializzati anche i contatori del recupero artwork che causavano UnboundLocalError a fine fase.
+  - il planner non preconta piu' sottofasi artwork condizionali: evita X/Y non raggiungibili quando
+    non ci sono download, embedding o verifiche da fare; il contatore principale resta dinamico.
+  - romanizzazione fonetica offline dell'alfabeto russo (inclusi ё, ж, х, ц, ч, ш, щ, ы, э, ю, я),
+    con forma bilingue originale + traslitterazione e rispetto dei mapping manuali.
+  - cleanup Unknown Artist esteso ai commenti FLAC ALBUM_ARTIST legacy; le scritture rimuovono
+    tutte le varianti singular/plural senza toccare i crediti ARTIST/ARTISTS dei brani.
+  - Lidarr non disattiva piu' il monitoraggio degli album preesistenti non richiesti; la sync
+    abilita soltanto quelli richiesti dalle playlist mancanti/saved albums.
+  - matching Lidarr ampliato con alias di titolo conservativi per soundtrack/OST e relative
+    edizioni; se il publisher non è riconosciuto prova anche gli artisti delle tracce mancanti,
+    sempre con titolo esatto, artist-credit MusicBrainz e selezione release/data.
+Novita' 0.127 (database Navidrome indipendente dal mount musicale):
+  - E2M_NAVIDROME_DB non viene piu' obbligato a risolversi sotto E2M_STORAGE_MOUNT:
+    il database puo' vivere nella directory host montata da Docker per /data, anche se
+    e' su un filesystem separato o raggiunto tramite symlink. Gli altri percorsi persistenti
+    restano protetti dal controllo del mount; la directory padre del DB deve esistere.
+  - il preflight segnala il percorso effettivo del DB quando e' esterno al mount, senza
+    bloccare la run; rifiuta comunque una directory inesistente o un path che punta a una directory.
+Novita' 0.128 (artwork provider-aware, ripresa equa, audit FLAC #15 e fasi opzionali):
+  - i circuit breaker artwork sono ora indipendenti per MusicBrainz, Cover Art Archive, Apple/iTunes e Deezer:
+    un provider irraggiungibile non sospende gli altri; HTTP 429/5xx e rifiuti di connessione applicano
+    backoff per provider e non producono cache negative.
+  - le verifiche artwork interrotte da errori rete non vengono memorizzate come review definitive; gli album
+    restano riprovabili. Il batch limitato ruota tra i candidati, evitando che una coda iniziale bloccata
+    impedisca agli album successivi di essere processati nelle run seguenti.
+  - audit raw dei commenti FLAC ALBUMARTIST/ALBUM_ARTIST/ALBUMARTISTS prima della pulizia, anche quando
+    ffprobe mostra già il nome corretto: intercetta il duplicato legacy nascosto che manteneva [Unknown Artist]
+    e fa ripulire tutte le varianti. Il repair Unknown Artist legge inoltre i crediti raw ARTIST/ARTISTS.
+  - Lidarr: il controllo MBID usa già la fotografia SQLite globale prima del POST; se Lidarr risponde comunque
+    AlbumExistsValidator, la ricerca di recupero aggiorna la fotografia globale invece di controllare soltanto
+    la discografia dell'artista. I conflitti reali di MBID vengono descritti senza ripetere POST.
+  - l'import slskd non viene più segnato come fallito solo perché il passaggio accessorio di riallineamento
+    path non trova cartelle di artisti non presenti localmente; il risultato DownloadedAlbumsScan resta distinto.
+  - in --all la scansione automatica dei proxy Spotify viene saltata chiaramente se mancano credenziali API,
+    preservando auto_albums e continuando con i proxy manuali. Il comando autonomo resta rigoroso.
+Novita' 0.129 (Google Images fallback, immagini artista e traduzione cirillica):
+  - per le cover album ancora mancanti, dopo CAA/MusicBrainz e il consenso multi-catalogo viene cercata
+    Google Images con la query richiesta '<album> album cover', poi con artista+album. Sono accettati
+    soltanto URL HTTPS pubblici, redirect sicuri e immagini JPG/PNG/WEBP realmente decodificabili,
+    abbastanza grandi e con proporzioni da copertina; le immagini folder sane non vengono sostituite.
+  - aggiunta la ricerca delle immagini artista mancanti: il gloss inglese dei tag bilingui o la
+    traduzione/alias inglese viene provato prima della romanizzazione e del nome originale; ogni
+    variante passa da Deezer e poi Google Images. Le immagini vengono salvate come artist.* nella
+    cartella artista, secondo la priorita' locale predefinita di Navidrome, senza embedding audio.
+  - coda e cache negative per gli artisti separate da quelle degli album, con batch round-robin;
+    la cache v7 invalida i vecchi no-result album, che erano stati calcolati senza Google Images.
+  - l'auto-traduzione inglese include ora il cirillico russo. La traduzione semantica verificata
+    precede la romanizzazione fonetica; se Google restituisce soltanto una lettura fonetica, la
+    euristica la scarta e mantiene il fallback cirillico/traslitterato.
+Novita' 0.130 (configurazione artwork artista):
+  - MISSING_ARTWORK_ARTIST_ENABLED controlla correttamente il recupero artisti; resta accettato
+    anche il nome interno storico MISSING_ARTWORK_ARTIST_ART_ENABLED per compatibilita'.
+Novita' 0.131 (refresh artwork Navidrome dopo i download):
+  - dopo uno scan libreria riuscito, i nuovi file cover/artist.* vengono applicati alla cache artwork
+    Navidrome con `artwork reprocess --kind ar --kind al --source absent --yes`; si ritentano solo
+    artisti e album attualmente senza immagine, senza rilanciare lookup esterni per tutta la libreria.
+  - l'assenza o l'incompatibilita' della CLI artwork nel container produce un avviso non bloccante.
+Novita' 0.132 (immagini originali Google-hosted):
+  - i risultati Google Images ospitati su googleusercontent.com/gstatic.com non vengono esclusi
+    in blocco: sono accettati solo se il file originale supera soglia byte, dimensioni e proporzioni;
+    i domini delle thumbnail `encrypted-tbn` restano rifiutati.
+Novita' 0.133 (coda artwork riprendibile, alias artista e diagnosi album):
+  - il cursore album/artista avanza soltanto dopo un elemento realmente completato; se tutti i provider
+    utili vanno in cooldown, la fase interrompe il batch senza saltare gli elementi non tentati. La run
+    successiva riparte dal primo candidato ancora incompleto, non dall'inizio o dalla fine del batch.
+  - ricerca ritratti rigorosamente nell'ordine nome inglese (gloss/NAME_TRANSLATIONS/NAME_FIXES/
+    traduzione automatica accettata) -> grafia originale; rimossa la query fonetica intermedia che
+    poteva consumare richieste prima del nome originale.
+  - se una cartella bilingue e una cartella col nome originale identificano in modo univoco lo stesso
+    artista, copia il file locale artist.* gia' valido invece di richiedere un nuovo download. In caso
+    di alias condiviso da piu' cartelle non effettua copie automatiche.
+  - report per run con esito di ogni album senza cover: scaricato, cache negativo, batch rinviato,
+    disaccordo cataloghi, immagine non valida o errore provider. Il riepilogo non confonde piu' i tentativi
+    effettivi con gli artisti saltati dopo il guasto della rete.
+  - corretti contatori duplicati nella struttura di ritorno artwork e aggiornato il formato cache v8.
+Novita' 0.134 (fair queue artwork, priorita' bilingue e report album completo):
+  - gli artisti con un nome inglese e una grafia originale vengono messi in testa alla coda; per ciascuno
+    la ricerca usa prima tutti gli alias/gloss inglesi e soltanto dopo il nome originale. Sono riconosciute
+    entrambe le disposizioni del gloss, ad esempio "Я сошла с ума (I Went Crazy)" e viceversa.
+  - il cursore round-robin artista/album avanza dopo ogni elemento realmente interrogato; se tutti i
+    provider sono indisponibili, ruota oltre il batch differito e riprende dalla coda successiva.
+  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
+    gli altri provider usati per gli album.
+  - il log stampa l'esito nominativo di ogni album candidato e degli artisti rinviati; i conteggi usano
+    identita' uniche, evitando di sommare due volte errori e rinvii dello stesso album.
+  - i ritratti locali di alias bilingui vengono riutilizzati quando la corrispondenza tra cartelle e' univoca.
+Novita' 0.135 (diagnostica artwork verificabile e coda artisti piu' efficiente):
+  - affinata la diagnosi per album: ogni candidato ottiene un esito nominativo, mentre i riepiloghi
+    distinguono risultati negativi completi, errori temporanei, verifiche di cover sane e sostituzioni.
+    Gli errori e i rinvii dello stesso album non vengono conteggiati come due album diversi.
+  - la ricerca artista bilingue resta ordinata per tutti i nomi inglesi/gloss prima della grafia originale;
+    i target bilingui precedono quelli monolingui e possono riutilizzare un artist.* locale solo quando
+    la corrispondenza tra cartelle alias e' univoca.
+  - il cursore round-robin avanza dopo ogni query effettiva. Se i provider diventano indisponibili,
+    ruota oltre la coda differita selezionata, cosi' la run successiva puo' raggiungere gli altri target;
+    gli elementi rinviati restano nella coda circolare e tornano eleggibili al giro successivo.
+  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
+    gli altri provider album; un guasto non correlato non trasforma una ricerca artista in retry.
+  - rimossi helper e rami ridondanti non usati, evitata un'assegnazione senza effetto e semplificato
+    il ciclo di failover della traduzione automatica.
+Novita' 0.136 (fix artwork crash e file audio obsoleti):
+  - corretta la barra di avanzamento del download artwork: la fase usa album_progress, non una variabile
+    progress inesistente. Il NameError non interrompe piu' la fase prima dell'embedding e dei ritratti artista.
+  - la riparazione Unknown Artist filtra i percorsi gia' rimossi e tratta un file sparito tra probe e scrittura
+    come elemento obsoleto/rinviato, non come errore di metadati. Gli errori reali di scrittura restano fatali.
+  - il riepilogo della riparazione mostra separatamente i file non piu' disponibili, senza contarli come errori.
+Novita' 0.137 (cover playlist Spotify e retry artwork mirati):
+  - acquisizione cover Spotify compatibile con piu' forme JSON (images, image, imageUrl,
+    coverUrl, artworkUrl e URL annidati), mantenendo la whitelist dei CDN Spotify;
+  - verifica magic-bytes del sidecar prima di saltare un download gia' sincronizzato;
+  - dopo lo scan, refresh mirato in Navidrome delle sole playlist il cui sidecar e' cambiato,
+    cosi' la cache artwork non continua a mostrare la vecchia immagine;
+  - ampliati i tentativi Google Images con varianti titolo/punteggiatura (es. Vol.1 / Vol 1);
+  - cache negativa album portata a v9: i precedenti no-result vengono riprovati una volta.
+Novita' 0.138 (robustezza artwork, Docker Compose e path playlist):
+  - separata la soglia minima per le immagini scaricate dalla soglia che decide se una
+    cover LOCALE esistente e' troppo piccola: cover CAA valide sotto 32 KiB non vengono piu' scartate;
+  - il refresh cover playlist abbina i path anche in forma relativa a PLAYLIST_DIR, cosi'
+    host e container possono usare prefissi diversi senza perdere il refresh Navidrome;
+  - individuato il nome effettivo del container Navidrome dai risultati Docker, supportando
+    anche i nomi Compose come progetto-navidrome-1; le scritture SQLite si fermano se Docker
+    non conferma lo stop del container;
+  - i redirect delle immagini Spotify restano vincolati a HTTPS e ai CDN Spotify ammessi.
+Novita' 0.139 (refresh playlist persistente e cover MusicBrainz esatte):
+  - una risposta Spotify piu' recente per la stessa playlist aggiorna ora anche la cover URL:
+    non viene piu' conservata per errore la prima immagine acquisita durante Export All;
+  - la coda dei sidecar playlist da aggiornare e' persistente: path non abbinati o refresh
+    Navidrome falliti vengono ritentati nelle esecuzioni successive;
+  - il matching Navidrome abbina path assoluti/relativi e, solo quando univoco, il nome playlist;
+    gli ID saltati/non trovati non vengono dichiarati completati;
+  - al primo avvio v0.139 viene riconciliato anche lo stato artwork gia' presente in .sync_state.json,
+    cosi' i sidecar aggiornati dalle versioni precedenti vengono rinfrescati una volta;
+  - i front CAA legati a un MUSICBRAINZ_RELEASEGROUPID nei tag vengono accettati direttamente;
+    i risultati MusicBrainz quasi esatti (score >= 0.96) non richiedono una seconda conferma multi-catalogo;
+    i risultati fuzzy continuano a richiedere conferma indipendente;
+  - ricerca MusicBrainz: se la query artista+titolo non restituisce risultati, viene provata
+    anche una ricerca per titolo, con filtro locale rigoroso su artista e album;
+  - cache negativa artwork aggiornata a v10: gli album precedentemente senza risultato vengono
+    ricontrollati una volta con la nuova regola CAA.
+  - le cover caricate manualmente nell'interfaccia Navidrome non vengono cancellate: hanno
+    priorita' sui sidecar Spotify e vanno rimosse manualmente solo se non sono volute.
+Novita' 0.140 (descrizioni playlist e copertura completa album Lidarr):
+  - Exportify/Spotify conserva la descrizione quando viene esposta; la descrizione viene
+    trasferita nel commento Navidrome, poi viene aggiunto un paragrafo di attribuzione con
+    il nome effettivo della M3U e il link GitHub. I valori Spotify null/non esposti non
+    cancellano i commenti gia' presenti in Navidrome.
+  - le descrizioni da sincronizzare restano in una coda JSON persistente finche' la playlist
+    non viene trovata nel DB Navidrome e aggiornata; la sync e' idempotente e non duplica
+    il paragrafo di attribuzione. La coda viene processata dopo una scan riuscita.
+  - Lidarr riceve ora tutti gli album distinti rappresentati dai brani delle playlist, non
+    soltanto gli album con tracce assenti dalla libreria. Questo evita di perdere album
+    completi/localmente presenti che prima non generavano alcuna richiesta di monitoraggio.
+  - il match permissivo senza album resta valido per comporre la M3U, ma se il brano esiste
+    sotto un'altra release il suo album Spotify originale viene comunque candidato per Lidarr.
+  - report_missing riconosce anche Spotify Local Files URI, come gia' faceva la conversione
+    M3U, e conserva album artist/URI/data per ogni riga. Il report distingue tracce mancanti
+    da tracce trovate sotto un album locale diverso.
+  - il sync stampa il Metadata Profile effettivo di Lidarr e avvisa quando Singles, EP,
+    Broadcasts, compilation/live/remix/soundtrack o status non ufficiali risultano filtrati;
+    non modifica automaticamente il profilo scelto dall'utente.
+Novita' 0.141 (risoluzione diretta URI Spotify per Lidarr):
+  - gli Album Artist URI(s) Spotify vengono risolti tramite le relazioni URL di MusicBrainz;
+    il MBID artista viene memorizzato e riutilizzato per l'intera discografia, riducendo i
+    falsi mancati dovuti a grafie, alias e traslitterazioni differenti;
+  - prima si cerca il titolo esatto nel catalogo release-group dell'artista identificato
+    dall'URI; se il catalogo e' incompleto/vecchio si usa una ricerca mirata per MBID e titolo;
+    il match resta vincolato al titolo album e al credito artista MusicBrainz;
+  - solo quando il percorso artista non basta si interroga l'URI esatto dell'album Spotify;
+    la richiesta URL MusicBrainz include le relazioni release e release-group corrette;
+  - cache MusicBrainz aggiornata a v6 conservando ricerche/discografie; vengono azzerate le
+    vecchie relazioni Spotify album memorizzate dal lookup precedente e aggiunta la cache
+    degli URI artista. I risultati negativi ritentano dopo un giorno, i cataloghi positivi
+    dopo sette giorni.
+Novita' 0.142 (resilienza MusicBrainz, Lidarr e fasi parziali):
+  - tutte le chiamate MusicBrainz (date, completezza album, Lidarr e artwork) passano da
+    un unico lock/rate limiter: minimo 1.2 s tra richieste, coordinamento anche fra processi
+    tramite flock + stato persistente, User-Agent identificabile e backoff 429/503 con Retry-After;
+  - un 503 MusicBrainz apre subito il circuito Lidarr per questa run, ma non interrompe la
+    sincronizzazione: il catalogo SQLite Lidarr continua a risolvere album gia' presenti e gli
+    altri casi vengono registrati come rinviati, non come falsi NO-MATCH;
+  - il report Lidarr distingue album realmente senza match da album rinviati per indisponibilita'
+    temporanea del provider; non genera piu' un report 0+0 quando la fase e' interrotta;
+  - la fase di allineamento cartelle non interpreta piu' un artista presente nel DB Lidarr ma
+    privo di cartella locale come errore: prova nome e alias, quindi riepiloga le cartelle assenti;
+  - star_liked non fallisce la pipeline per errori per-account: password assenti/errate o API
+    non disponibili sono segnalate, ma non annullano il lavoro degli altri utenti o delle fasi successive;
+  - le traduzioni provano MyMemory come fallback dopo i due endpoint Google, entro un budget
+    anonimo persistente prudenziale di 4.500 caratteri/giorno; le richieste valide consumano il
+    budget anche quando MyMemory non restituisce una traduzione;
+  - le intestazioni fase sono mostrate senza '(totale dinamico)', con fase verde e indice giallo;
+    l'avviso sui soli status Official del Metadata Profile e' informativo, non un falso errore.
+Novita' 0.143 (deduplica nomi artista con punteggiatura terminale):
+  - i nomi artista che differiscono soltanto per punteggiatura finale/spaziatura finale
+    condividono una grafia canonica; es. JPEGMAFIA / JPEGMAFIA .
+  - la riparazione tag Lidarr aggrega l'evidenza dei record duplicati e scrive la grafia senza
+    punteggiatura accidentale in ALBUMARTIST/ARTIST, senza fondere punteggiatura interna.
+  - la lista dei nomi Lidarr attendibili viene deduplicata prima della riparazione bilingue.
+  - nessuna cancellazione di artisti/album Lidarr: la convergenza avviene nei tag locali e
+    quindi nell'indice Navidrome al successivo scan; gli elementi del catalogo restano intatti.
+Novita' 0.144 (report album Spotify senza match, descrizioni playlist corrette e artwork multi-catalogo):
+  - star_liked conserva gli album salvati Spotify che non trovano un titolo nel catalogo Navidrome
+    e li scrive album per album in una sezione marcata di e2m_mancanti_<data>.txt, separata
+    dal report Lidarr; il conteggio corrisponde alla riga 'album Spotify senza corrispondenza locale'.
+  - le descrizioni playlist usano il testo Spotify originale, poi '<playlist>.m3u: M/T match,
+    N mancanti' e l'URL GitHub in chiaro; rimuove l'attribuzione Markdown precedente senza
+    cancellare la descrizione impostata dall'utente. La coda persistente conserva i contatori.
+  - aggiunti TheAudioDB e Wikimedia Commons come fonti artwork. Una copertina candidata viene
+    accettata dalla verifica catalogo soltanto quando almeno due provider indipendenti restituiscono
+    immagini visivamente corrispondenti (hash percettivo); un singolo provider non basta.
+  - SPOTIFY_LOCAL_PROXY.auto_sync abilita l'aggiornamento automatico di auto_albums dentro --all.
+    La scansione riguarda album gia' presenti nella libreria ma non reperibili su Spotify; non
+    aggiunge gli album Spotify assenti dalla libreria, per i quali non esiste un file da convertire.
+Novita' 0.145 (correzione spaziatura descrizioni playlist):
+  - la riga dell'URL GitHub segue immediatamente la riga '<playlist>.m3u: M/T match, N mancanti',
+    senza un paragrafo vuoto aggiuntivo; resta una riga vuota tra descrizione Spotify e contatore.
+Novita' 0.146 (artisti con ellissi, assegnazione univoca tracce e date autorevoli):
+  - la pulizia nomi artista rimuove soltanto il punto isolato preceduto da spazio (es. JPEGMAFIA .);
+    preserva punteggiatura intenzionale finale come l'ellissi di Fred again.. e ripara i vecchi
+    tag gia' ridotti usando il nome Lidarr attendibile quando la corrispondenza e' univoca.
+  - le playlist risolvono prima i brani con match esatti piu' specifici; un file gia' assegnato
+    non viene piu' scartato in silenzio. In caso di conflitto il secondo brano cerca un altro
+    candidato a titolo esatto; se non esiste, viene correttamente segnalato come mancante.
+  - date_heal considera DATE e ORIGINALDATE, risolve album senza MBID tramite ricerca MusicBrainz
+    per titolo + album artist, preferisce l'anno originale esplicitamente annotato quando esiste,
+    non mette in cache gli anni non risolti e scrive i tag su FLAC, MP3, M4A/MP4, OGG e OPUS.
+  - la ricerca MusicBrainz richiede titolo e credito artista esatti, sceglie la prima data fra
+    release-group esatti e usa una cache positiva/negativa a scadenza; errori temporanei restano
+    ritentabili. Il dry-run mostra la fonte e l'eventuale correzione senza scrivere i file.
+Novita' 0.147 (matching univoco, date originali e nomi artista punteggiati):
+  - non rimuove piu' la punteggiatura ufficiale da nomi come "Fred again..": quando Lidarr
+    espone duplicati con e senza punti finali, viene preservata la grafia esplicita; la
+    correzione accidentale "JPEGMAFIA ." continua invece a diventare "JPEGMAFIA".
+  - il matching playlist assegna ogni file una sola volta per playlist, valuta prima i titoli
+    esatti e piu' specifici e riprova su un secondo file esatto quando il primo e' gia' usato.
+    Se non esiste un secondo file, la riga finisce davvero in .missing.txt (non viene ignorata).
+    "Pts." / "Pt." e "Parts" sono alias equivalenti, mantenendo distinti Pts. 1-5 e Pts. 6-9.
+  - invalida la cache dell'indice filesystem dopo la nuova normalizzazione titoli e la cache
+    date_heal prodotta dalle vecchie regole. Le date sono risolte per artista+titolo esatti,
+    preferendo la prima pubblicazione del release-group alle ristampe; le annotazioni esplicite
+    di data originale possono correggere anche edizioni bonus/pubblicazioni digitali successive.
+    Controlla DATE e ORIGINALDATE su ogni traccia e scrive entrambi i campi anche nei formati
+    non-FLAC supportati.
+Novita' 0.148 (nome ufficiale Fred again.. e cache date non obsolete):
+  - il display canonico esatto di MusicBrainz/Lidarr per Fred again.. viene ripristinato anche
+    quando il catalogo Lidarr locale contiene gia' la forma degradata 'Fred again'. La regola
+    JPEGMAFIA resta distinta: elimina soltanto lo spazio seguito da un singolo punto finale.
+  - _mb_year non riusa piu' gli anni grezzi di release-group/release MBID salvati dalle vecchie
+    regole: risolve sempre il release-group e applica la stessa priorita' data originale
+    annotata -> prima release Official. Anche i fallback basati su release MBID evitano l'anno
+    di una ristampa 2009 quando il release-group originale e' identificabile.
+  - la cache album/date_heal passa alla versione 4 e la cache delle date originali usa una
+    nuova chiave; le decisioni 2009 memorizzate dalle vecchie regole vengono ricalcolate.
+Novita' 0.149 (fallback MusicBrainz non obsoleto):
+  - se la ricerca trova il release-group esatto ma il dettaglio MusicBrainz e' temporaneamente
+    indisponibile, date_heal lascia l'album irrisolto e ritentabile: non ripete la stessa
+    richiesta nello stesso run e non ricade su un anno ID/cache potenzialmente vecchio.
+  - l'override del nome ufficiale "Fred again.." e' una regola esplicita e testabile, separata
+    dalla pulizia conservativa del solo punto accidentale "JPEGMAFIA .".
 Novita' 0.150 (dateheal basato su release ufficiali complete + RELEASEDATE Navidrome):
   - Corretto il motivo per cui le date potevano restare al 2009: date_heal considerava soltanto
     DATE/ORIGINALDATE, ma Navidrome usa anche RELEASEDATE per l'identita' dell'album. Ora controlla
@@ -451,1541 +1850,51 @@ Novita' 0.150 (dateheal basato su release ufficiali complete + RELEASEDATE Navid
     una seconda lettura/probe per file e ricalcoli ripetuti della stessa directory.
   - Le annotazioni MusicBrainz riconoscono anche date nel formato 'Originally released in 2007'
     e 'Originally released on 10 October 2007', non soltanto l'anno immediatamente dopo la frase.
-
-Novita' 0.149 (fallback MusicBrainz non obsoleto):
-  - se la ricerca trova il release-group esatto ma il dettaglio MusicBrainz e' temporaneamente
-    indisponibile, date_heal lascia l'album irrisolto e ritentabile: non ripete la stessa
-    richiesta nello stesso run e non ricade su un anno ID/cache potenzialmente vecchio.
-  - l'override del nome ufficiale "Fred again.." e' una regola esplicita e testabile, separata
-    dalla pulizia conservativa del solo punto accidentale "JPEGMAFIA .".
-
-Novita' 0.148 (nome ufficiale Fred again.. e cache date non obsolete):
-  - il display canonico esatto di MusicBrainz/Lidarr per Fred again.. viene ripristinato anche
-    quando il catalogo Lidarr locale contiene gia' la forma degradata 'Fred again'. La regola
-    JPEGMAFIA resta distinta: elimina soltanto lo spazio seguito da un singolo punto finale.
-  - _mb_year non riusa piu' gli anni grezzi di release-group/release MBID salvati dalle vecchie
-    regole: risolve sempre il release-group e applica la stessa priorita' data originale
-    annotata -> prima release Official. Anche i fallback basati su release MBID evitano l'anno
-    di una ristampa 2009 quando il release-group originale e' identificabile.
-  - la cache album/date_heal passa alla versione 4 e la cache delle date originali usa una
-    nuova chiave; le decisioni 2009 memorizzate dalle vecchie regole vengono ricalcolate.
-
-Novita' 0.147 (matching univoco, date originali e nomi artista punteggiati):
-  - non rimuove piu' la punteggiatura ufficiale da nomi come "Fred again..": quando Lidarr
-    espone duplicati con e senza punti finali, viene preservata la grafia esplicita; la
-    correzione accidentale "JPEGMAFIA ." continua invece a diventare "JPEGMAFIA".
-  - il matching playlist assegna ogni file una sola volta per playlist, valuta prima i titoli
-    esatti e piu' specifici e riprova su un secondo file esatto quando il primo e' gia' usato.
-    Se non esiste un secondo file, la riga finisce davvero in .missing.txt (non viene ignorata).
-    "Pts." / "Pt." e "Parts" sono alias equivalenti, mantenendo distinti Pts. 1-5 e Pts. 6-9.
-  - invalida la cache dell'indice filesystem dopo la nuova normalizzazione titoli e la cache
-    date_heal prodotta dalle vecchie regole. Le date sono risolte per artista+titolo esatti,
-    preferendo la prima pubblicazione del release-group alle ristampe; le annotazioni esplicite
-    di data originale possono correggere anche edizioni bonus/pubblicazioni digitali successive.
-    Controlla DATE e ORIGINALDATE su ogni traccia e scrive entrambi i campi anche nei formati
-    non-FLAC supportati.
-
-Novita' 0.146 (artisti con ellissi, assegnazione univoca tracce e date autorevoli):
-  - la pulizia nomi artista rimuove soltanto il punto isolato preceduto da spazio (es. JPEGMAFIA .);
-    preserva punteggiatura intenzionale finale come l'ellissi di Fred again.. e ripara i vecchi
-    tag gia' ridotti usando il nome Lidarr attendibile quando la corrispondenza e' univoca.
-  - le playlist risolvono prima i brani con match esatti piu' specifici; un file gia' assegnato
-    non viene piu' scartato in silenzio. In caso di conflitto il secondo brano cerca un altro
-    candidato a titolo esatto; se non esiste, viene correttamente segnalato come mancante.
-  - date_heal considera DATE e ORIGINALDATE, risolve album senza MBID tramite ricerca MusicBrainz
-    per titolo + album artist, preferisce l'anno originale esplicitamente annotato quando esiste,
-    non mette in cache gli anni non risolti e scrive i tag su FLAC, MP3, M4A/MP4, OGG e OPUS.
-  - la ricerca MusicBrainz richiede titolo e credito artista esatti, sceglie la prima data fra
-    release-group esatti e usa una cache positiva/negativa a scadenza; errori temporanei restano
-    ritentabili. Il dry-run mostra la fonte e l'eventuale correzione senza scrivere i file.
-
-Novita' 0.145 (correzione spaziatura descrizioni playlist):
-  - la riga dell'URL GitHub segue immediatamente la riga '<playlist>.m3u: M/T match, N mancanti',
-    senza un paragrafo vuoto aggiuntivo; resta una riga vuota tra descrizione Spotify e contatore.
-
-Novita' 0.144 (report album Spotify senza match, descrizioni playlist corrette e artwork multi-catalogo):
-  - star_liked conserva gli album salvati Spotify che non trovano un titolo nel catalogo Navidrome
-    e li scrive album per album in una sezione marcata di e2m_mancanti_<data>.txt, separata
-    dal report Lidarr; il conteggio corrisponde alla riga 'album Spotify senza corrispondenza locale'.
-  - le descrizioni playlist usano il testo Spotify originale, poi '<playlist>.m3u: M/T match,
-    N mancanti' e l'URL GitHub in chiaro; rimuove l'attribuzione Markdown precedente senza
-    cancellare la descrizione impostata dall'utente. La coda persistente conserva i contatori.
-  - aggiunti TheAudioDB e Wikimedia Commons come fonti artwork. Una copertina candidata viene
-    accettata dalla verifica catalogo soltanto quando almeno due provider indipendenti restituiscono
-    immagini visivamente corrispondenti (hash percettivo); un singolo provider non basta.
-  - SPOTIFY_LOCAL_PROXY.auto_sync abilita l'aggiornamento automatico di auto_albums dentro --all.
-    La scansione riguarda album gia' presenti nella libreria ma non reperibili su Spotify; non
-    aggiunge gli album Spotify assenti dalla libreria, per i quali non esiste un file da convertire.
-
-Novita' 0.143 (deduplica nomi artista con punteggiatura terminale):
-  - i nomi artista che differiscono soltanto per punteggiatura finale/spaziatura finale
-    condividono una grafia canonica; es. JPEGMAFIA / JPEGMAFIA .
-  - la riparazione tag Lidarr aggrega l'evidenza dei record duplicati e scrive la grafia senza
-    punteggiatura accidentale in ALBUMARTIST/ARTIST, senza fondere punteggiatura interna.
-  - la lista dei nomi Lidarr attendibili viene deduplicata prima della riparazione bilingue.
-  - nessuna cancellazione di artisti/album Lidarr: la convergenza avviene nei tag locali e
-    quindi nell'indice Navidrome al successivo scan; gli elementi del catalogo restano intatti.
-
-Novita' 0.142 (resilienza MusicBrainz, Lidarr e fasi parziali):
-  - tutte le chiamate MusicBrainz (date, completezza album, Lidarr e artwork) passano da
-    un unico lock/rate limiter: minimo 1.2 s tra richieste, coordinamento anche fra processi
-    tramite flock + stato persistente, User-Agent identificabile e backoff 429/503 con Retry-After;
-  - un 503 MusicBrainz apre subito il circuito Lidarr per questa run, ma non interrompe la
-    sincronizzazione: il catalogo SQLite Lidarr continua a risolvere album gia' presenti e gli
-    altri casi vengono registrati come rinviati, non come falsi NO-MATCH;
-  - il report Lidarr distingue album realmente senza match da album rinviati per indisponibilita'
-    temporanea del provider; non genera piu' un report 0+0 quando la fase e' interrotta;
-  - la fase di allineamento cartelle non interpreta piu' un artista presente nel DB Lidarr ma
-    privo di cartella locale come errore: prova nome e alias, quindi riepiloga le cartelle assenti;
-  - star_liked non fallisce la pipeline per errori per-account: password assenti/errate o API
-    non disponibili sono segnalate, ma non annullano il lavoro degli altri utenti o delle fasi successive;
-  - le traduzioni provano MyMemory come fallback dopo i due endpoint Google, entro un budget
-    anonimo persistente prudenziale di 4.500 caratteri/giorno; le richieste valide consumano il
-    budget anche quando MyMemory non restituisce una traduzione;
-  - le intestazioni fase sono mostrate senza '(totale dinamico)', con fase verde e indice giallo;
-    l'avviso sui soli status Official del Metadata Profile e' informativo, non un falso errore.
-
-Novita' 0.141 (risoluzione diretta URI Spotify per Lidarr):
-  - gli Album Artist URI(s) Spotify vengono risolti tramite le relazioni URL di MusicBrainz;
-    il MBID artista viene memorizzato e riutilizzato per l'intera discografia, riducendo i
-    falsi mancati dovuti a grafie, alias e traslitterazioni differenti;
-  - prima si cerca il titolo esatto nel catalogo release-group dell'artista identificato
-    dall'URI; se il catalogo e' incompleto/vecchio si usa una ricerca mirata per MBID e titolo;
-    il match resta vincolato al titolo album e al credito artista MusicBrainz;
-  - solo quando il percorso artista non basta si interroga l'URI esatto dell'album Spotify;
-    la richiesta URL MusicBrainz include le relazioni release e release-group corrette;
-  - cache MusicBrainz aggiornata a v6 conservando ricerche/discografie; vengono azzerate le
-    vecchie relazioni Spotify album memorizzate dal lookup precedente e aggiunta la cache
-    degli URI artista. I risultati negativi ritentano dopo un giorno, i cataloghi positivi
-    dopo sette giorni.
-
-Novita' 0.140 (descrizioni playlist e copertura completa album Lidarr):
-  - Exportify/Spotify conserva la descrizione quando viene esposta; la descrizione viene
-    trasferita nel commento Navidrome, poi viene aggiunto un paragrafo di attribuzione con
-    il nome effettivo della M3U e il link GitHub. I valori Spotify null/non esposti non
-    cancellano i commenti gia' presenti in Navidrome.
-  - le descrizioni da sincronizzare restano in una coda JSON persistente finche' la playlist
-    non viene trovata nel DB Navidrome e aggiornata; la sync e' idempotente e non duplica
-    il paragrafo di attribuzione. La coda viene processata dopo una scan riuscita.
-  - Lidarr riceve ora tutti gli album distinti rappresentati dai brani delle playlist, non
-    soltanto gli album con tracce assenti dalla libreria. Questo evita di perdere album
-    completi/localmente presenti che prima non generavano alcuna richiesta di monitoraggio.
-  - il match permissivo senza album resta valido per comporre la M3U, ma se il brano esiste
-    sotto un'altra release il suo album Spotify originale viene comunque candidato per Lidarr.
-  - report_missing riconosce anche Spotify Local Files URI, come gia' faceva la conversione
-    M3U, e conserva album artist/URI/data per ogni riga. Il report distingue tracce mancanti
-    da tracce trovate sotto un album locale diverso.
-  - il sync stampa il Metadata Profile effettivo di Lidarr e avvisa quando Singles, EP,
-    Broadcasts, compilation/live/remix/soundtrack o status non ufficiali risultano filtrati;
-    non modifica automaticamente il profilo scelto dall'utente.
-
-Novita' 0.139 (refresh playlist persistente e cover MusicBrainz esatte):
-  - una risposta Spotify piu' recente per la stessa playlist aggiorna ora anche la cover URL:
-    non viene piu' conservata per errore la prima immagine acquisita durante Export All;
-  - la coda dei sidecar playlist da aggiornare e' persistente: path non abbinati o refresh
-    Navidrome falliti vengono ritentati nelle esecuzioni successive;
-  - il matching Navidrome abbina path assoluti/relativi e, solo quando univoco, il nome playlist;
-    gli ID saltati/non trovati non vengono dichiarati completati;
-  - al primo avvio v0.139 viene riconciliato anche lo stato artwork gia' presente in .sync_state.json,
-    cosi' i sidecar aggiornati dalle versioni precedenti vengono rinfrescati una volta;
-  - i front CAA legati a un MUSICBRAINZ_RELEASEGROUPID nei tag vengono accettati direttamente;
-    i risultati MusicBrainz quasi esatti (score >= 0.96) non richiedono una seconda conferma multi-catalogo;
-    i risultati fuzzy continuano a richiedere conferma indipendente;
-  - ricerca MusicBrainz: se la query artista+titolo non restituisce risultati, viene provata
-    anche una ricerca per titolo, con filtro locale rigoroso su artista e album;
-  - cache negativa artwork aggiornata a v10: gli album precedentemente senza risultato vengono
-    ricontrollati una volta con la nuova regola CAA.
-  - le cover caricate manualmente nell'interfaccia Navidrome non vengono cancellate: hanno
-    priorita' sui sidecar Spotify e vanno rimosse manualmente solo se non sono volute.
-
-Novita' 0.138 (robustezza artwork, Docker Compose e path playlist):
-  - separata la soglia minima per le immagini scaricate dalla soglia che decide se una
-    cover LOCALE esistente e' troppo piccola: cover CAA valide sotto 32 KiB non vengono piu' scartate;
-  - il refresh cover playlist abbina i path anche in forma relativa a PLAYLIST_DIR, cosi'
-    host e container possono usare prefissi diversi senza perdere il refresh Navidrome;
-  - individuato il nome effettivo del container Navidrome dai risultati Docker, supportando
-    anche i nomi Compose come progetto-navidrome-1; le scritture SQLite si fermano se Docker
-    non conferma lo stop del container;
-  - i redirect delle immagini Spotify restano vincolati a HTTPS e ai CDN Spotify ammessi.
-
-Novita' 0.137 (cover playlist Spotify e retry artwork mirati):
-  - acquisizione cover Spotify compatibile con piu' forme JSON (images, image, imageUrl,
-    coverUrl, artworkUrl e URL annidati), mantenendo la whitelist dei CDN Spotify;
-  - verifica magic-bytes del sidecar prima di saltare un download gia' sincronizzato;
-  - dopo lo scan, refresh mirato in Navidrome delle sole playlist il cui sidecar e' cambiato,
-    cosi' la cache artwork non continua a mostrare la vecchia immagine;
-  - ampliati i tentativi Google Images con varianti titolo/punteggiatura (es. Vol.1 / Vol 1);
-  - cache negativa album portata a v9: i precedenti no-result vengono riprovati una volta.
-
-Novita' 0.136 (fix artwork crash e file audio obsoleti):
-  - corretta la barra di avanzamento del download artwork: la fase usa album_progress, non una variabile
-    progress inesistente. Il NameError non interrompe piu' la fase prima dell'embedding e dei ritratti artista.
-  - la riparazione Unknown Artist filtra i percorsi gia' rimossi e tratta un file sparito tra probe e scrittura
-    come elemento obsoleto/rinviato, non come errore di metadati. Gli errori reali di scrittura restano fatali.
-  - il riepilogo della riparazione mostra separatamente i file non piu' disponibili, senza contarli come errori.
-
-Novita' 0.135 (diagnostica artwork verificabile e coda artisti piu' efficiente):
-  - affinata la diagnosi per album: ogni candidato ottiene un esito nominativo, mentre i riepiloghi
-    distinguono risultati negativi completi, errori temporanei, verifiche di cover sane e sostituzioni.
-    Gli errori e i rinvii dello stesso album non vengono conteggiati come due album diversi.
-  - la ricerca artista bilingue resta ordinata per tutti i nomi inglesi/gloss prima della grafia originale;
-    i target bilingui precedono quelli monolingui e possono riutilizzare un artist.* locale solo quando
-    la corrispondenza tra cartelle alias e' univoca.
-  - il cursore round-robin avanza dopo ogni query effettiva. Se i provider diventano indisponibili,
-    ruota oltre la coda differita selezionata, cosi' la run successiva puo' raggiungere gli altri target;
-    gli elementi rinviati restano nella coda circolare e tornano eleggibili al giro successivo.
-  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
-    gli altri provider album; un guasto non correlato non trasforma una ricerca artista in retry.
-  - rimossi helper e rami ridondanti non usati, evitata un'assegnazione senza effetto e semplificato
-    il ciclo di failover della traduzione automatica.
-
-Novita' 0.134 (fair queue artwork, priorita' bilingue e report album completo):
-  - gli artisti con un nome inglese e una grafia originale vengono messi in testa alla coda; per ciascuno
-    la ricerca usa prima tutti gli alias/gloss inglesi e soltanto dopo il nome originale. Sono riconosciute
-    entrambe le disposizioni del gloss, ad esempio "Я сошла с ума (I Went Crazy)" e viceversa.
-  - il cursore round-robin artista/album avanza dopo ogni elemento realmente interrogato; se tutti i
-    provider sono indisponibili, ruota oltre il batch differito e riprende dalla coda successiva.
-  - il circuito di disponibilita' artista considera soltanto Deezer e Google Images, non MusicBrainz o
-    gli altri provider usati per gli album.
-  - il log stampa l'esito nominativo di ogni album candidato e degli artisti rinviati; i conteggi usano
-    identita' uniche, evitando di sommare due volte errori e rinvii dello stesso album.
-  - i ritratti locali di alias bilingui vengono riutilizzati quando la corrispondenza tra cartelle e' univoca.
-
-Novita' 0.133 (coda artwork riprendibile, alias artista e diagnosi album):
-  - il cursore album/artista avanza soltanto dopo un elemento realmente completato; se tutti i provider
-    utili vanno in cooldown, la fase interrompe il batch senza saltare gli elementi non tentati. La run
-    successiva riparte dal primo candidato ancora incompleto, non dall'inizio o dalla fine del batch.
-  - ricerca ritratti rigorosamente nell'ordine nome inglese (gloss/NAME_TRANSLATIONS/NAME_FIXES/
-    traduzione automatica accettata) -> grafia originale; rimossa la query fonetica intermedia che
-    poteva consumare richieste prima del nome originale.
-  - se una cartella bilingue e una cartella col nome originale identificano in modo univoco lo stesso
-    artista, copia il file locale artist.* gia' valido invece di richiedere un nuovo download. In caso
-    di alias condiviso da piu' cartelle non effettua copie automatiche.
-  - report per run con esito di ogni album senza cover: scaricato, cache negativo, batch rinviato,
-    disaccordo cataloghi, immagine non valida o errore provider. Il riepilogo non confonde piu' i tentativi
-    effettivi con gli artisti saltati dopo il guasto della rete.
-  - corretti contatori duplicati nella struttura di ritorno artwork e aggiornato il formato cache v8.
-
-Novita' 0.132 (immagini originali Google-hosted):
-  - i risultati Google Images ospitati su googleusercontent.com/gstatic.com non vengono esclusi
-    in blocco: sono accettati solo se il file originale supera soglia byte, dimensioni e proporzioni;
-    i domini delle thumbnail `encrypted-tbn` restano rifiutati.
-
-Novita' 0.131 (refresh artwork Navidrome dopo i download):
-  - dopo uno scan libreria riuscito, i nuovi file cover/artist.* vengono applicati alla cache artwork
-    Navidrome con `artwork reprocess --kind ar --kind al --source absent --yes`; si ritentano solo
-    artisti e album attualmente senza immagine, senza rilanciare lookup esterni per tutta la libreria.
-  - l'assenza o l'incompatibilita' della CLI artwork nel container produce un avviso non bloccante.
-
-Novita' 0.130 (configurazione artwork artista):
-  - MISSING_ARTWORK_ARTIST_ENABLED controlla correttamente il recupero artisti; resta accettato
-    anche il nome interno storico MISSING_ARTWORK_ARTIST_ART_ENABLED per compatibilita'.
-
-Novita' 0.129 (Google Images fallback, immagini artista e traduzione cirillica):
-  - per le cover album ancora mancanti, dopo CAA/MusicBrainz e il consenso multi-catalogo viene cercata
-    Google Images con la query richiesta '<album> album cover', poi con artista+album. Sono accettati
-    soltanto URL HTTPS pubblici, redirect sicuri e immagini JPG/PNG/WEBP realmente decodificabili,
-    abbastanza grandi e con proporzioni da copertina; le immagini folder sane non vengono sostituite.
-  - aggiunta la ricerca delle immagini artista mancanti: il gloss inglese dei tag bilingui o la
-    traduzione/alias inglese viene provato prima della romanizzazione e del nome originale; ogni
-    variante passa da Deezer e poi Google Images. Le immagini vengono salvate come artist.* nella
-    cartella artista, secondo la priorita' locale predefinita di Navidrome, senza embedding audio.
-  - coda e cache negative per gli artisti separate da quelle degli album, con batch round-robin;
-    la cache v7 invalida i vecchi no-result album, che erano stati calcolati senza Google Images.
-  - l'auto-traduzione inglese include ora il cirillico russo. La traduzione semantica verificata
-    precede la romanizzazione fonetica; se Google restituisce soltanto una lettura fonetica, la
-    euristica la scarta e mantiene il fallback cirillico/traslitterato.
-
-Novita' 0.128 (artwork provider-aware, ripresa equa, audit FLAC #15 e fasi opzionali):
-  - i circuit breaker artwork sono ora indipendenti per MusicBrainz, Cover Art Archive, Apple/iTunes e Deezer:
-    un provider irraggiungibile non sospende gli altri; HTTP 429/5xx e rifiuti di connessione applicano
-    backoff per provider e non producono cache negative.
-  - le verifiche artwork interrotte da errori rete non vengono memorizzate come review definitive; gli album
-    restano riprovabili. Il batch limitato ruota tra i candidati, evitando che una coda iniziale bloccata
-    impedisca agli album successivi di essere processati nelle run seguenti.
-  - audit raw dei commenti FLAC ALBUMARTIST/ALBUM_ARTIST/ALBUMARTISTS prima della pulizia, anche quando
-    ffprobe mostra già il nome corretto: intercetta il duplicato legacy nascosto che manteneva [Unknown Artist]
-    e fa ripulire tutte le varianti. Il repair Unknown Artist legge inoltre i crediti raw ARTIST/ARTISTS.
-  - Lidarr: il controllo MBID usa già la fotografia SQLite globale prima del POST; se Lidarr risponde comunque
-    AlbumExistsValidator, la ricerca di recupero aggiorna la fotografia globale invece di controllare soltanto
-    la discografia dell'artista. I conflitti reali di MBID vengono descritti senza ripetere POST.
-  - l'import slskd non viene più segnato come fallito solo perché il passaggio accessorio di riallineamento
-    path non trova cartelle di artisti non presenti localmente; il risultato DownloadedAlbumsScan resta distinto.
-  - in --all la scansione automatica dei proxy Spotify viene saltata chiaramente se mancano credenziali API,
-    preservando auto_albums e continuando con i proxy manuali. Il comando autonomo resta rigoroso.
-
-Novita' 0.127 (database Navidrome indipendente dal mount musicale):
-  - E2M_NAVIDROME_DB non viene piu' obbligato a risolversi sotto E2M_STORAGE_MOUNT:
-    il database puo' vivere nella directory host montata da Docker per /data, anche se
-    e' su un filesystem separato o raggiunto tramite symlink. Gli altri percorsi persistenti
-    restano protetti dal controllo del mount; la directory padre del DB deve esistere.
-  - il preflight segnala il percorso effettivo del DB quando e' esterno al mount, senza
-    bloccare la run; rifiuta comunque una directory inesistente o un path che punta a una directory.
-
-Novita' 0.126 (artwork completo, artisti cirillici, Lidarr conservativo e matching soundtrack):
-  - la verifica delle cover sane non ha piu' un tetto predefinito di 50 album: 0 significa tutti;
-    inizializzati anche i contatori del recupero artwork che causavano UnboundLocalError a fine fase.
-  - il planner non preconta piu' sottofasi artwork condizionali: evita X/Y non raggiungibili quando
-    non ci sono download, embedding o verifiche da fare; il contatore principale resta dinamico.
-  - romanizzazione fonetica offline dell'alfabeto russo (inclusi ё, ж, х, ц, ч, ш, щ, ы, э, ю, я),
-    con forma bilingue originale + traslitterazione e rispetto dei mapping manuali.
-  - cleanup Unknown Artist esteso ai commenti FLAC ALBUM_ARTIST legacy; le scritture rimuovono
-    tutte le varianti singular/plural senza toccare i crediti ARTIST/ARTISTS dei brani.
-  - Lidarr non disattiva piu' il monitoraggio degli album preesistenti non richiesti; la sync
-    abilita soltanto quelli richiesti dalle playlist mancanti/saved albums.
-  - matching Lidarr ampliato con alias di titolo conservativi per soundtrack/OST e relative
-    edizioni; se il publisher non è riconosciuto prova anche gli artisti delle tracce mancanti,
-    sempre con titolo esatto, artist-credit MusicBrainz e selezione release/data.
-
-Novita' 0.125 (piano fasi dinamico esatto e pulizia del codice contatore):
-  - rimosse le 13 riserve fisse e le 10 sottofasi di riconciliazione precontate: ogni ciclo viene
-    prenotato solo dopo aver rilevato album realmente cambiati e rilascia le fasi saltate in caso
-    di errore; funziona anche con piu' cicli e con --all senza --lidarr-sync.
-  - scansioni Navidrome di fallback, diagnosi post-scan, star_liked, fasi artista Lidarr, pulizia
-    M3U/DB e scan dopo artwork vengono aggiunte al totale solo quando la relativa condizione e'
-    effettivamente vera; eliminate le riserve opzionali basate su stime.
-  - rimossi parametri/globali del contatore non usati e unificata la gestione delle riserve;
-    il totale iniziale contiene solo fasi deterministiche, i checkpoint aggiornano soltanto il residuo.
-  - la riconciliazione album mirata non viene eseguita in --sync-only, che resta una sincronizzazione.
-  - --flac-16bit viene riconosciuto come manutenzione standalone e non avvia per errore la sync playlist;
-    la stima --missing include fetch/unzip; Lidarr preview/apply conta il fetch solo se viene eseguito;
-    --sync-proxy-favorites usa run_phase come le altre utility.
-  - la condizione di import slskd viene fotografata una volta e riutilizzata da piano ed esecuzione,
-    evitando divergenze se Soularr sposta file mentre la pipeline parte.
-  - rimossi gli helper privati non piu' chiamati _has_local_album_art e _lidarr_query; condivisi i
-    conteggi manutenzione/artwork/proxy tra planner ed esecuzione per evitare divergenze future.
-
-Novita' 0.124 (piano fasi ricalcolato, verifica artwork multi-catalogo e album artist ridondanti):
-  - il contatore principale viene ricalcolato ai confini dei rami dinamici (scan/Lidarr/artwork):
-    le riserve per riconciliazioni Navidrome non eseguite vengono tolte prima delle fasi residue;
-    prima dell'artwork e' gia' incluso lo scan opzionale, mentre dopo l'esito artwork restano solo
-    le fasi realmente previste. Il riepilogo tempi riallinea il totale al numero di fasi eseguite.
-  - le cover locali sane vengono verificate contro il front approvato della release esatta nel Cover Art Archive;
-    se la release esatta mostra una copertina diversa, la sostituzione richiede anche accordo visivo
-    multi-catalogo con il front CAA e metadata concordi di almeno due cataloghi tra Apple, Deezer e Spotify.
-    Le immagini Spotify non vengono scaricate o salvate; Spotify viene usato solo come riscontro metadata.
-  - se e' disponibile solo un release-group o manca l'MBID, la cover locale viene verificata contro
-    l'immagine concordata da multi-catalogo; il match fuzzy non autorizza mai una sovrascrittura.
-    I fallback TheAudioDB, Wikimedia Commons, Apple/iTunes e Deezer richiedono corrispondenza
-    prudente artista+album; una proposta album viene accettata solo con dHash concorde fra
-    almeno due provider indipendenti. Google Images resta un suggerimento di revisione.
-  - le verifiche coprono anche gli album senza MBID, a lotti di massimo 50/run; la cache v4 viene
-    invalidata per rifare le verifiche con le regole visive piu' severe (cache v5).
-  - cleanup albumartist: collassa componenti ridondanti come 'The Prodigy, Prodigy' solo quando
-    i tag ARTIST delle tracce dimostrano un unico artista dominante; completa anche ALBUMARTIST
-    placeholder/unknown con il credito principale verificato delle tracce.
-Novita' 0.123 (contatore sottofasi e una sola riga pinned):
-  - ogni fase mantiene una sola riga pinned; i progressi interni condividono quella riga e
-    non stampano piu' snapshot 100% separati o barre annidate.
-  - le fasi con sottoattivita' prevedibili mostrano X/Y in blu accanto al contatore fase;
-    ogni sottofase completata stampa `Sottofase X/Y completata` in giallo.
-  - il totale delle sottofasi viene pianificato prima dell'avvio; se il conteggio supera
-    il limite o non e' stimabile entro il budget, il contatore sottofase viene disattivato.
-  - i progressi tecnici ffprobe restano sulla riga pinned ma non creano sottofasi autonome.
-Novita' 0.122 (Lidarr folder-fix via SQLite, failover traduzione e progressi di fase):
-  - run_lidarr_folder_fix non chiama piu' il GET completo /api/v1/artist: legge artisti e path
-    dal database Lidarr in sola lettura; il GET API puntuale viene usato soltanto per il PUT
-    di un artista con cartella da correggere, evitando il timeout causato dalle statistiche globali.
-  - SLKSD_FAILED_FOLDER accetta sia un path host sia il vecchio path container /downloads/slskd/...;
-    il secondo viene tradotto nel corrispondente path host e la directory assente resta informativa.
-  - la traduzione automatica tenta anche il dominio alternativo translate.google.com e registra
-    il motivo effettivo del fallback, invece del solo RuntimeError generico.
-  - le progress bar interne alle fasi alimentano l'unica barra di fase pinned: le fasi con un
-    contatore reale mostrano di nuovo barra, percentuale e progresso, senza barre annidate.
-
-Novita' 0.121 (ripristino display bilingue dopo riparazione Lidarr):
-  - un nome Lidarr solo in kanji non prevale piu' su una forma bilingue gia' presente
-    in Navidrome; la fase bilingue ripristina il gloss dopo la riscrittura dei tag Lidarr.
-  - i nomi CJK puri vengono collegati anche quando una cartella contiene spazi interni
-    non significativi (es. 高中 正義 / 高中正義), riutilizzando la forma canonica bilingue.
-  - ARTIST_CANONICAL_NAMES riconosce le varianti CJK con spazi accidentali senza
-    modificare le chiavi o i valori salvati nella configurazione.
-
-Novita' 0.120 (import slskd legacy e contatore fasi stabile):
-  - --all controlla la cartella host /mnt/red1/homelab/slskd/downloads e, se contiene
-    audio, invia a Lidarr DownloadedAlbumsScan usando il path container /downloads/slskd.
-  - la vecchia MUSICA/_slskd-old viene spostata fuori dalla libreria nello staging slskd
-    con un nome non sovrascrivente; failed_imports viene preservata separatamente.
-  - l'import attende il completamento del comando Lidarr prima di riallineare i path;
-    SLKSD_IMPORT_FOLDER e SLKSD_DOWNLOADS_HOST consentono override distinti host/container.
-  - il riepilogo tempi numera le fasi e colora in giallo il numero.
-  - il totale fasi e' fissato prima della prima intestazione e non cresce durante la run.
-
-
-Novita' 0.119 (deduplicazione intra-album estesa a slot disco/traccia e tutti i formati audio):
-  - la fase dedupe_tracks cerca ora i duplicati sia per titolo sia per posizione disco/traccia;
-    cosi' rileva anche copie dello stesso audio con tag titolo differenti o errati.
-  - il confronto per posizione e' consapevole dei multi-disco: CD1/01 e CD2/01 non vengono
-    confusi. Senza numero disco usa il percorso CD/Disc/Vinyl quando disponibile.
-  - i gruppi con titoli diversi vengono rimossi solo dopo conferma waveform; senza NumPy
-    resta attivo il fallback metadata molto conservativo e le coppie ambigue sono preservate.
-  - la scansione intra-album include tutti i formati indicizzati da Navidrome (FLAC, MP3,
-    M4A, WAV, APE, WV, AIFF, DSF, DFF, MPC, TTA, MKA, OGA, MP2, M4B e altri).
-  - probe cache v5: conserva anche i tag disco, evitando di confondere le tracce omonime
-    per numero tra CD diversi; la cache v4 viene lasciata intatta e non riutilizzata per errore.
-  - --all continua a eseguire la fase dedupe_tracks gia' prevista; ora passa anche
-    --library-root alla fase e il risultato viene spostato nel cestino dedupe standard.
-
-Novita' 0.118 (deduplicazione album-artist tramite identita' MusicBrainz e pulizia completa FLAC):
-  - la pulizia albumartist richiede un artista primario coerente su almeno il 75% delle tracce;
-    compilation e album con primaria ambigua non vengono mai fusi automaticamente.
-  - quando albumartist e tracce non concordano, risolve il nome primario in MusicBrainz e carica
-    gli alias ufficiali tramite MBID (`inc=aliases`). Gli alias sono applicati solo all'album e
-    all'identita' verificata: `Prodigy` e' riconosciuto come alias di `The Prodigy`, senza fondere
-    globalmente l'omonimo artista rap o altre entita'.
-  - cerca inoltre il release-group esatto per MBID artista + titolo album. Solo se tutti i release-
-    group esatti concordano su un unico MBID artista, elimina i nomi album-only non presenti nelle
-    tracce: cosi' vengono rimossi anche vecchi alias non registrati in MusicBrainz. Se il release-
-    group ha piu' artisti, le tracce hanno ospiti, le edizioni discordano o la ricerca fallisce,
-    i collaboratori non abbinati vengono conservati. I tag ARTIST/ARTISTS delle tracce non cambiano.
-  - sui FLAC vengono letti i commenti Vorbis grezzi solo per album con mismatch, inclusi valori
-    ripetuti e chiavi legacy (`ALBUM_ARTIST`, `ALBUMARTISTS`, ecc.). La scrittura rimuove tutte le
-    varianti e ricrea i campi singolare/plurale mantenendo separati i rispettivi crediti.
-  - la riparazione tag Lidarr usa la stessa prova MBID/release-group prima di scrivere il nome
-    canonico, evitando che il passaggio successivo reintroduca un alias gia' rimosso; ricontrolla
-    inoltre i commenti FLAC grezzi quando i campi visibili non corrispondono all'artista scelto.
-  - la cache MusicBrainz versione 4 conserva ricerche/cataloghi esistenti e memorizza alias per
-    MBID e ricerche release-group per album, riutilizzandoli tra le esecuzioni.
-
-Novita' 0.117 (embedding artwork senza Mutagen e contatore fasi coerente):
-  - il log v0.116 ha mostrato 2.132 errori embedding causati da `ModuleNotFoundError: mutagen`.
-    FLAC ora usa `metaflac` come fallback nativo; MP3 e M4A usano un remux ffmpeg con `-c copy`
-    (nessuna ricodifica audio). Mutagen resta il backend per Ogg/Opus/WAV quando disponibile.
-  - cover gia' presenti sane non vengono piu' toccate. Per default una cover sotto 32 KiB e'
-    considerata troppo piccola: solo album senza cover o con cover sotto soglia vengono cercati;
-    anche le immagini embedded piccole possono essere sostituite, quelle sane restano intatte.
-    La soglia e' configurabile con MISSING_ARTWORK_MIN_EXISTING_COVER_BYTES.
-  - se una traccia ha una cover embedded sana ma la cartella non ce l'ha (o ha una cover piccola),
-    la cover viene estratta con Mutagen o ffmpeg e propagata solo ai file mancanti/piccoli.
-  - il contatore iniziale prevede le scan pre/fallback e la scan eventuale dopo artwork; se una scan
-    condizionale non serve o una fase successiva viene saltata, la relativa voce viene rimossa dal totale.
-    Evita salti tardivi del denominatore e finali ingannevoli come 39/46.
-  - rimosse le righe artificiali `0/1 fase`: resta lo spinner della fase con il contatore globale.
-
-Novita' 0.116 (recupero artwork MusicBrainz e embedding nei file audio):
-  - la fase recover_and_embed_album_artwork (ex download_missing_album_artwork) e' stata estesa: prima prova il release MBID e il
-    release-group MBID, poi cerca il gruppo esatto su MusicBrainz e usa Cover Art Archive;
-    iTunes e Deezer restano fallback. MusicBrainz/Cover Art Archive e' preferito a Google
-    Images perche' i risultati sono collegati a un album/credit specifico, non a immagini
-    generiche che possono appartenere a edizioni o artisti omonimi.
-  - ogni cover scaricata viene salvata nella cartella album come cover.* e incorporata nelle
-    tracce che ne sono sprovviste (FLAC, MP3, M4A/MP4, Ogg Vorbis, Opus e WAV). Le cover
-    gia' incorporate non vengono sovrascritte; le tracce non supportate o in errore sono
-    contate separatamente. Anche le cover esterne gia' presenti vengono usate per completare
-    l'embedding mancante.
-  - quando una traccia contiene gia' l'unica cover, questa viene estratta e propagata alle
-    altre tracce dell'album e alla cartella, senza una nuova ricerca web.
-  - incrementato il limite predefinito di album interrogati per run a 250; la cache negativa
-    viene aggiornata alla nuova versione, cosi' gli album non trovati con i vecchi provider
-    vengono riesaminati anche con la ricerca MusicBrainz. Retry negativo ridotto a 14 giorni.
-  - aggiunta MISSING_ARTWORK_EMBED_AUDIO (default true); --all continua a includere la fase
-    artwork e --no-artwork-download la salta come prima.
-
-Novita' 0.115 (proxy Spotify integrati e copertura Lidarr degli album salvati):
-  - --all include ora la scansione SPOTIFY_LOCAL_PROXY del catalogo Spotify e la generazione
-    degli MP3 locali, nell'ordine scansione -> aggiornamento auto_albums -> build. --apply
-    applica il JSON e crea i proxy; senza --apply entrambe le fasi restano in anteprima.
-    Un errore delle credenziali/API Spotify non interrompe le altre fasi: i proxy manuali
-    vengono comunque generati e gli album automatici non verificati restano invariati.
-  - Lidarr riceve anche gli album da saved_albums.csv, distinti dalle tracce mancanti delle
-    playlist; gli URI Spotify artista/album e la data vengono usati per risolvere i crediti.
-    Il report mostra la provenienza e il conteggio delle tracce mancanti resta separato.
-  - proxy Spotify compatti: default 32k mono; bitrate configurabile da 32k a 320k e canali
-    configurabili (1=mono, 2=stereo). Non vengono mai modificati i sorgenti FLAC.
-  - indicizzazione delle cartelle proxy eseguita in una sola passata, invece di riscannerle
-    per ogni criterio album; mantiene il fallback tag per i nomi cartella non standard.
-  - il manifest registra codec/bitrate/canali: un proxy creato in precedenza a 64k stereo viene
-    rigenerato quando la configurazione passa a 32k mono; le run successive saltano i file invariati.
-  - la lista auto_albums proposta dalla scansione viene passata subito al builder nella stessa
-    --all, anche in preview; non occorre attendere il run successivo per vedere i proxy proposti.
-
-Novita' 0.114 (una barra per fase e tag artista Lidarr affidabili):
-  - ogni fase mostra una sola barra pinned per tutta la sua durata. Le barre interne di
-    artist_names, ffprobe, scansioni e sotto-attivita' sono soppresse durante run_phase:
-    non riservano righe, non stampano progressi separati e non sostituiscono la barra fase.
-    Le attivita' continuano normalmente; la barra fase resta animata e termina al 100%.
-  - i nomi artista canonici letti da Lidarr diventano identita' autorevoli durante la fase
-    bilingue successiva. Un nome ufficiale con virgola (es. Tyler, The Creator) resta un
-    singolo artista anche se Navidrome contiene ancora le voci separate Tyler / The Creator.
-    I vecchi tag gia' divisi con punto e virgola vengono ricomposti solo se i componenti
-    coincidono esattamente e nello stesso ordine con il nome completo presente in Lidarr.
-  - la riparazione Lidarr sostituisce integralmente i campi ALBUMARTIST/ALBUMARTISTS,
-    rimuovendo anche alias Vorbis legacy (ALBUM_ARTIST, ALBUM ARTIST, ecc.) che potevano
-    mantenere il vecchio artista accanto a quello corretto (issue #13/#15). Rimuove anche
-    i placeholder Unknown Artist dai crediti delle tracce quando Lidarr identifica l'artista.
-  - per MP3/MP4 vengono rimossi anche i frame/atomi album-artist legacy e plurali prima
-    di scrivere il nome Lidarr; le credenziali ARTIST/ARTISTS dei featuring restano intatte
-    quando non rappresentano semplicemente il vecchio artista principale.
-  - la fase di matching continua a confrontare titolo album e artista con il catalogo
-    Lidarr; non vengono divisi i nomi Lidarr ufficiali e non vengono rinominati gli album.
-
-Novita' 0.113 (barra fissata per ogni fase):
-  - ogni run_phase crea una barra di fase dedicata, sempre visibile in TTY anche quando
-    la funzione non espone una propria percentuale; le barre interne mostrano il progresso
-    dettagliato senza sostituire/nascondere quella della fase.
-  - le barre annidate ora occupano righe fissate separate: fase in basso, sottofase sopra,
-    attivita' ffprobe ancora sopra. L'output ordinario scorre soltanto nella regione libera.
-  - il layout viene aggiornato quando si aprono/chiudono barre o cambia la dimensione del
-    terminale; Ctrl+C, SIGTERM e chiusure anomale liberano tutte le righe riservate.
-  - le barre di fase non aggiungono righe 100% artificiali nei log non interattivi; i log
-    continuano a contenere i checkpoint delle barre di lavoro reali.
-  - il calcolo della larghezza minima include il contatore fase, evitando wrap su terminali
-    stretti e mantenendo spinner/barra/percentuale sulla stessa riga.
-
-Novita' 0.112 (catalogo Lidarr da SQLite e stop ai timeout globali):
-  - richiede il catalogo host-side lidarr.db accessibile in modalita' SQLite rigorosamente read-only;
-    supporta sia lo schema storico (ForeignArtistId/Name in Artists) sia quello recente
-    (join Artists.ArtistMetadataId -> ArtistMetadata), con mapping Album.ArtistMetadataId
-    sull'ID locale dell'artista. Il default e' <E2M_CONFIG_ROOT>/lidarr/lidarr.db; override LIDARR_DB_PATH.
-  - nel percorso lidarr_sync elimina le GET lista /api/v1/artist e /api/v1/album, anche
-    quando /album e' filtrata per artistId, albumIds o foreignAlbumId: il mapper delle liste
-    calcola comunque ArtistStatistics() per l'intera libreria e puo' scadere su librerie grandi.
-  - elimina anche il fallback GET /artist?mbId: quel filtro calcola statistiche globali prima
-    di filtrare. Se SQLite non e' leggibile, il sync si ferma prima delle aggiunte invece di
-    aspettare timeout ripetuti o rischiare POST duplicati.
-  - lo snapshot SQLite viene condiviso con lidarr_artist_tag_repair; gli album di un artista
-    nuovo e i controlli MBID anti-duplicato usano query SQLite mirate, non GET lista filtrate.
-    Resta soltanto GET /artist/{id} per aggiornare i dettagli di un singolo artista.
-  - replica da SQLite la query ufficiale Lidarr delle statistiche Tracks/AlbumReleases e legge
-    LastSearchTime direttamente da Albums: le ricerche di recupero degli album gia monitorati
-    mantengono il conteggio file e il cooldown di 7 giorni anche senza la vecchia GET globale.
-
-Novita' 0.111 (correzione artisti dai metadati Lidarr):
-  - aggiunta la fase lidarr_artist_tag_repair in --lidarr-sync e --all: confronta ogni album
-    locale con il catalogo completo Lidarr e corregge ARTIST/ALBUMARTIST in base al nome
-    ufficiale dell'artista Lidarr; aggiorna ARTISTS/ALBUMARTISTS quando contengono
-    lo stesso singolo artista, senza cancellare featuring o crediti multipli.
-  - la corrispondenza usa prima il Release Group MBID, poi titolo album esatto e infine chiavi
-    titolo conservative che ignorano solo annotazioni di edizione/disco; gli omonimi fra artisti
-    diversi vengono risolti solo con prove esplicite e i casi ambigui restano invariati.
-  - la fase lavora su tutta la libreria; distingue piu' album nella stessa cartella artista
-    e unisce soltanto i suffissi espliciti Disc/Disk/CD N, preservando Deluxe/Remastered;
-    conserva i tag non artista e registra anteprima, album/file corretti, ambiguita' ed errori.
-  - dopo la sostituzione con il nome Lidarr, una fase mirata artist_names applica le forme
-    bilingui e le traduzioni configurate (NAME_TRANSLATIONS/NAME_FIXES) ai soli file cambiati;
-    segue una scan Navidrome incrementale se sono disponibili le credenziali e lo scan non e' disabilitato.
-
-Novita' 0.110 (fallback MusicBrainz e recupero album gia presenti):
-  - aggiunta una seconda ricerca MusicBrainz combinata titolo + artist-credit. Usa i campi
-    releasegroup/release e artistname/creditname, poi verifica localmente titolo esatto/alias
-    e MBID dell'artista prima di accettare il candidato; recupera artisti che la ricerca
-    separata per nome o il browse della discografia non riuscivano a risolvere.
-  - la ricerca combinata usa anche le varianti alias/romaji e i titoli base senza annotazioni
-    di edizione, mantenendo separati i titoli non equivalenti e i credit Various Artists.
-  - se Lidarr contiene gia' un album dello stesso artista con titolo normalizzato identico,
-    ma un diverso release-group MBID, riusa il record esistente e lo monitora invece di
-    inviare un POST che Lidarr rifiutera' come AlbumExistsValidator; titoli Deluxe/Standard
-    diversi restano distinti e non vengono collassati da questo fallback.
-  - aggiunto il contatore degli album riutilizzati per titolo esatto con MBID diverso.
-
-Novita' 0.109 (report album Lidarr non risolti e profilo discografia estesa):
-  - aggiunta la fase report_lidarr_unresolved_albums dopo --lidarr-sync --apply e --all --apply;
-    elenca ogni voce Spotify che non ha ottenuto un MBID univoco, con motivazione e dati utili.
-    In --lidarr-sync --apply il report giornaliero contiene soltanto questa lista; in --all --apply
-    la sezione viene aggiornata in coda al report tracce/MusicBrainz/copertura gia' esistente.
-  - il report separa gli album realmente senza match dalle voci Spotify diverse che puntano allo
-    stesso release-group MBID; cosi' 1794 - 1290 non viene scambiato per 504 album tutti assenti.
-  - LIDARR_METADATA_PROFILE_NAME/ID permette di assegnare un profilo Metadata personalizzato agli
-    artisti nuovi e aggiornare quello degli artisti esistenti, includendo mixtape, compilation,
-    live, soundtrack, remix e altri tipi se abilitati nel profilo Lidarr.
-  - il riepilogo Lidarr espone i match Spotify prima della deduplicazione, gli MBID unici, i veri
-    album senza match e le voci Spotify che condividono un MBID gia' risolto.
-  - il report include anche gli Spotify URI per gli album con MBID risolto ma aggiunta/verifica
-    Lidarr fallita o rinviata, e quelli ancora assenti dal catalogo a fine sync.
-  - corretto l'update degli artisti esistenti: la PUT invia davvero il nuovo metadataProfileId
-    selezionato, invece di riutilizzare il valore precedente.
-
-Novita' 0.108 (controllo multi-disco globale):
-  - la scansione dei dischi separati non dipende piu' dalle sole cartelle selezionate:
-    anche i passaggi mirati controllano tutta la libreria per coppie disco esplicite.
-  - il controllo globale in modalita' mirata limita le modifiche ai soli gruppi con numeri
-    disco distinti; non ri-unifica in massa altri album/alias non correlati.
-  - logga il numero di cartelle album esaminate dal controllo globale, così e' verificabile
-    che il passaggio copra l'intera libreria e non un singolo album di esempio.
-
-Novita' 0.107 (merge multi-disco e fallback Lidarr/MusicBrainz):
-  - gruppi multi-disco riconosciuti solo quando stesso artista e titolo-base hanno almeno due
-    numeri disco distinti (1/2, Disc/Disk/CD); dopo la fusione ALBUM viene scritto senza suffisso.
-  - la riparazione DB Navidrome e la diagnostica riconoscono lo stesso caso; la scelta del titolo
-    non privilegia piu' il disco con piu' tracce (es. The Bends (2)).
-  - un lookup Lidarr /artist?mbId= valido che restituisce [] conferma che quell'MBID non e' ancora
-    presente: l'artista puo' essere aggiunto invece di essere saltato come non verificabile.
-  - se il catalogo MusicBrainz di un artista supera il limite browse, ricerca mirata release-group
-    per MBID artista + titolo, senza dover scaricare migliaia di gruppi o alzare il limite globale.
-  - matching titoli Lidarr usa anche alias/normalizzazione album gia' disponibili (edizioni come
-    Legacy Edition incluse); le date parziali vengono confrontate come intervalli.
-  - con la lista artisti completa non disponibile, verifica gli artisti gia' noti via MBID e
-    riusa la discografia per artista; usa lookup esatti per foreignAlbumId prima di qualsiasi POST.
-  - niente secondo timeout costoso sulle liste complete; circuito aggiunte aperto anche su 502/503/504
-    o POST con esito di trasporto incerto, per evitare raffiche e possibili duplicati.
-
-Novita' 0.106 (colori delle righe informative):
-  - le righe [i] non vengono piu' classificate come riepiloghi numerici solo perche' contengono
-    parole come "estratti" o "indicizzati" e una quantita'; resta blu soltanto [i], mentre
-    i percorsi filesystem incorporati nella riga mantengono il viola.
-
-Novita' 0.105 (pianificazione fasi e stato login utenti):
-  - il contatore iniziale include gia' fetch Exportify ed estrazione ZIP per --lidarr-sync;
-    non passa piu' da 1/4 a 2/6 durante la stessa esecuzione.
-  - aggiunto --fetch-status: controlla tutti gli utenti Navidrome e distingue sessioni valide,
-    scadute, mancanti o non verificabili; segnala anche i cookie disponibili senza sessione.
-
-Novita' 0.104 (contatori e colori terminale):
-  - le progress bar mostrano il contatore della fase prima dello spinner; diventa verde al 100%.
-  - il totale delle fasi viene calcolato dopo il caricamento silenzioso della config, cosi' anche
-    la prima intestazione mostra il totale corretto; l'output viene riprodotto nell'ordine usuale.
-  - banner versione con nome script verde, versione ciano e timestamp viola; tutti i percorsi
-    filesystem nel terminale sono viola e il riepilogo Lidarr e' giallo.
-
-Novita' 0.103 (configurazione centralizzata e JSONC commentato):
-  - spostati in env/.env i ruoli TERMINAL_COLOR_*, TITLE_MATCH_PENALTY_*, MISSING_ARTWORK_*
-    e AUTO_NAME_TRANSLATION_*; env descrive ogni variabile con un commento.
-  - aggiunti override dei percorsi host per libreria, playlist, ZIP/CSV, config JSON, log,
-    database Navidrome, cache, sessioni e cookie Exportify.
-  - exportify_names.json accetta commenti // e /* ... */; i writer interni preservano
-    le annotazioni quando aggiornano Spotify_USERS o SPOTIFY_LOCAL_PROXY.
-  - rimosso UNIFY_FORCE: album_unify usa i tag, la cartella e il consenso delle tracce;
-    ricostruisce ALBUMARTIST vuoto/Unknown Artist solo con crediti primari coerenti.
-  - ARTIST_CANONICAL_NAMES resta distinta dalle mappe di traduzione/fix e dai gruppi alias.
-  - rimossi i gruppi Ye/Kanye e Parannoul/파란노을 duplicati e una chiave canonica con spazio Unicode duplicata.
-
-Novita' 0.102 (ottimizzazione Lidarr, circuit breaker e riduzione lavoro ripetuto):
-  - legge il catalogo album Lidarr completo con una singola GET /api/v1/album e lo indicizza
-    per artistId; riusa questa fotografia sia per disambiguare gli artisti sia per riconciliare
-    gli album, evitando centinaia di GET per artista e lookup puntuali ridondanti per MBID.
-    Se la lista completa non risponde, mantiene il fallback per artista e i controlli esatti.
-  - interrompe le POST di aggiunta artista/album quando Lidarr segnala che il provider esterno
-    api.lidarr.audio rifiuta la connessione; conta il lavoro rinviato, ma continua a monitorare
-    e disattivare gli album gia' presenti e non ripete decine di POST destinati a fallire.
-  - MusicBrainz: la cache viene scritta ogni 50 album invece che a ogni catalogo artista e ogni
-    10 album; il progress resta parziale se il circuito si apre, senza dichiarare falsamente 100%.
-  - artwork: un rifiuto di connessione apre un circuito per i provider remoti per il resto della
-    run; le copertine non verificate non entrano nella cache negativa e vengono rinviate.
-  - Exportify: un errore in Browser.close non maschera piu' un download gia' salvato o l'eccezione
-    originale; la chiusura fallita viene solo segnalata come warning.
-  - FLAC 16 bit: elimina il secondo ffprobe dopo il rename atomico, perche' il file temporaneo e'
-    gia' stato validato; compressione FLAC predefinita a livello 5 (configurabile 0-12) al posto
-    di 8, riducendo il tempo CPU con un possibile aumento contenuto della dimensione, senza perdita.
-  - TERMINAL_COLORS supporta alias tra ruoli; il JSON distribuito riusa gli stili identici senza
-    duplicare oggetti colore. Sono state rimosse tre funzioni helper interne non piu' usate.
-
-Novita' 0.101 (sync Lidarr idempotente e gestione album gia' presenti):
-  - prima di ogni POST album non gia' presente nella discografia esegue un lookup esatto
-    GET /api/v1/album?foreignAlbumId=<MBID>; riconosce album gia' aggiunti ma non restituiti
-    dalla GET per artista e filtra localmente per MBID anche se l'API restituisce piu' album.
-  - se il lookup puntuale non risponde, sospende il POST per evitare duplicati; se Lidarr rifiuta
-    un POST come gia' esistente, ripete il lookup e recupera l'album senza contare un errore.
-  - passa images=[] nel POST album per evitare il vincolo NOT NULL su Albums.Images osservato
-    nel log v0.100 quando il metadata provider non fornisce immagini.
-  - il riepilogo distingue gli album aggiunti da quelli gia' presenti e i lookup rinviati.
-
-Novita' 0.100 (timeout API Lidarr e alias artisti multilingua):
-  - le richieste GET Lidarr hanno retry limitati sui timeout/errori temporanei; la lettura
-    completa degli artisti usa un timeout piu' ampio. Se il catalogo completo non risponde,
-    il sync prova la ricerca mirata per MBID (`/api/v1/artist?mbId=...`) degli artisti gia'
-    risolti, senza interrompere l'intera fase.
-  - quando la lista completa non e' disponibile, non aggiunge artisti non verificabili:
-    evita duplicati e rimanda la creazione degli artisti nuovi alla run successiva.
-  - la ricerca MusicBrainz considera esplicitamente nome artista, alias e sort-name; genera
-    anche una variante fonetica tramite i romanizzatori gia' installati (pykakasi/Hangul),
-    cosi' un nome Spotify in lettere latine puo' trovare un artista MB con nome principale
-    in kanji/kana/hangul e viceversa.
-  - un candidato trovato tramite alias/romanizzazione non viene scelto solo per il nome:
-    il titolo esatto dell'album deve comparire nel suo catalogo release-group e, in caso
-    di omonimi, in un solo catalogo. I nomi originali Spotify restano quelli mostrati in log;
-    le varianti servono soltanto alla ricerca.
-  - cache MusicBrainz aggiornata alla v3: mantiene i cataloghi gia' scaricati e invalida
-    gli esiti negativi/ambigui della ricerca artista, che non contemplavano alias e romanizzazione.
-
-Novita' 0.99 (risoluzione release e artisti ambigui in Lidarr):
-  - quando MusicBrainz restituisce piu' release-group con lo stesso titolo, sceglie quella con la
-    data piu' vicina a Spotify; a parita' sceglie la piu' vecchia. Se Spotify/MB non hanno date
-    confrontabili, usa la release piu' vecchia disponibile (o il record Lidarr piu' vecchio).
-  - tratta le date parziali (solo anno/mese) in modo deterministico, confrontando il primo giorno
-    noto invece di considerare sovrapposto tutto l'intervallo dell'anno.
-  - per artisti omonimi o con nomi molto simili confronta il catalogo release-group di ogni candidato
-    con il titolo esatto dell'album; seleziona l'artista solo se il titolo compare in un solo catalogo.
-  - applica la stessa disambiguazione al catalogo locale Lidarr, anche quando piu' artisti locali
-    hanno nomi uguali/simili; non usa il solo punteggio fuzzy per scegliere un artista.
-  - aggiorna la cache MusicBrainz alla v2, mantenendo i cataloghi gia' scaricati e rinnovando gli
-    esiti negativi/ambigui che non contenevano l'elenco dei candidati.
-
-Novita' 0.98 (monitoraggio selettivo degli album in Lidarr):
-  - corregge il POST /api/v1/album: Lidarr richiede l'oggetto Artist annidato; il solo artistId
-    produceva HTTP 400 e lasciava gli artisti aggiunti senza album monitorati (1005 errori nel log v0.97).
-  - crea l'insieme completo degli MBID album richiesti per artista e lo passa in albumsToMonitor;
-    l'artista resta monitored=true ma monitorNewItems=none.
-  - legge l'intera discografia presente in Lidarr e imposta monitored=true solo sugli album legati
-    a brani mancanti nelle playlist; tutti gli altri album di quegli artisti vengono disattivati.
-  - dopo il POST di un album forza il monitor con l'endpoint bulk Lidarr e accoda la ricerca solo dopo;
-    cosi' evita la race del post-add asincrono che poteva disattivare l'album appena aggiunto.
-  - usa il catalogo album locale Lidarr come fallback esatto per artisti/titoli non risolti da MusicBrainz;
-    le ambiguita' vengono rivalutate in v0.99 confrontando i cataloghi album.
-  - segnala gli MBID ancora assenti dal catalogo Lidarr, cosi' da poterli riprovare alla sync successiva.
-
-Novita' 0.97 (Lidarr sync per Album Artist e MusicBrainz ID):
-  - il sync conserva Album Artist Name(s), Album URI e Album Release Date delle righe CSV mancanti;
-    raggruppa le tracce per identita' Spotify dell'album, evitando ricerche duplicate e featuring
-    trattati come artisti principali.
-  - risolve gli artisti su MusicBrainz con nome esatto, scarica/cachea i loro release-group e sceglie
-    solo un titolo esatto con credito artista compatibile; la data Spotify disambigua release-group
-    omonimi. Ambiguita', compilation e identita' non risolte restano in review.
-  - usa direttamente i MusicBrainz ID per le operazioni Lidarr, evitando la ricerca testuale upstream
-    che ha problemi noti; le aggiunte usano foreignArtistId e foreignAlbumId verificati.
-  - aggiunge cache persistente dei cataloghi artista/release-group, rate limit MusicBrainz a 1 richiesta/s,
-    retry limitati e circuit breaker. Gli errori temporanei non vengono mai memorizzati come assenza.
-
-Novita' 0.96 (caricamento env per Lidarr):
-  - il loader legge sia .env sia il file senza punto 'env' accanto allo script; supporta anche
-    ~/homelab/scripts/env. Le variabili gia' impostate nell'ambiente hanno precedenza, mentre
-    una variabile vuota nell'ambiente non blocca il valore valido presente nel file.
-  - stampa soltanto il percorso del file env da cui ha caricato impostazioni, mai i valori segreti.
-  - il default Lidarr per lo script eseguito sull'host diventa http://127.0.0.1:8686, coerente
-    con la pubblicazione Docker 8686:8686; LIDARR_URL puo' comunque sovrascriverlo.
-
-Novita' 0.95 (ZIP Exportify e cookie usati da --lidarr-sync):
-  - --lidarr-sync non salta piu' l'estrazione: legge il piu' recente ZIP Exportify disponibile,
-    incluso quello nella vecchia cartella scripts/spotify_csv, e usa i CSV attivi dello ZIP.
-    La preview estrae in una directory temporanea e non modifica i CSV persistenti.
-  - quando esiste un cookie Cookie-Editor <utente>*.json ma manca la sessione Playwright,
-    --fetch e --all importano e verificano il cookie prima di esportare da Exportify; se il
-    login non riesce, resta disponibile lo ZIP locale gia' presente.
-  - la migrazione degli ZIP legacy sposta insieme anche il sidecar <nome>.meta.json, evitando
-    di perdere nomi e copertine originali delle playlist durante lo spostamento su Red1.
-  - saved_albums.csv viene escluso dal calcolo delle tracce mancanti di Lidarr: e' una raccolta
-    di album, non un CSV di playlist con titoli di brani.
-
-Novita' 0.94 (correzione percorso standalone --lidarr-sync):
-  - risolve la selezione utenti subito dopo il caricamento della configurazione, prima dei
-    percorsi utility standalone. --lidarr-sync non raggiunge piu' collect_user_csvs con
-    la variabile sel non inizializzata (UnboundLocalError della v0.93).
-  - la stessa selezione canonica e' riutilizzata dal resto della pipeline, evitando assegnazioni
-    tardive o divergenti tra modalita' standalone e --all.
-
-Novita' 0.93 (correzione mountpoint Red1 case-sensitive):
-  - uniforma tutti i default, i controlli di mount, i percorsi persistenti e i riferimenti
-    operativi al mount effettivo dichiarato in /etc/fstab: /mnt/red1 (minuscolo).
-  - evita che il preflight cerchi /mnt/Red1, interpretandolo come directory distinta sul
-    filesystem root, quando il disco e' correttamente montato su /mnt/red1.
-
-Novita' 0.92 (preflight Red1 e allineamento root Lidarr):
-  - verifica che LIDARR_MUSIC_ROOT risolva esattamente nella stessa directory host usata da E2M,
-    e che resti sotto il mount Red1; blocca configurazioni stale o una seconda libreria vuota.
-  - docker-compose-safe.sh verifica mountpoint Red1 e tutte le bind-source richieste prima di
-    avviare/creare/riavviare i servizi; non crea directory mancanti. stop/down restano disponibili
-    durante il recupero dei dati.
-
-Novita' 0.91 (Lidarr sync dei mancanti e storage Red1):
-  - aggiunge --lidarr-sync: ricalcola i mancanti da tutti i CSV attivi e raggruppa ogni album
-    distinto, non solo i primi 10 mostrati nel riepilogo di e2m_mancanti. La lookup deve
-    confermare titolo e artista in modo univoco; ambiguita'/compilation non vengono forzate.
-  - gli artisti nuovi sono aggiunti con la discografia non monitorata; vengono monitorati e
-    ricercati soltanto gli album presenti nei mancanti. Gli album gia' presenti ma non
-    monitorati vengono attivati; quelli monitorati con trackFileCount < trackCount ricevono
-    una nuova AlbumSearch al massimo ogni LIDARR_SYNC_RESEARCH_DAYS giorni (default 7).
-  - --all abilita la fase dopo il report mancanti; --all --apply aggiunge/monitora e accoda
-    le ricerche. --lidarr-sync standalone fa preview per default; usare --apply per scrivere.
-  - LIBRARY_ROOT, Playlists, exportify CSV/ZIP, database Navidrome, cestino dedupe, cache,
-    sessioni e cookie Exportify hanno default su /mnt/red1/homelab. Le vecchie cartelle ZIP
-    sono sorgenti legacy di migrazione, mai destinazioni. Nessun path musicale usa Toshiba.
-  - aggiunto docker-compose.yml con bind mount espliciti tutti sotto Red1; i segreti restano
-    nel .env. create_host_path=false evita di creare directory host vuote se un mount manca.
-  - blocca le operazioni se /mnt/red1 non e' montato, se una root configurata esce da Red1,
-    o se MUSICA non esiste. Non crea automaticamente la libreria: evita scritture sul disco
-    di sistema e protegge un eventuale tentativo di recupero dati.
-
-==============================================================================
-
-Novita' 0.90 (canonicalizzazione artisti esatta, split collaborazioni e album artist sconosciuti):
-  - aggiunto ARTIST_CANONICAL_NAMES, una mappa artista a chiave lossless che conserva
-    parentesi/romaji/gloss e impedisce alle chiavi NAME_FIXES normalizzate di collidere.
-  - lo split catalog-aware ricostruisce prima i nomi solo-artista piu' lunghi (Tyler, The Creator),
-    ma divide i crediti multi-artista anche se l'intera stringa concatenata e' gia' nel DB;
-    tollera componenti non riconosciuti e rimuove '&'/'and' iniziali dopo le virgole.
-  - le regole esatte valgono per ARTIST, ARTISTS, ALBUMARTIST e ALBUMARTISTS; le compilation
-    mantengono i collaboratori e i tag delle tracce non vengono appiattiti.
-  - aggiunti pin ALBUMARTIST The Cure per Disintegration e Three Imaginary Boys.
-
-Novita' 0.89 (display CJK bilingue, pulizia album artist e chiave album Navidrome):
-  - la canonicalizzazione conserva esattamente la forma CJK bilingue preferita gia' presente
-    nel catalogo Navidrome (kanji + romaji), senza ri-romanizzarla e sostituire un gloss curato
-    con una lettura fonetica generata o con una variante di maiuscole.
-  - la pulizia ALBUMARTIST confronta i componenti con ARTIST e ARTISTS di tutte le tracce;
-    collassa le varianti CJK equivalenti mantenendo la forma bilingue kanji (romaji) preferita,
-    rimuove [Unknown Artist] se esistono crediti reali e conserva gli altri co-artisti album-level.
-    ARTIST/ARTISTS delle tracce non vengono modificati.
-  - la riparazione dei gruppi album uniforma RELEASEDATE e riconcilia gli ID MusicBrainz
-    sia nei tag dei file sia nelle righe album del DB: ID discordanti nel DB vengono rimossi
-    anche quando i tag dei file sembrano gia' concordi.
-    DATE viene mantenuto distinto nei formati che supportano entrambi i campi; M4A/MP4 usa
-    l'unico atom nativo ©day come RELEASEDATE.
-  - aggiunta la lettura/scrittura RELEASEDATE per FLAC, MP3 (TDRL) e M4A/MP4; ffprobe normalizza
-    TDRL/©day a `date`, quindi il probe lo promuove a RELEASEDATE per evitare riscritture ripetute;
-    la cache dei gruppi e' versionata per forzare una nuova riparazione dei gruppi ancora separati.
-
-Novita' 0.88 (report mancanti consolidato, album artist alias e merge cross-folder):
-  - il report di copertura libreria (album assenti e presenti-ma-non-matchati) viene incorporato
-    in e2m_mancanti_DD-MM-YYYY.txt con marcatori, preservato quando il report playlist o MusicBrainz
-    viene rigenerato e aggiornato senza duplicati; _report.txt non viene piu' generato.
-  - durante album_unify vengono rimossi da ALBUMARTIST i componenti [Unknown Artist] ridondanti
-    e gli alias CJK duplicati solo quando un'altra forma equivalente e' effettivamente accreditata
-    nelle ARTIST delle tracce; le ARTIST delle canzoni non vengono modificate da questa pulizia.
-  - i separatori bullet nei crediti ALBUMARTIST vengono normalizzati a '; ' quando ogni componente
-    e' confermato dai crediti delle tracce.
-  - il consolidamento cross-folder usa l'identita' ALBUMARTIST dai tag come fonte primaria invece
-    del solo nome della cartella: frammenti sotto cartelle alias (es. Makaveli/2Pac) possono cosi'
-    essere riconosciuti come lo stesso artista e uniti solo con titolo esatto/alias noto. Fuzzy,
-    edizioni esplicite discordanti e gruppi artista ambigui restano esclusi.
-  - dopo la normalizzazione dei tag, la repair legge i gruppi di album duplicati esatti/alias noti
-    dal DB Navidrome e uniforma i tag a livello album tra tutti i file. Rimuove MBID/RGID
-    discordanti e ALBUMVERSION incongruenti solo quando mantengono separato un gruppo esatto;
-    se esiste un solo ID valido lo propaga alle tracce che ne sono prive. Una data
-    originale comune e attendibile viene uniformata. I crediti ARTIST/ARTISTS delle tracce non
-    vengono mai riscritti da questo passaggio.
-  - le riparazioni MP3 scrivono DATE/ORIGINALDATE, ALBUMVERSION e ID MusicBrainz direttamente
-    via Mutagen ID3 (TDRC/TDOR/TXXX), senza remux FFmpeg; i frame non correlati e l'audio sono
-    preservati. Nei cicli mirati, se un file appartiene a un gruppo duplicato, vengono riparati
-    tutti i file del gruppo e non soltanto il path che ha attivato il ciclo.
-
-Novita' 0.87 (log locali, ruoli operativi, riepiloghi e velocita'):
-  - tutti i log e i report e2m usano logs/ accanto a script e JSON; all'avvio la cartella
-    viene creata se manca, i vecchi file e2m_* vengono raccolti dai percorsi legacy noti e le
-    cartelle e2m/ vengono migrate ricorsivamente senza sovrascrivere file omonimi.
-  - waveform compare, modo APPLY e messaggi operativi (Navidrome stop/start, cestino duplicati)
-    condividono un nuovo ruolo purple `operation`; i riepiloghi numerici riconosciuti, anche con
-    un solo contatore, a due colonne o con valori separati da virgole, usano il giallo `release_summary`.
-  - il riepilogo proprietari playlist diventa `playlist riassegnate: N | esaminate: N`.
-  - date_heal controlla la cache prima delle richieste MusicBrainz: evita i sleep/richieste
-    ripetuti per gli album gia' verificati con la stessa firma cache.
-  - romaji_tags aggiorna MP3 con Mutagen/ID3 su copia temporanea, senza remux FFmpeg; M4A
-    riusa la scrittura diretta MP4 gia' presente. clean_empty riusa il suo os.walk per rilevare
-    anche i conflitti Syncthing e salta a monte le cartelle di metadati @eaDir/.stfolder, mantenendo la scansione delle
-    playlists per rilevare eventuali conflitti Syncthing e l'audio nelle altre cartelle nascoste.
-
-Novita' 0.86 (riconciliazione album iterativa, artisti CJK, FLAC/M4A/MP3 e log coerenti):
-  - dopo la scan Navidrome, le correzioni mirate includono dedupe tracce nella cartella album e
-    tra frammenti album con identita' esatta; i passaggi vengono ripetuti finche' il DB converge,
-    con limite massimo di 20 cicli. I candidati fuzzy e le edizioni discordanti restano review-only.
-  - la mappa artisti Navidrome preferisce la forma bilingue CJK(gloss) anche per la chiave del
-    nome Kanji puro, quando esiste un solo candidato non ambiguo; gloss/romaji non sovrascrivono
-    artisti latini autonomi.
-  - `metaflac` non e' piu' un singolo punto di fallimento: in caso di errore i tag Vorbis richiesti
-    vengono aggiornati tramite Mutagen, senza toccare gli altri commenti; entrambi gli errori sono
-    riportati se falliscono anche i due metodi.
-  - `--mp3-vs-flac` applica la gerarchia FLAC > M4A > MP3, confrontando solo copie a qualita'
-    superiore nello stesso album e mantenendo durata/waveform e le protezioni conservative.
-  - tutte le uscite di log predefinite convergono in logs/; il ruolo
-    JSON `log_path` evidenzia i percorsi log con il cyan-azzurro gia' presente nella palette.
-  - la riga di completamento 100% usa la stessa composizione e gli stessi colori della barra pinned.
-
-Novita' 0.85 (diagnostica album, progress log e riepiloghi per fase):
-  - il log principale usa logs/e2m_vVERSION_DD-MM-YYYY.log; esecuzioni ripetute nello stesso
-    giorno/versione vengono accodate con un separatore che riporta ora e opzioni.
-  - il report tracce mancanti, MusicBrainz e copertura libreria e' consolidato in un unico
-    logs/e2m_mancanti_DD-MM-YYYY.txt; non vengono piu' generati sidecar _report.txt.
-  - le barre TTY registrano checkpoint compatti al 0%, ogni 10% e al 100% nel log e2m;
-    ogni barra completata emette sempre una riga finale 100%, anche prima dello shutdown/unpin.
-  - la diagnostica album incorpora fino a due firme tag per ogni riga DB nei gruppi duplicati:
-    ARTIST/ARTISTS, ALBUMARTIST/ALBUMARTISTS, ALBUM, DATE/ORIGINALDATE, ALBUMVERSION e MBID.
-  - le fasi che restituiscono conteggi ma non stampano gia' un riepilogo ricevono una riga
-    [summary] automatica; le righe metriche multi-campo condividono il ruolo colore release_summary.
-  - aggiunto TERMINAL_COLORS.action_label per UNIFY, CROSS-ALBUM, ARTIST-TAG e gli altri
-    marcatori operativi in maiuscolo; [dry] e [dry-run] usano lo stesso ruolo dry.
-  - album_unify mantiene la sua barra conteggiabile; i checkpoint al 10% e il 100% ora sono
-    anche visibili nel log, oltre alla barra fissata nel terminale interattivo.
-
-Novita' 0.84 (artisti album/traccia separati, alias CJK stabili e metadata write sicuri):
-  - corretta la causa per cui un tag artista vuoto veniva interpretato come [Unknown Artist]:
-    i tag mancanti sono ora distinti dai placeholder espliciti. Un ARTIST mancante viene
-    riempito solo da ARTISTS della stessa traccia o da un'identita' album certa e non-compilation.
-  - la riparazione Unknown Artist mantiene distinti ARTIST/ARTISTS della singola traccia e
-    ALBUMARTIST/ALBUMARTISTS dell'album; non copia la lista dei collaboratori di un album su ogni
-    traccia e non appiattisce compilation o crediti album conflittuali.
-  - la grafia bilingue CJK gia' presente nel catalogo Navidrome e' ora preferita anche in
-    artist_names, album_unify e nel consolidamento cross-folder. Gloss inglesi/romaji univoci
-    diventano alias di ricerca, senza sovrascrivere un artista latino autonomo con lo stesso nome.
-  - le cartelle album con nomi artista CJK/romaji equivalenti possono entrare nello stesso gruppo
-    cross-folder; l'ALBUMARTIST consolidato riutilizza la grafia bilingue del catalogo.
-  - i backup/temp metadata usano una cartella nascosta .e2m-meta-backups quando aggiungere
-    '.meta-backup' o '.tmp' supera NAME_MAX. Il cleanup ripristina backup lasciati da run interrotte
-    ed elimina quelli gia' committati; album_unify non si interrompe piu' su filename lunghi.
-  - M4A/MP4 usa Mutagen per modificare gli atomi tag su una copia temporanea, evitando il remux
-    ffmpeg che nel log 2026-10-30 falliva con exit 234; audio e artwork incorporato sono preservati.
-
-Novita' 0.83 (ruoli colore per riepiloghi e diagnostica):
-  - aggiunti cinque ruoli JSON indipendenti: waveform_compare, run_mode, release_summary,
-    total_label e total_duration; le righe waveform compare, modo e gruppi release sono
-    colorate come blocchi distinti, mentre TOTALE e il relativo tempo hanno colori separati.
-  - === riepilogo tempi === e === fine riepilogo tempi === usano phase; ogni nome fase nella
-    tabella tempi usa phase e ogni valore elapsed usa duration.
-  - === interrotta: ... === e [!] RUN INTERROTTA usano entrambi phase_failure.
-  - il JSON distribuito conserva la palette personalizzata aggiornata dall'utente, incluso
-    progress_unit verde #77FF94, e aggiunge i cinque ruoli con fallback coerenti.
-
-Novita' 0.82 (shutdown pulito della barra e intestazioni fase uniformi):
-  - la barra pinned viene rimossa e la regione di scrolling ripristinata su completamento,
-    eccezioni, Ctrl+C, SIGTERM e SIGHUP; atexit fornisce un ulteriore fallback. SIGKILL e
-    terminazioni forzate non intercettabili restano, per definizione, non gestibili dal processo.
-  - le intestazioni fase usano ora `=== fase nome === X/Y`, con ruolo `phase` e ruolo `counter`
-    indipendenti; le chiusure usano `=== fine fase nome === durata` e riutilizzano esattamente
-    il ruolo `phase`, mentre la durata usa `duration`.
-  - aggiunti i prefissi `[info]` e `[review]`; `[i]` e `[INFO]` sono alias di `info`.
-  - la palette viene precaricata prima delle prime righe e della fase `load_user_config`, cosi'
-    anche banner iniziale, messaggio --all e prima intestazione rispettano subito il JSON.
-  - il JSON distribuito usa la palette personalizzata fornita dall'utente, con `review` amber.
-
-Novita' beta-0.81 (palette terminale configurabile dal JSON):
-  - tutti gli accenti terminale sono configurabili in env/.env con TERMINAL_COLOR_<ROLE>:
-    titoli/fallimenti di fase, contatori, prefissi info/warning/error/dry-run/success, tempi,
-    label/contatore/unita' della barra, spinner, bordo, celle piene/vuote e percentuali.
-  - supporta nomi ANSI (es. blue, bright_cyan), colori truecolor #RRGGBB, indice 256-color
-    (256:81), SGR avanzato (sgr:1;38;5;81), sfondo e attributi bold/dim/italic/underline/reverse.
-    Il valore none disattiva il colore di quel ruolo; TERMINAL_COLORS.enabled=false disattiva tutto.
-  - i ruoli dettagliati hanno fallback sui ruoli base per mantenere compatibilita' con JSON vecchi;
-    NO_COLOR, CLICOLOR=0 e TERM=dumb continuano ad avere la precedenza. Il log e2m resta semplice.
-  - validazione rigorosa dei valori colore: un errore indica il nome del ruolo non valido e blocca
-    il caricamento della configurazione, evitando di avviare una run con palette inaspettata.
-
-Novita' beta-0.81 (palette terminale configurabile da JSON):
-  - aggiunta la configurazione TERMINAL_COLORS: tutti i ruoli colore del terminale possono
-    essere modificati indipendentemente, inclusi stato delle fasi, messaggi, durata, label/counter
-    della barra, spinner, bordo, celle piene/vuote e percentuale al 100%.
-  - supportati nomi ANSI, #RRGGBB, 256:N e sgr:N;..., oltre a colori di sfondo e attributi bold,
-    dim, italic, underline e reverse. none rimuove l'accento di un singolo ruolo; enabled=false
-    spegne la palette. Il JSON distribuito usa un insieme iniziale più morbido e meno acceso.
-  - la configurazione dei colori e' validata all'avvio, con errori che indicano il ruolo difettoso;
-    i JSON vecchi senza TERMINAL_COLORS continuano a usare i colori predefiniti del codice.
-  - confermati il rispetto di NO_COLOR/CLICOLOR/TERM, il rilevamento TTY e i log e2m senza ANSI.
-
-Novita' 0.80 (spinner compatto, righe terminali atomiche e scansioni piu' rapide):
-  - spinner sostituito con frame Braille a singola colonna (⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏),
-    mantenendo il refresh a 100 ms e senza cambiare la larghezza interna della barra a 50 caratteri.
-  - Tee accumula i frammenti console fino al newline/flush e scrive ogni messaggio completo in un'unica
-    sezione critica: evita che il ticker si inserisca tra il testo di print() e il suo newline, causa
-    delle righe artwork fuse con la barra. Il log e2m continua a ricevere testo semplice.
-  - la scansione artwork aggiorna il denominatore con il numero effettivamente osservato se la cache
-    ffprobe sovrastima i file, così una scansione conclusa non resta al 99% per una stima obsoleta.
-  - _audio_files usa il walker os.scandir condiviso invece di Path.rglob ripetuto per ogni album;
-    riduce le scansioni ricorsive ridondanti nelle fasi di dedupe senza cambiare l'ordine dei file.
-  - dedupe_releases raggruppa prima i nomi delle cartelle e visita i file solo per titoli d'album ripetuti;
-    nel log allegato la fase impiegava 2m40 trovando zero gruppi. dedupe_tracks decodifica i fingerprint
-    di ogni gruppo in parallelo (EXPORTIFY_WAVEFORM_WORKERS, default 2, massimo 4), senza cambiare
-    la logica di correlazione o le regole di cancellazione.
-  - flac_16bit esegue i probe ffprobe in parallelo, con limite configurabile EXPORTIFY_FLAC_PROBE_TIMEOUT
-    (default 30 s, massimo 120) e conteggio esplicito dei timeout/errori; evita che probe sequenziali
-    lenti blocchino per decine di minuti la pipeline. La conversione e l'ordine di applicazione restano sequenziali.
-  - ffprobe seleziona esplicitamente il primo stream audio durante la lettura dei bit: una copertina
-    embedded esposta come stream video non puo' essere scambiata per lo stream audio.
-
-Novita' 0.79 (colori terminale):
-  - colori ANSI adattivi: titoli di fase in ciano/grassetto, contatori e spinner magenta,
-    barra con bordo ciano, avanzamento verde e parte residua grigio tenue; le percentuali
-    sono in ciano e diventano verdi al 100%.
-  - messaggi [i], [warn], [ERRORE], [dry] e gli esiti delle fasi hanno accenti coerenti.
-  - i colori sono soltanto per un terminale interattivo; NO_COLOR, CLICOLOR=0 e TERM=dumb
-    disabilitano la decorazione. I codici ANSI vengono sempre rimossi dai log e2m.
-  - la barra rimane fissata all'ultima riga, conserva i 50 caratteri interni e il refresh
-    dello spinner resta ogni 100 ms. I colori non influenzano allineamento o rilevamento wrap.
-
-Novita' beta-0.78 (split artisti generico e barra sempre visibile):
-  - rimossa la dipendenza da ARTIST_SPLIT_OVERRIDES: le virgole senza spazio sono delimitatori
-    generici; le virgole con spazio vengono divise quando il catalogo conferma i componenti o
-    quando una componente coincide con una cartella-artista della traccia.
-  - corretta la causa principale: split_artists accettava prima il nome composto gia' presente
-    nel DB; il riparatore tag inoltre rifiutava collaborazioni se i singoli artisti non erano
-    gia' indicizzati. Ora separatori e contesto del path sono evidenze indipendenti; i nomi reali
-    noti come 'Tyler, The Creator' restano protetti.
-  - corretta una collisione del catalogo: norm() rimuove le parentesi quadre, per cui
-    'The Cure, [Unknown Artist]' collideva con 'The Cure' e la stringa corrotta poteva vincere
-    come grafia canonica. La mappa ignora righe artista che contengono componenti placeholder.
-  - la normalizzazione artisti riusa il contesto di cartella gia' calcolato per file, e quando
-    una lista confermata contiene un artista reale piu' [Unknown Artist], rimuove il placeholder.
-  - barra TTY fissata all'ultima riga fisica: il terminale scrolla nella regione superiore,
-    il ridisegno salva/ripristina il cursore e clear() non cancella piu' la barra prima di ogni
-    messaggio. Anche dopo un ridimensionamento verticale, il cursore di output viene riportato
-    nella regione di scroll prima di riprendere la stampa. I controlli ANSI restano esclusi dal log.
-  - rimossa un'implementazione duplicata di _split_artist_tag_if_known. Il vecchio campo JSON
-    ARTIST_SPLIT_OVERRIDES viene ignorato e segnalato come legacy, mai usato per decidere lo split.
-
-Novita' beta-0.77 (spinner regolare, alias canonici e date coerenti per album):
-  - spinner a ciclo regolare di quattro frame (/ -> ── -> \\ -> |), avanzamento con indice
-    monotono ogni 100 ms; niente salti legati al clock assoluto, mantenuta la casella a due colonne.
-  - la forma bilingue CJK riusa anche la capitalizzazione esatta della voce canonica gia' nel catalogo;
-    la title-case non crea piu' varianti artificiali come '高中正義 (Masayoshi Takanaka)' rispetto a
-    '高中正義 (masayoshi takanaka)'.
-  - M.O.O.N e' ora un alias canonico forte: il nome gia' presente nel DB non puo' reintrodurre
-    il punto finale in M.O.O.N. o ripristinare M_O_O_N. La grafia finale resta M.O.O.N.
-  - fix_date_tags calcola una data originale affidabile a livello di album logico (incluse cartelle CD1/CD2)
-    usando solo una maggioranza datata >=60% con almeno due tracce. Se esiste, uniforma ORIGINALDATE
-    sulle tracce FLAC dell'album e rimuove DATE discordanti; nel dry-run mostra ogni modifica proposta.
-  - quando ORIGINALDATE esiste, DATE viene rimosso anche se i due valori sono identici: elimina il doppio
-    campo in coerenza con la regola documentata e rende deterministica la data letta da Navidrome.
-  - il rapporto di verifica distingue i fix proposti dalla convergenza del DB: --dry-run non scrive tag
-    e non esegue la scansione Navidrome, quindi non puo' attestare che gli album siano gia' fusi nel DB.
-
-Novita' beta-0.76 (split artisti, deduplica e consolidamento album):
-  - barra fissa da 50 caratteri con spinner a due colonne (trattino lungo incluso), refresh ogni
-    100 ms; la fase/contatore resta a sinistra e spinner + barra + percentuale a destra.
-  - split esplicito e configurabile dei tag composti 'Afro Medusa,West Way' e
-    'Chiello,Powv_FSK', anche se Navidrome ha gia' indicizzato la stringa unita.
-  - canonizzazione stabile M_O_O_N/M.O.O.N e unificazione dei nomi CJK puri con la forma
-    bilingue in catalogo; le collaborazioni non si affidano piu' soltanto al catalogo preesistente.
-  - album_unify sceglie ORIGINALDATE soltanto quando l'anno dominante compare in almeno due
-    tracce e copre il 60% dei tag datati; rimuove ID MusicBrainz non uniformabili anche su M4A/MP4
-    e cancella ALBUMVERSION discordanti quando un titolo/artista esatti vengono consolidati.
-  - dedupe_tracks usa il fallback conservativo FLAC/lossy con titolo esatto e durata quasi uguale
-    anche quando manca un numero traccia; una nuova fase post-unificazione in --all trova doppioni
-    tra cartelle album diverse e li sposta nel cestino solo con --apply. Qualificatori e marcatori
-    espliciti di edizione restano protetti.
-  - corretto NameError in _unify_cross_album_dirs (mappa artisti non inizializzata); UNKNOWN-ALBUMARTIST
-    ignora i componenti placeholder in 'The Cure; Unknown Artist' solo quando resta un nome concreto.
-
-Novita' beta-0.75 (normalizzazione artisti e riparazione album):
-  - barra terminale larga 50 caratteri esatti tra parentesi quadre, spinner animato ogni 100 ms
-    e ridisegno temporizzato della stessa riga; i log e2m non ricevono CR né sequenze ANSI.
-  - la normalizzazione artisti canonizza anche le varianti di punteggiatura (M_O_O_N/M.O.O.N),
-    preferisce il nome bilingue CJK già presente nel catalogo e divide collaborazioni con virgole
-    senza spaccare nomi propri con virgola quando il catalogo riconosce il nome completo.
-  - la riparazione di [Unknown Artist] interviene anche su ALBUMARTIST/ALBUM_ARTIST espliciti,
-    usando cartella e metadati delle tracce solo quando non indicano una compilation.
-  - album_unify ora aggiorna DATE anche sui FLAC senza ORIGINALDATE: un ORIGINALDATE trovato
-    su un'altra traccia non blocca più il campo DATE dell'intero album e non lascia split evitabili.
-  - dedupe_tracks ha un fallback conservativo per doppioni con titolo esatto, stesso numero traccia,
-    durata quasi identica e senza qualificatori live/demo/mix; le diverse incisioni restano protette.
-  - report album_db_diagnostics e album_cross_folder_review sono scritti direttamente nel log e2m,
-    senza creare file autonomi temporanei; il report MusicBrainz resta in mancanti.
-
-Novita' beta-0.74 (progress bar terminale e log consolidati):
-  - la progress bar ridisegna la stessa riga ogni 500 ms in terminale, non a soglie del 5%;
-    contatore e fase restano a sinistra, barra completa e percentuale sono allineate a destra.
-  - Tee rileva se la console e' interattiva e manda i redraw solo al terminale, senza inserire
-    caratteri CR nel log e2m. I log reindirizzati mantengono checkpoint temporizzati leggibili.
-  - album_db_diagnostics e album_cross_folder_review vengono incorporati nel log e2m e poi
-    cancellati come file autonomi; il report MusicBrainz resta incorporato in mancanti.
-
-Novita' beta-0.73 (MP3 ID3 convergenti, exit status e report robusti):
-  - MP3: la pulizia dell'alias TXXX albumartist usa mutagen/ID3 invece di tentare di
-    cancellarlo con ffmpeg (che nei log continuava a lasciare il frame e riscrivere 168 file
-    a ogni run). Conserva gli altri frame ID3 e non ricodifica l'audio.
-  - run_phase registra le fasi con ritorno False, eccezioni o risultato con errori>0; la
-    pipeline completa continua per produrre tutti i report ma termina con exit code 1 se una
-    fase e' fallita, cosi' cron/monitoring non vedono una run fallita come successo.
-  - check-albums ritorna un esito coerente con gli errori MusicBrainz e sostituisce anche un
-    eventuale blocco MusicBrainz troncato in mancanti, senza duplicarlo.
-  - aggiornata la guida per mutagen e chiarito che album_incompleti e' un nome storico: il
-    report completo e' consolidato in e2m_mancanti_<GG-MM-AAAA>.txt.
-
-Novita' beta-0.72 (ottimizzazione artist split, report persistenti e log piu' chiari):
-  - split_known_artist_tags prefiltra i file con i tag ffprobe e invoca metaflac solo sui candidati
-    reali, evitando migliaia di processi per file senza separatori utili.
-  - aggiunti artists/albumartists alla cache ffprobe e incrementata la versione della cache per
-    evitare di riutilizzare voci prive dei campi plurali.
-  - un export tag FLAC non leggibile viene segnalato come WARN e saltato; non blocca il repair
-    dell'intera libreria. Gli errori di scrittura restano ERROR e fanno fallire la fase.
-  - la sezione completa MusicBrainz di e2m_mancanti_<GG-MM-AAAA>.txt viene preservata quando il report
-    playlist viene rigenerato piu' tardi nella giornata; il controllo album aggiorna il blocco.
-  - README aggiornato e configurazione SKIP_PLAYLISTS documentata per utente; PLAYLIST_PREFIXES
-    non e' piu' una funzione/configurazione attiva.
-
-Novita' beta-0.71 (skip playlist per utente e report consolidati):
-  - SKIP_PLAYLISTS ora e' un oggetto per utente: le esclusioni attuali appartengono solo a chic;
-    --skip resta invece un override globale per la singola esecuzione. Accetta ancora la vecchia
-    lista JSON assegnandola a DEFAULT_USER con avviso di compatibilita'.
-  - rimosso PLAYLIST_PREFIXES: il nome della playlist viene rispettato come arriva da Spotify;
-    rinomina le playlist direttamente in Spotify invece di trasformarle durante l'import.
-  - i report completi album_db_diagnostics e album_cross_folder_review sono incorporati nel log
-    principale e2m, con marcatori di inizio/fine; i file separati vengono eliminati dopo l'incorporazione.
-  - il controllo MusicBrainz scrive l'intero report, incluse tracce mancanti e album non trovati,
-    in fondo a e2m_mancanti_<GG-MM-AAAA>.txt; non crea piu' nuovi album_incompleti_<data>.txt separati.
-  - UNKNOWN-ARTIST prova anche ARTISTS per la singola traccia e un suffisso artista attendibile
-    nel nome file (es. 'Titolo - Artista') prima di arrendersi per un album multi-artista.
-  - i FLAC il cui export dei tag fallisce vengono esclusi dal fallback non-FLAC, evitando una
-    seconda riscrittura impropria; l'errore resta esplicito nel log per riparare/verificare il file.
-  - star_liked restituisce esito fallito se almeno un utente ha un errore API, anziche' mostrare
-    la fase come completata quando il log contiene [ERRORE].
-
-Novita' beta-0.70 (progress bar terminale per scansioni e fasi lunghe):
-  - le fasi con un insieme di elementi misurabile usano una barra dinamica su una sola riga:
-    contatore corrente/totale, indicatore visuale, percentuale stimata ed elementi rimanenti.
-    Su terminale interattivo la riga viene aggiornata con carriage return; nei log non interattivi
-    vengono emessi solo aggiornamenti periodici per non riempire i log con una riga per elemento.
-  - sostituiti i contatori a righe multiple per scansione libreria, matching playlist, prefetch ffprobe,
-    romaji_tags, album_unify, dedupe tracce/release, normalizzazione artisti, MP3-vs-FLAC, scan Navidrome,
-    check MusicBrainz, confronto catalogo Spotify, download artwork e fix-flac-safe.
-  - aggiunti contatori anche a repair collaborazioni/album artist, repair ownership e dedupe playlist,
-    clean-empty e conversione FLAC; le barre avanzano con item controllati, percentuale e rimanenti.
-  - su TTY la barra usa carriage return e sovrascrive la riga attiva; nei log non interattivi conserva solo
-    checkpoint periodici. Messaggi di errore e modifiche effettivamente applicate restano log separati.
-
-Novita' beta-0.69 (riparazione artisti, contatore fasi e verifica MusicBrainz):
-  - i tag ARTIST/ARTISTS/ALBUMARTIST/ALBUMARTISTS riconoscono anche la virgola come separatore,
-    ma solo quando almeno due componenti sono confermati dal catalogo Navidrome; nomi propri
-    come 'Tyler, The Creator' vengono ricomposti e non spezzati.
-  - la normalizzazione artisti armonizza le forme CJK pure e bilingui fra i campi singoli/plurali,
-    scegliendo una grafia canonica per evitare duplicati 'kanji' / 'kanji (traduzione)'.
-  - UNKNOWN-ARTIST usa prima l'album artist coerente, poi il nome cartella attendibile, quindi
-    una maggioranza di artisti traccia solo se chiara e non esplicitamente una compilation.
-  - ogni fase mostra il numero progressivo e il totale previsto; il riepilogo finale continua a
-    mostrare le durate misurate.
-  - --all controlla gli album che hanno MUSICBRAINZ_ALBUMID, elenca i brani mancanti in fondo a
-    logs/e2m_mancanti_<GG-MM-AAAA>.txt e include li' il report MusicBrainz completo (nessun file album_incompleti separato).
-  - dopo lo scan Navidrome confronta lo stato degli album prima/dopo, stampa i nuovi album e le
-    voci cambiate/accorpate, riapplica le fasi tag solo ai file degli album interessati e chiude
-    con uno scan incrementale. Il confronto usa i path dei brani, non solo gli ID DB volatili.
-
-Novita' beta-0.68 (diagnostica album piu' efficiente e scritture piu' robuste):
-  - --diagnose-album-splits genera le coppie candidate tramite un indice inverso degli artisti:
-    evita confronti fra album che non condividono alcuna identita' artista e riduce il lavoro
-    quadratico sull'intero catalogo; i controlli di similarita' e la regola fuzzy review-only
-    restano invariati.
-  - le riscritture dei tag non-FLAC ripristinano il file originale se la sostituzione finale del
-    file temporaneo fallisce, evitando che un errore I/O lasci il brano mancante dal path atteso.
-  - la riparazione dei tag artista separati da ';' combina in modo deterministico i campi alias
-    presenti nei metadata non-FLAC, deduplicando i componenti e impedendo che un campo successivo
-    sovrascriva silenziosamente il risultato del primo.
-  - la cache MusicBrainz aggiornata durante una riparazione in anteprima viene salvata come cache
-    ausiliaria: il dry-run non modifica tag o file audio, ma evita di ripetere le stesse richieste.
-  - la correzione di [Unknown Artist] non usa piu' una semplice maggioranza di ARTIST per
-    indovinare l'artista nelle compilation: un ALBUMARTIST generico/conflittuale blocca il fallback;
-    se ALBUMARTIST manca, tutti gli artisti noti delle tracce devono concordare.
-  - la riparazione aggrega gli errori di scrittura delle fasi MBID-sanity, artist_names e album_unify;
-    non segnala piu' successo se una di queste passate ha avuto errori.
-  - l'inferenza degli artisti controlla tutti i campi alias disponibili (artist/artists e albumartist/album_artist/albumartists);
-    metadati discordanti sullo stesso file bloccano l'inferenza invece di scegliere il primo campo.
-
-Novita' beta-0.67 (integrazione album repair in --all e correzioni artisti):
-  - --all produce automaticamente il report DB di diagnosi album prima delle modifiche e include
-    le riparazioni album nella pipeline; --all --apply esegue le scritture. I candidati fuzzy restano
-    nel report e non vengono piu' uniti automaticamente, anche quando un frammento e' piccolo.
-  - Aggiunta la correzione degli ARTIST='[Unknown Artist]' quando l'album fornisce un unico artista
-    attendibile: preferisce ALBUMARTIST, altrimenti un artista non sconosciuto condiviso dalle tracce;
-    gli album compilation ambigui restano intatti e sono segnalati per revisione.
-  - Aggiunta la separazione condizionata di tag artista separati da ';': si attiva solo se almeno un
-    componente corrisponde a un artista gia' presente nel DB Navidrome. FLAC riceve ARTISTS multi-valore;
-    gli altri formati ricevono il separatore standard '; ' per lo scanner Navidrome.
-  - La riparazione album completa esegue anche queste due correzioni; nell'uso --all riutilizza le fasi
-    date_heal/artist_names/album_unify gia' presenti per evitare di ripeterle inutilmente.
-  - La diagnostica mostra anche ALBUMVERSION/releasedate/release-group ID dal DB quando disponibili,
-    perché possono separare album con lo stesso titolo visibile. ALBUMVERSION viene resa coerente per
-    album logico; edizioni/versioni discordanti tra cartelle restano review-only e non si uniscono.
-
-Novita' beta-0.66 (riparazione album frammentati e artisti CJK duplicati):
-  - album_base non elimina piu' indiscriminatamente ogni parentesi e la parola "live" interna al titolo.
-    Ora rimuove qualificatori di edizione solo quando sono marcatori/ suffissi, preserva titoli
-    significativi come "Blackbox Live Recorder" e tratta il gloss romaji CJK come alias.
-  - album_unify aggiunge un passaggio cross-folder: raggruppa titoli identici/alias e piccoli
-    frammenti supportati da titoli traccia o numerazione contigua, armonizza ALBUM/ALBUMARTIST,
-    rimuove ID album discordanti e propaga ID univoci mancanti (Animals, Finger Dancin', Saudade, ecc.).
-  - date_heal controlla MUSICBRAINZ_ALBUMID sull'intero album logico, inclusi sottodischi e tutti
-    i formati. Se un'unica cartella contiene ID album contrastanti, non sceglie arbitrariamente la
-    maggioranza: rimuove quegli ID, conservando un release-group ID solo se e' univoco. Invalida le
-    cache dopo le scritture per impedire ad album_unify di ripristinare tag vecchi.
-  - artist_names esamina anche tracce che si trovano in cartelle latine/compilation: ogni valore ARTIST/
-    ALBUMARTIST CJK diventa la forma bilingue preferita in tag FLAC multipli e non-FLAC. I valori
-    duplicati che collassano nella stessa forma vengono deduplicati, poi lo scan Navidrome aggiorna il DB.
-  - aggiunti --diagnose-album-splits (DB read-only) e --repair-album-groups (preview predefinita):
-    report con album.id/MBID/track count/path e artisti CJK doppi; la riparazione unifica tag fra cartelle,
-    rimuove MBID discordanti in tutti i formati e canonizza i valori ARTIST/ALBUMARTIST CJK ovunque.
-
-Novita' beta-0.65 (ottimizzazioni basate sul profilo Tachyon v0.64):
-  - artwork: lo stato delle cover embedded viene salvato nella cache ffprobe insieme a tag/durata;
-    per le cache preesistenti viene aggiunto al primo controllo. La verifica si ferma appena una
-    delle prime tracce contiene una cover, invece di eseguire sempre fino a tre ffprobe per album.
-  - traduzione automatica: dopo un errore del provider Google pubblico si attiva un circuit breaker
-    persistente per 6 ore (configurabile con AUTO_NAME_TRANSLATION_FAILURE_COOLDOWN_HOURS in env/.env). Le
-    traduzioni gia' cacheate continuano a funzionare; i nuovi nomi usano la fonetica senza altri timeout.
-  - correlazione waveform: controlla prima offset zero e poi gli offset grossolani in ordine di
-    distanza, così le copie gia' allineate possono superare la soglia senza percorrere tutta la griglia.
-    Le ricerche complete (incl. --compare) conservano la griglia e il massimo diagnostico precedenti.
-  - il profiling del 27/10/2026 mostra che la cache ffprobe non e' piu' hotspot dominante; restano
-    ~92 s in controlli artwork embedded, ~85 s nella traduzione HTTPS e ~69 s nei tie-break waveform.
-    Queste durate sono stime a campionamento; la nuova riduzione end-to-end va verificata sul server.
-
-Novita' beta-0.64 (ottimizzazioni verificate sul profilo Tachyon reale):
-  - flush_probe_cache non esegue piu' una os.path.exists su ogni chiave della cache dopo ogni fase.
-    Le voci obsolete vengono eliminate in modo lazy quando un percorso richiesto non esiste; la
-    cache non viene usata per un file prima di aver verificato stat, quindi i dati obsoleti non
-    possono produrre tag di un file mancante. Rimosso il controllo O(numero file) su storage lento.
-  - download_missing_album_artwork raccoglie i nomi delle cover gia' durante la passeggiata delle
-    directory, evitando una scandir separata per ogni album; controlla la cache negativa prima di
-    avviare ffprobe per l'artwork incorporato.
-  - le nuove traduzioni automatiche vengono salvate in batch a fine fase, non riscrivendo l'intero
-    JSON cache dopo ogni singolo nome; il salvataggio resta atomico e avviene anche dopo errori/interruzioni
-    gestite da run_phase.
-  - modifiche mirate basate su logs/e2m_sync-only+dry-run+no-scan_20261026_231303.log e sul flame graph
-    Tachyon: il profilo ha mostrato ~109 s nel controllo esistenza della cache ffprobe, altri ~23 s in
-    un successivo flush, ~75 s nelle verifiche ffprobe dell'artwork, ~29 s nelle scansioni cartella-cover
-    e ~69 s nelle traduzioni HTTP.
-    I tempi sono stime a campionamento e dipendono dallo storage/rete.
-
-Novita' beta-0.63 (tracciamento dei preferiti per i proxy Spotify e profiling Python 3.15):
-  - dopo la generazione dei proxy legge getStarred2 di Navidrome, abbina i brani preferiti ai proxy
-    tramite percorso file e metadati, e mantiene .spotify_proxy_manifest.json, liked.m3u e
-    spotify_proxy_favorites.json. Gli errori API non cancellano la lista precedente.
-  - aggiunto --sync-proxy-favorites (preview predefinita; --apply scrive la lista locale) per
-    aggiornare i preferiti senza ricodificare gli MP3. Il manifest consente di collegare i proxy
-    ai sorgenti anche nelle run successive.
-  - documentato il limite Spotify: la Web API non aggiunge file locali a playlist o Liked Songs;
-    liked.m3u e' un elenco locale pronto per consultazione/importazione manuale, non una playlist
-    Spotify nativa. Nessun falso stato di completamento viene dichiarato.
-  - aggiunte le istruzioni per Python 3.15.2 e profiling.sampling (Tachyon). Il runtime di questo
-    ambiente non e' stato aggiornabile perche' i download DNS sono bloccati; nessuna flame graph
-    reale viene dichiarata come prodotta.
-
-Novita' beta-0.62 (cache FLAC16 sicura e dedupe piu' efficiente):
-  - flac_16bit ora memorizza anche i FLAC gia' efficienti: non rilancia ffprobe su quegli stessi
-    file a ogni run se mtime e dimensione non cambiano. La scansione usa il walker os.scandir.
-  - corretto un bug di sicurezza: --dry-run non rimuove piu' file .backup e non modifica la cache
-    FLAC16; mostra invece quali backup verrebbero rimossi.
-  - dedupe_tracks pre-carica i tag di tutti i candidati in una singola fase parallela, invece di
-    salvare la cache ffprobe ripetutamente per ogni album: riduce I/O e scritture quadratiche.
-  - la correlazione waveform riusa somme cumulative per calcolare le norme delle finestre; mantiene
-    la ricerca di offset e velocita' senza cambiare le soglie di deduplicazione.
-  - rimosso un insieme old_auto_keys inutilizzato nella scansione proxy e resi piu' espliciti gli
-    errori API Spotify quando il proprietario dell'app deve avere Premium in Development Mode.
-
-Novita' beta-0.61 (proxy automatici e traduzioni automatiche prudenti):
-  - aggiunto --sync-spotify-proxy-config: confronta gli album della libreria con il catalogo
-    Spotify tramite Search API, produce un report e una copia JSON proposta; il JSON attivo
-    cambia solo con --apply. Gli album ambigui e gli errori di rete non vengono auto-aggiunti.
-  - separati SPOTIFY_LOCAL_PROXY.albums (manuali) e auto_albums (catalogo): la scansione aggiorna
-    solo la lista automatica; il builder genera proxy per entrambe senza perdere gli override manuali.
-  - aggiunta una cache persistente del catalogo Spotify con TTL e retry 429/5xx per non ripetere
-    richieste a ogni run; market IT predefinito, configurabile.
-  - introdotto il livello di traduzione inglese automatica per CJK/Hangul dopo NAME_TRANSLATIONS
-    e NAME_FIXES e prima della lettura fonetica; solo risultati sopra la soglia euristica vengono
-    usati. I risultati vengono memorizzati in cache, senza trasformarli in traduzioni ufficiali.
-  - l'affidabilita' della traduzione automatica e' una stima euristica (il provider Google pubblico
-    non restituisce una probabilita' calibrata); sotto soglia resta la lettura fonetica.
-  - catalog_cache_days=0 disabilita il riuso della cache Spotify; qualunque --proxy-limit resta
-    additivo e preserva gli auto_albums esistenti, anche quando tutti gli album entrano nel batch.
-  - gli errori imprevisti delle utility proxy ora restituiscono un codice di uscita non-zero;
-    prima dell'applicazione viene controllato che il JSON non sia stato modificato durante la scansione.
-
-Novita' beta-0.60 (proxy Spotify MP3 piu' compatti):
-  - bitrate predefinito dei proxy Spotify abbassato da 192k a 64k, per ridurre lo spazio audio
-    a circa un terzo per la stessa durata; il bitrate resta configurabile tra 64k e 320k in
-    SPOTIFY_LOCAL_PROXY.bitrate. A 64k la qualita' e' bassa se si ascoltano i proxy direttamente.
-
-Novita' beta-0.59 (ottimizzazioni mirate su normalizzazione, tag FLAC e clean-empty):
-  - cache LRU per norm()/norm_bare(): riusa le normalizzazioni ripetute di artista, album e titolo;
-    le cache vengono invalidate subito dopo aver caricato le regole emoji dalla configurazione.
-  - romaji_tags: applica tutti i tag cambiati con una sola invocazione di metaflac per file FLAC,
-    invece di avviare un processo separato per ogni campo aggiornato.
-  - fix_date_tags: legge DATE/ORIGINALDATE dalla cache ffprobe condivisa e pre-carica in parallelo
-    i soli FLAC non in cache; scrive ORIGINALDATE e rimuove DATE con una sola invocazione metaflac.
-  - clean_empty: determina se ogni cartella contiene audio con un'unica passeggiata bottom-up,
-    evitando una scansione ricorsiva dell'intero sottoalbero per ogni cartella.
-  - README: aggiunta la procedura di profiling con profiling.sampling (Tachyon) su Python 3.15,
-    distinguendo il profilo wall-clock da quello CPU per riconoscere le attese su disco/rete.
-
-Novita' beta-0.58 (integrazione utilita' FLAC, Lidarr e ListenBrainz):
-  - integrate --fix-flac-safe: ripara i file .flac.flac solo se il duplicato e' valido, e pulisce
-    i .backup quando l'originale esiste; preview predefinita, modifiche solo con --apply.
-  - integrate --lidarr-folder-fix: riconcilia i path artisti Lidarr con le cartelle reali usando
-    normalizzazione, NAME_TRANSLATIONS/NAME_FIXES/ALIASES/ARTIST_GROUPS e fallback fuzzy; aggiorna
-    l'API e avvia RescanFolders solo dopo correzioni riuscite.
-  - integrate --lidarr-import-slskd: avvia DownloadedAlbumsScan, riallinea le cartelle e segnala
-    le sottocartelle in failed_imports; credenziali Lidarr da LIDARR_API_KEY, mai dal sorgente.
-  - integrate --lb-dedup UTENTE: trova ascolti ListenBrainz ripetuti entro 5 secondi, con retry,
-    checkpoint e segnalazione delle finestre saltate; e' preview per default, --lb-delete abilita
-    le cancellazioni e LISTENBRAINZ_TOKEN resta solo nell'ambiente/.env.
-  - mantenuto --fix-owners per-percorso e aggiunto --fix-all-playlist-owners per replicare il vecchio helper
-    che forza tutte le playlist, incluse quelle create nella UI, a un solo proprietario.
-
-Novita' beta-0.57 (traduzioni CJK prioritarie con fallback fonetico):
-  - aggiunto NAME_TRANSLATIONS per traduzioni inglesi curate e nomi inglesi ufficiali; ha priorita su
-    NAME_FIXES e sulla romanizzazione automatica. NAME_FIXES resta il livello di compatibilita per alias
-    manuali/romaji e pykakasi/Hangul viene usato solo quando non esiste una forma preferita.
-  - applicata la stessa priorita a matching di brani/artisti/album, manutenzione dei tag e proxy Spotify;
-    il lookup inverso normalizza anche le maiuscole per collegare la forma inglese alla chiave CJK.
-  - spostate nel JSON NAME_TRANSLATIONS le traduzioni/forme inglesi ufficiali gia' curate; le regole
-    generiche non presenti nelle tabelle continuano ad avere come fallback la lettura fonetica.
-  - invalidata la cache dell'indice (CACHE_VERSION 7) per rendere effettive le nuove regole.
-
-Novita' beta-0.56 (alias inglesi per titoli CJK e provenienza delle tracce mancanti):
-  - NAME_FIXES mantiene le maiuscole per i gloss leggibili; il matcher normalizza al confronto.
-    Le nuove traduzioni semantiche/forme inglesi ufficiali sono ora separate in NAME_TRANSLATIONS.
-  - aggiunte le varianti giapponesi ワールドイズユアーズ / ワールド イズ ユアーズ -> World Is Yours,
-    confermate per MASS OF THE FERMENTING DREGS; il matching usa l'alias per titolo E album.
-  - se romaji_tags trova un vecchio gloss che coincide esattamente con la lettura fonetica pykakasi,
-    lo sostituisce con il mapping inglese curato; non sovrascrive parentesi legittime come (Live).
-  - cache dell'indice incrementata per ricostruirla con le nuove regole di alias.
-  - la classifica 'ALBUM DA SCARICARE' in e2m_mancanti_*.txt mostra ora le playlist attive che originano
-    ogni raccomandazione album: gli album suggeriti non vengono confusi con nomi di playlist cancellate.
-
-Novita' beta-0.55 (Spotify Local Files per album assenti dal catalogo):
-  - aggiunto --build-spotify-proxies: genera MP3 solo per gli album esplicitamente elencati in
-    SPOTIFY_LOCAL_PROXY.albums, mantenendo intatti i FLAC originali
-  - output configurabile fuori da MUSIC_ROOT per evitare doppioni in Navidrome; bitrate e dry-run
-    configurabili, tag artista/album/titolo e copertina embedded preservati quando supportata
-  - Exportify puo' esportare metadata da tracce locali in playlist Spotify (URI spotify:local:...);
-    il matcher usa i campi testuali per trovare il file lossless originale
-
-Novita' beta-0.54 (README e changelog CLI):
-  - aggiunto README.md con panoramica del progetto, funzionalita' e configurazione; le opzioni
-    dettagliate restano nell'help generato direttamente dallo script, che e' la fonte aggiornata
-  - aggiunto --changelog: stampa tutto questo changelog e termina senza avviare pipeline o creare log
-  - tutte le intestazioni dei rilasci precedenti sono marcate beta- per distinguerle dal rilascio corrente
-
-Novita' beta-5.3 (matching e copertine album):
-  - ampliata la penalita' configurabile per versioni alternative, includendo extended/expanded e
-    le etichette live, demo, instrumental e rehearsal; il titolo pulito e' favorito quando richiesto
-  - aggiunta la ricerca finale delle copertine album mancanti, con controlli per non sovrascrivere
-    artwork gia' presente e cache dei risultati negativi
-
-Novita' beta-5.2 (matching piu' semplice e scoring configurabile):
-  - riutilizzata la mappa TITLE_MATCH_PENALTIES caricata dalla configurazione anche per la penalita' parentesi;
-    il vecchio TITLE_MATCH_PARENTHESES_PENALTY viene ancora letto solo per compatibilita' con JSON v5.1
-  - lista dei qualificatori normalizzata/ordinata una sola volta e memorizzata in cache, invece di
-    ricostruire e ordinare gli stessi set per ogni candidato; cache invalidata dopo il caricamento config
-  - mantenuto il punteggio piu' alto per le versioni esplicitamente richieste (Live/Demo ecc.); i suffissi
-    alternativi non richiesti perdono contro il titolo pulito
-
-Novita' beta-5.1 (penalita' delle versioni alternative):
-  - penalita' maggiori per titoli tra parentesi o qualificati come live/demo/instrumental/rehearsal
-  - conservato il vantaggio per una versione alternativa quando e' esplicitamente richiesta dal CSV
-  - aggiunta TANTI AUGURIII!! alla lista delle playlist da ignorare
-
-Novita' beta-5.0 (normalizzazione dei nomi e preferiti):
-  - pulizia dei duplicati M3U con nomi equivalenti dopo normalizzazione di maiuscole, spazi e punteggiatura
-  - corrispondenza degli album salvati meno restrittiva per applicare le stelle alle edizioni compatibili
-
-Novita' beta-4.9 (fetch fresco e pulizia M3U per utente):
-  - FETCH_IGNORED_USERS in exportify_names.json esclude gli account dal fetch Exportify;
-  - quando il fetch riesce, l'estrazione usa solo lo ZIP appena scaricato per quell'utente,
-    ignorando gli altri ZIP della cartella spotify_csv;
-  - dopo una conversione riuscita vengono rimosse le M3U obsolete dell'utente non piu' coperte
-    dai CSV selezionati; CSV in errore sospendono la pulizia per sicurezza;
-  - pulisce anche dal DB Navidrome le playlist importate col path dei file rimossi (e righe collegate);
-  - fetch, pulizia M3U e pulizia DB sono fasi distinte e temporizzate;
-  - le cartelle M3U degli altri utenti sono protette anche col layout storico dell'utente default.
-
-Novita' beta-4.8 (sync Navidrome piu' sicura):
-  - attesa che l'API Navidrome torni disponibile dopo un riavvio prima di applicare preferiti
-  - scan incrementale nella modalita' sync-only e gestione esplicita degli errori di scan
-
-Novita' beta-4.7 (modalita' sync-only e timer):
-  - aggiunta la modalita' quotidiana leggera che salta dedupe, FLAC e manutenzione massiva dei tag
-  - tempi per fase e riepilogo totale; una fase interrotta non deve essere marcata come completata
-
-Novita' beta-4.6 (CSV album e tempi di fase):
-  - riconosciuto saved_albums.csv come raccolta album e non come playlist di brani
-  - aggiunti timer e riepilogo finale delle durate delle fasi
-
-Novita' beta-4.5 (revisione bug + pulizia):
-  - corretto un bug nel trasferimento di .playlist_meta.json: i nomi originali/cover dal ZIP ora vengono davvero salvati;
-  - unzip atomico per CSV: prima mette in staging tutti i file del nuovo ZIP, poi li sostituisce;
-    un archivio troncato non puo' cancellare i CSV precedenti o lasciare una pulizia incompleta
-  - rilevamento CSV non sensibile alle maiuscole dell'estensione (.csv/.CSV); eliminato il pre-clean
-    ridondante --clean (l'opzione resta compatibile, la pulizia avviene solo dopo estrazione riuscita)
-  - --star-liked legge una volta getStarred2 e salta anche le canzoni gia' preferite, non solo album/artisti
-  - scan Navidrome restituisce l'esito; una scan fallita non viene segnata come completata
-  - tolto il fallback a password Subsonic hard-coded: le credenziali vengono da ND_PASS / ND_PASS_<UTENTE>
-  - chiusa esplicitamente la risposta HTTP, uniformata la URL base senza slash finale
-  - rimossi helper/locali morti e aggiornato lo User-Agent artwork alla versione corrente
-
-Novita' beta-4.4:
-  - --star-liked: accetta la playlist 'liked' (e 'liked songs'), stella le tracce; usa 'saved albums'
-    per stellare gli album e stella gli artisti presenti nelle due playlist; la scan Navidrome avviene
-    prima di questa fase, cosi' vengono lette le playlist appena aggiornate
-  - unzip: se ci sono piu' ZIP dello stesso utente, usa solo il piu' recente; i CSV rimasti fuori
-    dal nuovo export di quello stesso utente vengono rimossi
-
-Novita' beta-4.3:
-  - import playlist: recupera durante --fetch nome Spotify originale (case, emoji, Unicode) e cover;
-    conserva i metadati per CSV e usa il nome esatto come basename M3U (slash -> ／, non puo' stare in un filename)
-  - importa la cover Spotify come sidecar accanto alla M3U, riconosciuto da Navidrome; aggiorna la cover
-    anche quando la playlist non deve essere riscritta; recupero artwork non riuscito non blocca l'import
-
-Novita' beta-4.2:
-  - e2m_mancanti_*.txt: X/Y ora e' TROVATI/totale con la % dei trovati, piu' "N brani rimasti" (quelli
-    ancora da trovare), ovunque: totale, per utente, playlist e album. Il resto non cambia
-  - corretto date_heal / MusicBrainz: un errore TEMPORANEO (503, 429, timeout) veniva salvato in cache
-    come "nessun dato" e quel release-group non veniva mai piu' ricontrollato (nel log del 18/10: 2
-    casi). Ora gli errori temporanei non si memorizzano e _mb_json riprova 3 volte con pausa; al primo
-    avvio le voci "nessun dato" gia' salvate si tolgono e vengono richieste di nuovo (una volta sola,
-    puo' allungare di qualche minuto la prima notte). Se MusicBrainz e' fuori servizio, dopo 5 richieste
-    fallite di fila si smette di insistere per il resto della run (senza questo limite le attese dei
-    tentativi allungherebbero la notte di ore); --check-albums si ferma dopo 3 album in errore e salva
-    cache e report
-  - corretto romaji_tags: se la lettura inizia con una cifra o un simbolo ("17歳" -> "17sai") il valore
-    non veniva riconosciuto come gia' romanizzato e a ogni notte si aggiungeva un'altra parentesi
-    ("17歳 (17sai) (17sai (17sai))"). Ora lo riconosce e, per sicurezza, non scrive mai un valore che
-    una seconda applicazione cambierebbe ancora
-  - report SKIP_PLAYLISTS: "entra?" e "entra" (stessa chiave) risultavano "senza corrispondenza": ora
-    sono accreditate tutte le voci che combaciano; senza CSV esaminati il riepilogo non compare
-  - --check-albums: abbinamento in due passate (prima titoli identici, poi varianti), "Intro" e
-    "Intro (Reprise)" non si scambiano piu'
-  - cookie malformati (campi col tipo sbagliato) danno un errore leggibile e non un traceback; i link
-    simbolici rotti *.zip in ZIP_DIR non fanno piu' fallire la ricerca degli zip
-
-Novita' beta-4.1:
-  - corretto --fix-collab-artists: con la gestione multi-libreria Navidrome salva in media_file.path
-    percorsi RELATIVI alla libreria (JPEGMAFIA/ALBUM (2023)/x.flac) e la fase li cercava saltando la
-    prima cartella: diceva "file non trovati sul disco" e non riscriveva niente
-  - gli ZIP Exportify vengono salvati in arr-config/spotify_csv su Red1; i vecchi ZIP nelle
-    cartelle legacy sono importati soltanto se validi e non vengono piu' usati come destinazione
-    Exportify; con --dry-run non si sposta niente ma si leggono comunque)
-  - dopo un'estrazione riuscita i CSV 'storici' direttamente in EXPORTIFY_DIR (vecchio layout)
-    vengono cancellati (prima restavano e davano solo un avviso)
-  - --all accende da solo --fetch se esistono sessioni Exportify salvate: il cron
-    "--all --apply" non riscaricava gli zip e usava quelli del giorno prima
-  - nome del log: logs/e2m_<opzione1>+<opzione2>+..._<AAAAMMGG>_<HHMMSS>.log (opzioni senza
-    '--'; senza opzioni "playlists")
-
-Novita' beta-4.0 - versione maggiore: pipeline multi-utente completa e guida integrata.
-  Riassume le novita' 3.22-3.30 qui sotto: zip e playlist per utente (--users), download
-  automatico degli zip da Exportify (--fetch*), dedupe delle playlist, report mancanti
-  con statistiche, controllo album incompleti su MusicBrainz, correzione dei collab.
-  - aggiunta questa guida in testa al file (uso, nuovo utente, comandi, configurazione)
-  - corretto --help: la descrizione di --max-dur-diff (contiene un '%') non veniva
-    mostrata e stampava un dizionario Python
-
-Novita' beta-3.30:
-  - --fix-collab-artists: album collab che Navidrome mostra come "JPEGMAFIA • JPEGMAFIA &
-    Danny Brown" invece di "JPEGMAFIA • Danny Brown". Navidrome unisce con " • " i VALORI
-    del tag ALBUMARTIST: se nei FLAC ce n'e' uno che contiene gia' l'altro ("A" e "A & B")
-    il nome esce doppio. La fase cerca nel DB gli album con quello schema (album_artist con
-    " • " e un valore che ripete un componente di un altro), legge i tag veri dei file e
-    riscrive ALBUMARTIST (e ALBUMARTISTS, se c'e') con i soli componenti ["A", "B"] in tutti
-    i file dell'album. Dry-run salvo --apply; --album/--artist restringono. Solo FLAC (gli
-    altri formati sono elencati). Dopo --apply serve uno scan di Navidrome (lo fa la run).
-    Percorsi: media_file.path e' quello DENTRO il container; la fase lo riporta sul host
-    (ND_MUSIC_ROOT=/music se serve; di solito lo riconosce da sola)
-  - --check-albums (vecchie versioni: album_incompleti_<data>.txt): confronta ogni album del DB con
-    la tracklist di MusicBrainz; nelle versioni attuali il report intero e' in fondo a
-    logs/e2m_mancanti_<GG-MM-AAAA>.txt. Include tracce mancanti (X/Y, %), quali tracce e l'elenco
-    "Artista - Album - Titolo" da riscaricare. Usa MUSICBRAINZ_ALBUMID del DB
-    (release esatta); senza, cerca per artista+album (--mb-no-search = solo gli album
-    taggati). 1 richiesta/secondo come chiede MusicBrainz, cache in .mb_albums_cache.json:
-    la prima run su una libreria grande e' lunga (si puo' interrompere e riprendere),
-    le successive sono quasi istantanee. Solo lettura: non tocca file ne' DB
-
-Novita' beta-3.29:
-  - estraendo uno zip, i CSV dell'utente che NON sono nel nuovo zip (playlist cancellate o
-    rinominate su Spotify) vengono cancellati: la cartella exportify/<utente>/ rispecchia
-    sempre l'ultimo export (--clean e' ora superfluo). Vale solo per gli utenti il cui zip
-    e' stato davvero estratto in questa run; con --no-unzip non si tocca nulla
-  - SKIP_PLAYLISTS (JSON) e --skip/--only confrontano i nomi in modo tollerante: minuscole,
-    NFKC e ogni sequenza di caratteri non alfanumerici (spazi, '_', punteggiatura, emoji)
-    vale uno spazio. Cosi' "entra?" combacia con entra_.csv e "Stello + chic<emoji>" con
-    "Stello _ chic_.csv" (prima non combaciavano, e le loro tracce finivano nei mancanti)
-  - una voce di SKIP_PLAYLISTS puo' avere '*' come jolly ("daylist*" = tutte quelle che
-    iniziano con daylist; le daylist di Spotify si chiamano "daylist • ...")
-  - a fine selezione: quante playlist sono state ignorate e quali voci di SKIP_PLAYLISTS non
-    corrispondono a nessun CSV (utile per accorgersi di nomi scritti male)
-  - le playlist ignorate non vengono elaborate, quindi non compaiono in logs/e2m_mancanti_*.txt
-
-Novita' beta-3.28 - controllo della sessione Exportify e cartella dei cookie:
-  - --fetch-cookies cerca il file anche in spotify_cookies/ (accanto allo script e nella
-    cartella corrente); senza nome (--fetch-cookies da solo) prende il file piu' recente
-    in spotify_cookies/ il cui nome inizia con l'utente (chic*.json / chic*.txt)
-  - --fetch-check: verifica in headless se le sessioni salvate sono ancora valide (codice
-    di uscita 2 se una e' scaduta: ideale per cron, es. "... --fetch-check || notifica")
-  - --fetch-list mostra anche tra quanti giorni scade il cookie di login (sp_dc) e l'eta'
-    di ogni zip; --fetch avvisa se sp_dc scade entro 14 giorni
-  - con --fetch, se uno zip e' piu' vecchio di ZIP_STALE_DAYS (3) giorni compare un avviso
-    [!]: copre ogni causa (sessione scaduta, interfaccia cambiata, Exportify non risponde)
-  - la riga "estratti N CSV" dice quanto e' vecchio lo zip
-
-Novita' beta-3.27 - logs/e2m_mancanti_<GG-MM-AAAA>.txt piu' ricco (l'elenco completo resta IN FONDO):
-  - totale: X/Y tracce uniche mancanti e percentuale (Y = brani unici letti dai CSV)
-  - per utente: mancanti/totale e %, e quante canzoni mancano a quali utenti ("3 canzoni
-    mancanti a elena", "1 canzone mancante a chic, stello"); solo con piu' utenti nella run
-  - le playlist con piu' canzoni mancanti (X/Y, %)
-  - i 10 album da scaricare, per numero di canzoni mancanti (X/Y = mancanti / brani di
-    quell'album presenti nelle playlist; non si conosce la tracklist completa dell'album)
-  - nell'elenco completo le playlist portano il prefisso "utente:" se gli utenti sono piu' di uno
-
-Novita' beta-3.26 - login Exportify piu' robusto:
-  - il browser del login nasconde i segnali di automazione (flag --enable-automation,
-    navigator.webdriver) e usa Google Chrome se installato, altrimenti Chromium
-  - chiudere il browser a meta' login non produce piu' un traceback
-  - se Spotify scambia comunque il browser per un bot (captcha impossibili, "something
-    went wrong"): fare il login nel PROPRIO browser, esportare i cookie di spotify.com
-    (estensione "Cookie-Editor" -> Export -> JSON, oppure cookies.txt Netscape) e importarli:
-        --fetch-login UTENTE --fetch-cookies FILE
-    Servono almeno i cookie di login (sp_dc); lo script verifica la sessione subito.
-    Consiglio: login in una finestra PRIVATA, esporta, chiudi la finestra SENZA fare logout.
-
-Novita' beta-3.25 - download automatico degli zip da Exportify (tutto in questo script):
-  Exportify gira solo nel browser (nessun URL da scaricare con curl): con --fetch lo
-  script pilota Chromium headless (Playwright), riusa la sessione Spotify salvata per
-  utente (.exportify_sessions/<utente>.json), clicca "Export All" e salva lo zip come
-  ZIP_DIR/<utente>_spotify_playlists.zip. Non serve Spotify Premium (si usa l'app
-  Exportify pubblica). Playwright e' richiesto SOLO da queste opzioni:
-      .venv/bin/pip install playwright && .venv/bin/playwright install chromium
-      (Debian: anche  sudo .venv/bin/playwright install-deps chromium)
-  1) una volta per utente, su una macchina con schermo:  --fetch-login UTENTE
-     (login su Spotify + autorizza Exportify; salva la sessione. Senza schermo: fallo sul
-     PC e copia il .json in .exportify_sessions/ sul server)
-  2) --fetch            scarica gli zip e poi elabora (cron: --fetch, o --fetch --all --apply)
-     --fetch-only       scarica gli zip e basta
-     --fetch-list       mostra sessioni e zip presenti
-     --users a,b        limita a questi utenti; --fetch-headed mostra il browser (debug)
-  - sessione scaduta (Spotify richiede di nuovo il login): l'utente e' segnalato con
-    l'errore e si prosegue con gli zip gia' presenti (con --fetch-only: codice di uscita 2)
-  - export interrotto (meno della meta' dei CSV dell'ultimo zip buono): il vecchio zip
-    resta, il nuovo va in <nome>.zip.suspect (fuori dal pattern *.zip)
-  - se l'interfaccia di Exportify cambia: screenshot + HTML in logs/ (pulsanti cercati
-    per testo, inglese e italiano); EXPORTIFY_URL cambia l'indirizzo
-  - --fetch e' saltato con --dry-run
-
-Novita' beta-3.23 (multi-utente Navidrome - prima tappa):
-  - ZIP PER UTENTE: ogni zip Exportify va legato a un utente Navidrome. Il nome del
-    file DEVE iniziare col nome utente (es. chic_spotify_playlists.zip). Se non lo fa,
-    si prende l'ID Spotify piu' frequente nella colonna "Added By" dei CSV nello zip e
-    lo si cerca in exportify_names.json -> "SPOTIFY_USERS": {"id": "utente"}. Se manca:
-    da terminale chiede l'utente e salva il legame nel JSON; da cron salta lo zip
-    con l'errore e la riga da aggiungere. Senza --zip legge tutti i *.zip di ZIP_DIR.
-  - CSV in EXPORTIFY_DIR/<utente>/. m3u in PLAYLIST_DIR/<utente>/ per gli utenti che
-    NON sono DEFAULT_USER (lui tiene il layout storico in PLAYLIST_DIR/: nessuna
-    migrazione, nessuna playlist duplicata). Sync-state dei non-default: "<utente>::<nome>".
-  - --users a,b: limita le fasi PER-UTENTE (playlist, fix-owners, dedupe-playlists,
-    star-liked). Senza --users (anche con --all --apply) vale per TUTTI gli utenti.
-    Le fasi sulla libreria condivisa (dedupe release/tracce, mp3-vs-flac, ...) non
-    dipendono dall'utente e non sono filtrate.
-  - --fix-owners assegna per PERCORSO dell'm3u (cartella utente); non tocca piu' le
-    playlist create a mano nell'UI (path vuoto) e rispetta --dry-run.
-  - nuova fase --dedupe-playlists: stesso nome ESATTO + stesso proprietario -> tiene la
-    piu' recente (updated_at), cancella le altre dal DB Navidrome. Dry-run salvo --apply.
-  - --star-liked per utente: password in ND_PASS_<UTENTE> (per l'utente ND_USER: ND_PASS).
-    Stella i brani di 'liked', gli album di 'saved albums' e gli artisti presenti in entrambe.
-
-Novita' beta-3.22:
-  - UN SOLO LOG per esecuzione (logs/exportify_<data>_<ora>.log): prima ogni fase
-    scriveva un file suo e il log 'principale' non conteneva le fasi
-  - logs/mancanti_<AAAA-MM-GG>.txt: elenco unico delle tracce mancanti, a ogni run
-  - nuova fase artist_names: lo stesso artista CJK/coreano non compare piu' con 3 nomi
-    (latino / kanji / 'kanji (latino)') su Navidrome; ripara anche gli mp3 con
-    ALBUMARTIST doppio (TPE2 + TXXX scritto da write_ffmpeg)
-  - nuova fase --mp3-vs-flac: via l'mp3 se la stessa traccia esiste in FLAC
-  - bugfix: cache indice non invalidata dalle modifiche a exportify_names.json;
-    metaflac senza --no-utf8-convert (tag giapponesi rovinati con locale C/cron);
-    _flac_tags case-sensitive; _move_to_trash lasciava il .lrc con --hard-delete
-
-Novita' beta-3.21 (dai log reali del 13/10):
-  - album_unify: la riparazione dei tag mancanti (spotyFLAC) dava KeyError 'title' su
-    OGNI FLAC (funzionava solo per mp3/m4a); titolo ricostruito meglio
-  - stop alle riscritture notturne che non convergono: .m4a (ffmpeg non salva
-    albumartist/originaldate/MBID), FLAC con ORIGINALDATE (unify rimetteva DATE e
-    fix_date_tags lo toglieva), .opus/.ogg (tag illeggibili)
-  - ALBUMARTIST riscritto col nome 'sanificato' della cartella solo per cartelle asiatiche
-  - .missing.txt delle playlist 'invariate' ora aggiornato; nuovo --missing [FILE]
-
-Novita' beta-3.20 (ottimizzazioni + bugfix):
-  - cache di ffprobe persistente + letture parallele: le fasi notturne non
-    rileggono piu' tutta la libreria a ogni esecuzione
-  - cache dell'indice in ~/.cache (non /tmp: su Debian 13 e' tmpfs, si svuota a
-    ogni riavvio), compatta, con firma che vede anche rinomine/spostamenti
-  - matching: risultati memoizzati, fuzzy con prefiltro di lunghezza (identico
-    a difflib), ordine DETERMINISTICO nei pareggi (prima dipendeva da PYTHONHASHSEED)
-  - fix: hangul-romanize (Transliter vuole la regola), NAME_FIXES applicate anche
-    ai tag, album multi-disco, dry-run davvero a secco, clean_empty non cancella
-    piu' cartelle di soli .aiff/.ape/.wv/.dsf, ping-pong notturno di ALBUMARTIST
-    fra romaji_tags e album_unify, DATE/ORIGINALDATE doppi in date_heal,
-    --explain che andava in crash, correlate() None, JSON config rotto = stop
+Novita' 0.151 (date originali Radiohead offline-safe + gloss bilingui con iniziali corrette):
+  - La run v0.150 ha mostrato il difetto residuo: dopo il circuit breaker MusicBrainz, 1.084 album
+    restavano irrisolti; album_unify conservava quindi RELEASEDATE=2009 (e Amnesiac=2021) perché
+    mancava ORIGINALDATE. Aggiunti fallback esatti e verificabili per i titoli originali Radiohead:
+    Pablo Honey 1993, The Bends 1995, OK Computer 1997, Hail to the Thief 2003, Amnesiac 2001,
+    In Rainbows e Disk 2 2007. Sono applicati prima della rete in date_heal e anche in album_unify,
+    quindi funzionano con MusicBrainz offline e non possono essere sovrascritti da un reissue tag.
+  - Le altre release continuano a richiedere MusicBrainz o un consenso ORIGINALDATE attendibile:
+    non viene generalizzato l'anno di cartella/DATE/RELEASEDATE come originale, perché può essere
+    una ristampa. La cache date_heal passa a v6 e i fallback esatti sono cacheabili come fonte valida.
+  - Se YEAR esiste già ed è discordante, date_heal lo aggiorna insieme a DATE/ORIGINALDATE/RELEASEDATE.
+  - Il casing del gloss latino bilingue viene ora normalizzato anche quando proviene da una riga
+    Navidrome/Lidarr già esistente o da NAME_TRANSLATIONS/NAME_FIXES: ogni token tutto minuscolo
+    riceve l'iniziale maiuscola. Token mixed-case e acronimi già maiuscoli restano invariati.
+  - Rimosso il bypass che preservava intenzionalmente il gloss di catalogo in minuscolo: era il
+    motivo per cui la precedente capitalizzazione riguardava soltanto alcuni nomi generati.
+Novita' 0.152 (anni originali mancanti + MUSICBRAINZ_ALBUMTYPE automatico):
+  - date_heal non salta piu' le cartelle senza DATE/ORIGINALDATE/RELEASEDATE/YEAR: se manca
+    l'anno originale, cerca il release-group MusicBrainz anche quando tutti i campi data sono vuoti.
+    Mantiene il criterio conservativo: scrive soltanto anni da prima release Official verificata
+    o dagli override esatti gia' documentati; errori temporanei restano ritentabili.
+  - Nuova fase album_type_sync per TUTTI gli album: risolve il release-group MusicBrainz con
+    MBID o ricerca esatta artista+titolo e compila MUSICBRAINZ_ALBUMTYPE. Mantiene al massimo
+    un valore per album/file, applicando Collection (Compilation) > Soundtrack > Live > Remix >
+    Mixtape/Street > altri tipi secondari > Single > EP > Album. I valori sono lowercase;
+    Compilation viene normalizzato nel valore richiesto 'collection'.
+  - Se MusicBrainz non e' disponibile, i tag albumtype gia' presenti vengono comunque ridotti
+    a un solo valore secondo la stessa priorita'; le voci senza match restano riportate come
+    pending e vengono ritentate, senza inventare 'Album' quando non c'e' una fonte.
+  - La cache persistente conserva primary/secondary release-group types e riduce le richieste
+    ripetute; la fase gestisce anche album multi-disco come una sola release logica.
+  - Aggiunto il supporto di lettura/scrittura MUSICBRAINZ_ALBUMTYPE per FLAC, MP3, M4A/MP4,
+    OGG e OPUS. ffprobe espone il frame ID3 TDOR degli MP3 con il nome grezzo `TDOR`:
+    viene normalizzato a ORIGINALDATE per evitare ricerche e riscritture ripetute. La fase e'
+    automatica nella pipeline normale e nelle riparazioni mirate.
+Novita' 0.153 (README operativo, inizializzazione env e changelog cronologico):
+  - README.md contiene ora soltanto struttura, installazione, configurazione, comandi, percorsi,
+    procedure operative e risoluzione problemi; le note di versione restano nel changelog CLI.
+  - Il changelog incorporato e' ordinato cronologicamente: dalla prima beta in alto alla versione
+    corrente in fondo; --changelog stampa l'intero blocco senza avviare la pipeline.
+  - Aggiunto env.example senza credenziali e il comando --init-env per copiarlo in env (permessi
+    0600). L'inizializzazione e' esplicita, non crea silenziosamente configurazioni al primo avvio,
+    e non sovrascrive file env gia' presenti.
+  - Documentata la separazione fra env.example condivisibile e env/.env privato, con istruzioni
+    per il .gitignore e per configurare le proprie credenziali e i percorsi host.
 """
 
 import argparse
@@ -3264,7 +3173,7 @@ PLAYLIST_ARTWORK_PENDING_FILE = PLAYLIST_DIR / '.playlist_artwork_pending.json'
 PLAYLIST_ARTWORK_REFRESH_MARKER = PLAYLIST_DIR / '.playlist_artwork_refresh_v139'
 PLAYLIST_DESCRIPTION_PENDING_FILE = PLAYLIST_DIR / '.playlist_description_pending.json'
 
-VERSION = "0.151"  # bump a ogni modifica: loggata all'avvio e via --version
+VERSION = "0.153"  # bump a ogni modifica: loggata all'avvio e via --version
 
 # intestazioni Exportify: italiano (prima) e inglese
 COLS = {
@@ -8625,8 +8534,9 @@ except (TypeError, ValueError):
     WAVEFORM_WORKERS = 2
 # solo i tag che lo script usa davvero (niente testi/commenti da KB per file)
 _PROBE_KEEP = {'title', 'artist', 'artists', 'album', 'albumartist', 'albumartists', 'album_artist', 'date',
-               'originaldate', 'releasedate', 'release_date', 'year',
-               'albumversion', 'album_version', 'musicbrainz_albumid',
+               'originaldate', 'tdor', 'releasedate', 'release_date', 'year',
+               'albumversion', 'album_version', 'musicbrainz_albumid', 'musicbrainz_albumtype',
+               'musicbrainz album type', 'musicbrainz_album_type', 'musicbrainz albumtype',
                'musicbrainz_releasegroupid', 'track', 'tracknumber', 'disc', 'discnumber', 'disk', 'disknumber'}
 _PROBE_MEM = None        # {path: [mtime_ns, size, tags, durata, embedded_art_opzionale]}
 _PROBE_DIRTY = False
@@ -8715,6 +8625,14 @@ def probe(path: Path):
         tags['albumartist'] = tags['album_artist']
     if 'album_version' in tags and 'albumversion' not in tags:
         tags['albumversion'] = tags['album_version']
+    for alias in ('musicbrainz album type', 'musicbrainz_album_type', 'musicbrainz albumtype'):
+        if alias in tags and not str(tags.get('musicbrainz_albumtype') or '').strip():
+            tags['musicbrainz_albumtype'] = tags[alias]
+            break
+    # ffprobe exposes the standard ID3 original-release-time frame as `TDOR`
+    # instead of `originaldate`; normalize it or MP3 albums look undated forever.
+    if 'tdor' in tags and not str(tags.get('originaldate') or '').strip():
+        tags['originaldate'] = tags['tdor']
     if 'release_date' in tags and 'releasedate' not in tags:
         tags['releasedate'] = tags['release_date']
     # ffprobe normalizes MP3 TDRL and MP4/M4A ©day to the generic `date` key.
@@ -8822,6 +8740,7 @@ def write_flac(path: Path, targets: dict):
               'albumartists': 'ALBUMARTISTS', 'albumversion': 'ALBUMVERSION',
               'musicbrainz_albumid': 'MUSICBRAINZ_ALBUMID',
               'musicbrainz_releasegroupid': 'MUSICBRAINZ_RELEASEGROUPID',
+              'musicbrainz_albumtype': 'MUSICBRAINZ_ALBUMTYPE',
               # title/artist: servono alla riparazione da nome file e alla regola 'artist'
               # di unify. Mancavano: KeyError su OGNI FLAC (la regola 'artist' ripiegava
               # su ffmpeg, la riparazione falliva e riprovava ogni notte)
@@ -10493,6 +10412,7 @@ def _estimate_phase_subphase_total(logname, fn, args, kwargs):
 
     fixed = {
         'run_date_heal': 1,
+        'run_album_type_sync': 1,
         'run_romaji_tags': 1,
         'run_unify': 1,
         'run_dedupe_tracks': 1,
@@ -11106,6 +11026,7 @@ def _write_mp4_tags_to_copy(source, target, updates):
         'albumversion': ('----:com.apple.iTunes:ALBUMVERSION', True),
         'musicbrainz_albumid': ('----:com.apple.iTunes:MusicBrainz Album Id', True),
         'musicbrainz_releasegroupid': ('----:com.apple.iTunes:MusicBrainz Release Group Id', True),
+        'musicbrainz_albumtype': ('----:com.apple.iTunes:MusicBrainz Album Type', True),
     }
     if not updates or any(str(key).casefold() not in key_map for key in updates):
         return False
@@ -11124,6 +11045,13 @@ def _write_mp4_tags_to_copy(source, target, updates):
             if atom_text.startswith('----:com.apple.iTunes:'):
                 description = atom_text.rsplit(':', 1)[-1]
                 if _albumartist_tag_alias_key(description) in {'albumartist', 'albumartists'}:
+                    audio.tags.pop(atom_key, None)
+    if any(str(key).casefold() == 'musicbrainz_albumtype' for key in updates):
+        for atom_key in list(audio.tags.keys()):
+            atom_text = str(atom_key)
+            if atom_text.startswith('----:com.apple.iTunes:'):
+                description = re.sub(r'[^a-z0-9]+', '', atom_text.rsplit(':', 1)[-1].casefold())
+                if description in {'musicbrainzalbumtype', 'musicbrainzalbumtypes'}:
                     audio.tags.pop(atom_key, None)
     for raw_key, value in updates.items():
         atom, freeform = key_map[str(raw_key).casefold()]
@@ -11159,6 +11087,7 @@ def _write_mp3_tags_to_copy(source, target, updates):
         'albumversion': ('TXXX', 'ALBUMVERSION'),
         'musicbrainz_albumid': ('TXXX', 'MusicBrainz Album Id'),
         'musicbrainz_releasegroupid': ('TXXX', 'MusicBrainz Release Group Id'),
+        'musicbrainz_albumtype': ('TXXX', 'MusicBrainz Album Type'),
     }
     if not updates or any(str(key).casefold() not in key_map for key in updates):
         return False
@@ -11182,6 +11111,9 @@ def _write_mp3_tags_to_copy(source, target, updates):
         'MusicBrainz Release Group Id': {
             'musicbrainz release group id', 'musicbrainz releasegroup id',
             'musicbrainz_releasegroupid', 'musicbrainz release groupid',
+        },
+        'MusicBrainz Album Type': {
+            'musicbrainz album type', 'musicbrainz_albumtype', 'musicbrainz albumtype',
         },
         'ALBUMARTISTS': {'albumartists', 'album artists'},
         'ARTISTS': {'artists', 'artist names'},
@@ -11913,9 +11845,320 @@ def _mb_exact_album_group(artist, album_title, cache):
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     _neg_score, year, group_id, _group = candidates[0]
     record = {'id': group_id, 'year': str(year) if year != 9999 else '',
+              'title': str(_group.get('title') or ''),
+              'artist_credit': _group.get('artist-credit') or [],
+              'primary_type': _group.get('primary-type') or '',
+              'secondary_types': _group.get('secondary-types') or [],
               'checked_at': datetime.now(timezone.utc).isoformat()}
     cache_root[cache_key] = record
+    # Search results already include title, artist-credit and release-group types;
+    # reuse them instead of issuing a second lookup for type metadata.
+    cache.setdefault('__release_group_type_metadata__', {})[group_id] = {
+        'title': record['title'], 'artist_credit': record['artist_credit'],
+        'primary_type': record['primary_type'],
+        'secondary_types': record['secondary_types'],
+        'source': 'search',
+        'checked_at': record['checked_at'],
+    }
     return group_id, record['year'] or None
+
+_MB_ALBUM_TYPE_CACHE_DAYS = 180
+
+
+def _mb_group_type_value(value):
+    """Extract a MusicBrainz type name from either a string or an API object."""
+    if isinstance(value, dict):
+        return str(value.get('name') or '').strip()
+    return str(value or '').strip()
+
+
+def _album_type_token(value):
+    """Normalize one MusicBrainz release-group type to the tag spelling we store."""
+    raw = _mb_group_type_value(value)
+    if not raw:
+        return ''
+    key = re.sub(r'\s+', ' ', raw.strip()).casefold()
+    aliases = {
+        'compilation': 'collection', 'collection': 'collection',
+        'mixtape/street': 'mixtape', 'mixtape': 'mixtape',
+        'dj-mix': 'dj-mix', 'dj mix': 'dj-mix',
+        'spoken word': 'spokenword',
+    }
+    if key in aliases:
+        return aliases[key]
+    # Stable lowercase MusicBrainz label; retain meaningful punctuation/slashes.
+    return key
+
+
+def _album_type_priority(value):
+    """Smaller values win; this is issue #26's explicit precedence order."""
+    token = _album_type_token(value)
+    priority = {
+        'collection': 0,
+        'soundtrack': 1,
+        'live': 2,
+        'remix': 3,
+        'mixtape': 4,
+        'single': 6,
+        'ep': 7,
+        'album': 8,
+    }
+    return priority.get(token, 5)
+
+
+def _select_album_type(values, secondary_first=False):
+    """Return at most one type; secondary/other tags outrank Single, EP and Album."""
+    candidates = []
+    for index, value in enumerate(values or ()):
+        # ffprobe joins repeated TXXX/Vorbis values with semicolons; accept commas too.
+        parts = re.split(r'\s*[;,]\s*', str(value or '').strip())
+        for part in parts:
+            token = _album_type_token(part)
+            if token:
+                candidates.append((token, index))
+    if not candidates:
+        return ''
+    # For MusicBrainz, values are supplied as [primary, secondary...]. On equal
+    # priority, a secondary classification is more informative than a primary type.
+    return min(candidates, key=lambda item: (
+        _album_type_priority(item[0]),
+        0 if secondary_first and item[1] > 0 else 1,
+        item[0], item[1],
+    ))[0]
+
+
+def _musicbrainz_album_type_from_group(group):
+    primary = _mb_group_type_value(group.get('primary-type') or group.get('primary_type'))
+    secondary_raw = group.get('secondary-types') or group.get('secondary_types') or []
+    if isinstance(secondary_raw, (str, dict)):
+        secondary_raw = [secondary_raw]
+    secondary = [_mb_group_type_value(item) for item in secondary_raw]
+    secondary = [item for item in secondary if item]
+    # Collection is the tag vocabulary requested in issue #26 for MB's Compilation.
+    return _select_album_type(([primary] if primary else []) + secondary,
+                              secondary_first=True)
+
+
+def _mb_group_type_details(group_id, artist, album_title, cache):
+    """Fetch/cache a release-group's primary+secondary type after exact identity checks."""
+    if not group_id:
+        return None
+    store = cache.setdefault('__release_group_type_metadata__', {})
+    entry = store.get(str(group_id))
+    needs_detail_refresh = bool(
+        isinstance(entry, dict) and entry.get('source') == 'search'
+        and not entry.get('primary_type') and not entry.get('secondary_types')
+    )
+    if needs_detail_refresh or not _mb_date_cache_fresh(entry, _MB_ALBUM_TYPE_CACHE_DAYS):
+        try:
+            data = _mb_json(f'release-group/{group_id}?inc=artist-credits')
+        except Exception as exc:
+            if not _mb_transient(exc):
+                print(f'[album_type_sync] MusicBrainz release-group {group_id}: {exc}',
+                      file=sys.stderr)
+            return None
+        entry = {
+            'title': str(data.get('title') or ''),
+            'artist_credit': data.get('artist-credit') or [],
+            'primary_type': data.get('primary-type') or '',
+            'secondary_types': data.get('secondary-types') or [],
+            'source': 'lookup',
+            'checked_at': datetime.now(timezone.utc).isoformat(),
+        }
+        store[str(group_id)] = entry
+
+    # A release-group MBID can be stale or copied from a different album; never tag it
+    # unless both title and credited artist agree with the local album identity.
+    if album_title and _trk_key(entry.get('title') or '') != _trk_key(album_title):
+        return None
+    if artist and not _mb_date_artist_credit_matches(entry.get('artist_credit'), artist):
+        return None
+    return {
+        'id': str(group_id),
+        'title': str(entry.get('title') or ''),
+        'artist_credit': entry.get('artist_credit') or [],
+        'primary-type': entry.get('primary_type') or '',
+        'secondary-types': entry.get('secondary_types') or [],
+    }
+
+
+def _resolve_album_release_group(album_root, tags, cache):
+    """Resolve a validated release-group using tagged MBIDs first, exact search last."""
+    album_root = Path(album_root)
+
+    def majority_value(keys):
+        vals = [str(tag.get(key) or '').strip() for tag in tags for key in keys
+                if str(tag.get(key) or '').strip()]
+        if not vals:
+            return ''
+        counts = Counter(vals)
+        ranked = counts.most_common()
+        if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+            return ''  # ambiguous identity: don't choose an arbitrary tag
+        return ranked[0][0]
+
+    artist = majority_value(('albumartist', 'album_artist')) or majority_value(('artist',))
+    title = majority_value(('album',))
+    is_disc_dir = bool(re.fullmatch(r'(?:disk|disc|cd|vinyl|lp)\s*0*\d+',
+                                    album_root.name, re.I))
+    if not artist:
+        artist = album_root.parent.parent.name if is_disc_dir else album_root.parent.name
+    if not title or is_disc_dir:
+        title = album_root.parent.name if is_disc_dir else (title or album_root.name)
+    if not artist or not title:
+        return None, artist, title, 'missing-local-identity'
+
+    rgids = {str(tag.get('musicbrainz_releasegroupid') or '').strip()
+             for tag in tags if str(tag.get('musicbrainz_releasegroupid') or '').strip()}
+    mbids = {str(tag.get('musicbrainz_albumid') or '').strip()
+             for tag in tags if str(tag.get('musicbrainz_albumid') or '').strip()}
+
+    # 1. A single release-group MBID already present in the files.
+    if len(rgids) == 1:
+        group_id = next(iter(rgids))
+        detail = _mb_group_type_details(group_id, artist, title, cache)
+        if detail:
+            return detail, artist, title, 'tagged-release-group-id'
+
+    # 2. Resolve release MBIDs to their parent group; ignore conflicting release IDs.
+    if len(mbids) == 1:
+        mbid = next(iter(mbids))
+        release_cache_key = f'__album_type_release_group_v1__:{mbid}'
+        group_id = cache.get(release_cache_key)
+        if group_id is None:
+            try:
+                release = _mb_json(f'release/{mbid}?inc=release-groups')
+                group_id = str((release.get('release-group') or {}).get('id') or '')
+                cache[release_cache_key] = group_id or ''
+            except Exception as exc:
+                if not _mb_transient(exc):
+                    print(f'[album_type_sync] MusicBrainz release {mbid}: {exc}', file=sys.stderr)
+                group_id = ''
+        if group_id:
+            detail = _mb_group_type_details(group_id, artist, title, cache)
+            if detail:
+                return detail, artist, title, 'tagged-release-id'
+
+    # 3. No usable MBID: exact artist-credit + release-group title search.
+    group_id, _search_year = _mb_exact_album_group(artist, title, cache)
+    if group_id:
+        detail = _mb_group_type_details(group_id, artist, title, cache)
+        if detail:
+            return detail, artist, title, 'exact-artist-title-search'
+    return None, artist, title, 'no-exact-musicbrainz-match'
+
+
+def _write_musicbrainz_album_type(path, album_type):
+    """Replace all values of MUSICBRAINZ_ALBUMTYPE with one canonical value."""
+    path = Path(path)
+    value = str(album_type or '').strip()
+    if not value:
+        return
+    if path.suffix.lower() == '.flac':
+        if not shutil.which('metaflac'):
+            raise RuntimeError('metaflac non trovato: impossibile scrivere MUSICBRAINZ_ALBUMTYPE')
+        _metaflac_run('--remove-tag=MUSICBRAINZ_ALBUMTYPE',
+                      f'--set-tag=MUSICBRAINZ_ALBUMTYPE={value}', path=path)
+    else:
+        _rewrite_nonflac(path, {'musicbrainz_albumtype': value})
+
+
+def run_album_type_sync(dry_run=False, base=None, album_dirs_only=None):
+    """Apply one MusicBrainz album-type label to every logical album in the library.
+
+    The selected value follows issue #26 priority. If MusicBrainz is unavailable, existing
+    multiple values are still reduced to one; missing values are left blank and reported.
+    """
+    base = Path(base) if base else LIBRARY_ROOT
+    folders = {}
+    for relative in _walk_audio(base, AUDIO_EXT):
+        if relative[-1].endswith('.backup') or _META_BACKUP_DIR in relative:
+            continue
+        path = base.joinpath(*relative)
+        root = _album_root_for_file(base, path)
+        folders.setdefault(root, []).append(path)
+
+    if album_dirs_only is not None:
+        wanted = {Path(item).resolve() for item in album_dirs_only}
+        def is_target(root):
+            resolved = root.resolve()
+            return any(resolved == item or resolved in item.parents or item in resolved.parents
+                       for item in wanted)
+        folders = {root: files for root, files in folders.items() if is_target(root)}
+
+    all_files = [path for files in folders.values() for path in files]
+    prefetch_probe(all_files, 'album_type_sync')
+    try:
+        cache = json.loads(MBDATE_CACHE.read_text(encoding='utf-8'))
+        if not isinstance(cache, dict):
+            cache = {}
+    except Exception:
+        cache = {}
+
+    synced = normalized = pending = errors = no_type = 0
+    pending_samples = []
+    progress = _ProgressBar('album_type_sync', len(folders), 'album', subphase=True)
+    for album_index, (root, files) in enumerate(sorted(folders.items()), 1):
+        progress.update(album_index)
+        try:
+            tags = [probe(path) for path in files]
+            existing_values = [tag.get('musicbrainz_albumtype') or '' for tag in tags]
+            existing_type = _select_album_type(existing_values)
+            group, artist, title, reason = _resolve_album_release_group(root, tags, cache)
+            mb_type = _musicbrainz_album_type_from_group(group) if group else ''
+            selected = mb_type or existing_type
+
+            if not selected:
+                no_type += 1
+                pending += 1
+                if len(pending_samples) < 15:
+                    pending_samples.append(f'{artist or root.parent.name} / {title or root.name} ({reason})')
+                continue
+
+            # All audio files in the logical album get exactly one label. This also removes
+            # legacy repeated/semicolon-separated values and resolves conflicts consistently.
+            needs_write = any(
+                _select_album_type([tag.get('musicbrainz_albumtype') or '']) != selected
+                or str(tag.get('musicbrainz_albumtype') or '').strip() != selected
+                for tag in tags
+            )
+            if needs_write:
+                progress.clear()
+                print(f"{'[dry] ' if dry_run else ''}ALBUMTYPE {artist or root.parent.name} / "
+                      f'{title or root.name}: '
+                      f'{existing_type or "(vuoto)"} -> {selected}'
+                      f'{" (MusicBrainz)" if mb_type else " (priorita' tag esistenti; MB non risolto)"}')
+                if not dry_run:
+                    for path in files:
+                        _write_musicbrainz_album_type(path, selected)
+                        invalidate_probe_cache([path])
+                normalized += 1
+            if group:
+                synced += 1
+            else:
+                pending += 1
+                if len(pending_samples) < 15:
+                    pending_samples.append(f'{artist or root.parent.name} / {title or root.name} ({reason})')
+        except Exception as exc:
+            errors += 1
+            progress.clear()
+            print(f'[album_type_sync][ERRORE] {root}: {exc}', file=sys.stderr)
+    progress.close(complete=True)
+    if not dry_run:
+        _write_json_atomic(MBDATE_CACHE, cache)
+        flush_probe_cache()
+    print(f'album_type_sync: {len(folders)} album controllati, {synced} risolti MusicBrainz, '
+          f'{normalized} album normalizzati, {pending} senza match/tipo, '
+          f'{no_type} senza alcun tipo disponibile, {errors} errori')
+    if pending_samples:
+        print('  [album_type_sync][retry] esempi senza tipo MusicBrainz confermato:')
+        for item in pending_samples:
+            print(f'    - {item}')
+        if pending > len(pending_samples):
+            print(f'    ... altri {pending - len(pending_samples)} album in attesa')
+    return {'checked': len(folders), 'matched': synced, 'normalized': normalized,
+            'pending': pending, 'without_type': no_type, 'errors': errors}
+
 
 def _mb_release_is_unlabelled_cdr(release):
     """Identify a weak CD-R date that should not outrank a catalogued retail release.
@@ -12174,8 +12417,12 @@ def _authoritative_year(album, files, probe_fn, cache, tags_seen=None):
                              if str(t.get('artist') or '').strip()), '')
     album_title = next((str(t.get('album') or '').strip() for t in tags_seen
                         if str(t.get('album') or '').strip()), '') or album.name
+    is_disc_dir = bool(re.fullmatch(r'(?:disk|disc|cd|vinyl|lp)\s*0*\d+',
+                                     Path(album).name, re.I))
     if not album_artist and album.parent.name:
-        album_artist = album.parent.name
+        album_artist = album.parent.parent.name if is_disc_dir else album.parent.name
+    if is_disc_dir and (not album_title or _trk_key(album_title) == _trk_key(Path(album).name)):
+        album_title = album.parent.name
 
     curated_year = _curated_original_year_for_album(album, tags_seen)
     if curated_year:
@@ -12433,7 +12680,14 @@ def run_date_heal(dry_run=False, base=None, album_dirs_only=None):
                         years.append(match.group(0))
                         break
             curated_year = _curated_original_year_for_album(album, tags)
-            if not years and not curated_year:
+            # A valid ORIGINALDATE is the signal that the original year is already known.
+            # Still re-check exact curated corrections (e.g. Radiohead reissue tags), but
+            # newly include albums where every date/year field is blank.
+            has_original_year = bool(tags) and all(
+                re.match(r'^(19|20)\d{2}', str(tag.get('originaldate') or '').strip())
+                for tag in tags
+            )
+            if has_original_year and not curated_year:
                 continue
             checked += 1
             maj = Counter(years).most_common(1)[0][0] if years else curated_year
@@ -20622,8 +20876,65 @@ def _embedded_changelog_text():
 
 
 def _print_changelog():
-    """Stampa l'intero changelog senza avviare la pipeline o creare un log di esecuzione."""
+    """Stampa il changelog cronologico senza avviare la pipeline o creare un log."""
     print(_embedded_changelog_text())
+
+
+def _initialize_env_file():
+    """Create a private env file from the committed, credential-free template."""
+    script_dir = Path(__file__).resolve().parent
+    template = script_dir / 'env.example'
+    explicit = (os.environ.get('ND_ENV_FILE') or '').strip()
+
+    if explicit:
+        destination = Path(explicit).expanduser()
+        if destination.exists():
+            print(f'[i] configurazione gia\u0300 presente: {destination}; nessun file sovrascritto')
+            return 0
+    else:
+        existing_candidates = [
+            script_dir / '.env',
+            script_dir / 'env',
+            Path('/mnt/red1/homelab/.env'),
+            Path.home() / 'homelab' / '.env',
+            Path.home() / 'homelab' / 'docker' / '.env',
+            Path.home() / 'homelab' / 'scripts' / '.env',
+            Path.home() / 'homelab' / 'scripts' / 'env',
+            Path.home() / '.config' / 'exportify2m3u' / 'navidrome.env',
+        ]
+        existing = next((p for p in existing_candidates if p.is_file()), None)
+        if existing:
+            print(f'[i] configurazione gia\u0300 trovata: {existing}; non creo un secondo file')
+            return 0
+        destination = script_dir / 'env'
+
+    if not template.is_file():
+        print(f'[ERRORE] template non trovato: {template}', file=sys.stderr)
+        print('[i] scarica env.example dalla stessa release e ripeti --init-env', file=sys.stderr)
+        return 2
+    if destination.exists():
+        print(f'[i] configurazione gia\u0300 presente: {destination}; nessun file sovrascritto')
+        return 0
+
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # Exclusive creation prevents overwriting a config created concurrently.
+        with destination.open('xb') as output:
+            output.write(template.read_bytes())
+        if os.name == 'posix':
+            os.chmod(destination, 0o600)
+    except FileExistsError:
+        print(f'[i] configurazione gia\u0300 presente: {destination}; nessun file sovrascritto')
+        return 0
+    except OSError as exc:
+        print(f'[ERRORE] impossibile creare {destination}: {exc}', file=sys.stderr)
+        return 2
+
+    print(f'[OK] configurazione creata: {destination}')
+    print('[i] modifica env: imposta almeno ND_USER, ND_PASS e i percorsi della tua installazione')
+    print('[i] aggiungi le credenziali opzionali (LIDARR_API_KEY, Spotify OAuth, ListenBrainz) solo se usi quelle integrazioni')
+    print('[i] il template non contiene credenziali reali; il file creato ha permessi 0600')
+    return 0
 
 
 def main():
@@ -20632,6 +20943,8 @@ def main():
                     version=f'%(prog)s {VERSION}')
     ap.add_argument('--changelog', action='store_true',
                     help='stampa il changelog completo incorporato nello script ed esce')
+    ap.add_argument('--init-env', action='store_true',
+                    help='crea il file privato env copiando env.example; non sovrascrive file esistenti')
     ap.add_argument('csv', nargs='*', help='CSV specifici (default: tutti in EXPORTIFY_DIR)')
     ap.add_argument('--build-spotify-proxies', action='store_true',
                     help='genera MP3 proxy compatti (32k mono default) e aggiorna manifest/preferiti Navidrome')
@@ -20816,6 +21129,8 @@ def main():
                     help='fase: converte i FLAC 24->16bit e ricomprime i 16bit male compressi '
                          '(compressione lossless, livello 5 predefinito)' )
     args = ap.parse_args()
+    if args.init_env:
+        sys.exit(_initialize_env_file())
     if args.changelog:
         _print_changelog()
         return
@@ -21029,6 +21344,8 @@ def _reconcile_navidrome_album_changes(before, library_root=None,
         failed_before_cycle = len(_RUN_FAILED_PHASES)
         targeted_phases = (
             ('targeted_date_heal', run_date_heal,
+             (), {'dry_run': False, 'base': base, 'album_dirs_only': album_dirs}),
+            ('targeted_album_type_sync', run_album_type_sync,
              (), {'dry_run': False, 'base': base, 'album_dirs_only': album_dirs}),
             ('targeted_romaji_tags', run_romaji_tags,
              (), {'dry_run': False, 'base': base, 'files_only': files_only}),
@@ -27338,6 +27655,8 @@ def _run(args):
 
         if not args.skip_date_heal:
             run_phase('date_heal', run_date_heal, args.dry_run)
+
+        run_phase('album_type_sync', run_album_type_sync, args.dry_run)
 
         if not args.skip_romaji:
             run_phase('romaji_tags', run_romaji_tags, args.dry_run)
